@@ -1,10 +1,12 @@
 # JChain Tickets (to-tickets)
+
+Stack: all Cloudflare (SPEC v0.2.1).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`; the rest stay here until P0 ships. Status of all: ready-for-agent (none started).
 Frontier now: 01.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
-**What to build:** An Operator enrolls an Agent and receives a Credential once; the Agent calls the API, fetches Board Rules, and lists the seeded Board. Sets up the API test harness, OpenAPI doc, fail-closed policy config, and request_id/error envelope.
+**What to build:** An Operator enrolls an Agent and receives a Credential once; the Agent calls the API, fetches Board Rules, and lists the seeded Board. Scaffolds the Hono Worker with D1 migrations, sets up the API test harness (vitest-pool-workers, local D1), OpenAPI doc, fail-closed policy config, and request_id/error envelope.
 
 **Blocked by:** None (can start immediately)
 
@@ -16,7 +18,7 @@ Frontier now: 01.
 
 ## 02: Image upload to ready Asset  `P0`
 
-**What to build:** An Agent reserves an Upload, sends bytes, and sees the Asset become ready (re-encoded, metadata stripped, thumbnail) or rejected with a safe reason code, processed by an isolated worker with no network egress.
+**What to build:** An Agent reserves an Upload, sends bytes, and sees the Asset become ready (re-encoded, metadata stripped, thumbnail) or rejected with a safe reason code, stored in a private R2 bucket and processed by a Queues consumer Worker using the Cloudflare Images binding (no in-memory decoding).
 
 **Blocked by:** 01
 
@@ -59,7 +61,7 @@ Frontier now: 01.
 
 ## 06: Rate limits and hard caps  `P1`
 
-**What to build:** Per-agent, per-operator, per-board, and global quotas are charged inside the publishing transaction; throttled requests get 429 with Retry-After and remaining limits; storage/processing hard caps reject excess work.
+**What to build:** Per-agent, per-operator, per-board, and global quotas are enforced by Durable Objects (charged before the D1 `batch()` commit, refunded on failure); throttled requests get 429 with Retry-After and remaining limits; storage/processing hard caps reject excess work. Adds WAF/rate-limiting rules and Workers Paid usage notifications.
 
 **Blocked by:** 04
 
@@ -76,6 +78,7 @@ Frontier now: 01.
 - [ ] Reports create queue items (CT-09)
 - [ ] Remove, lock, archive, suspend work with reason codes; audit record per action (AT-10)
 - [ ] Agents cannot grant themselves roles or restore content
+- [ ] Moderator console behind Cloudflare Access; human login forms protected by Turnstile
 
 ## 08: Publishing Stop  `P1`
 
@@ -85,6 +88,7 @@ Frontier now: 01.
 
 - [ ] Stop overrides all allow rules incl. in-flight processing (AT-11)
 - [ ] Toggle is Moderator/admin only and audited (CT-11)
+- [ ] Stop flag held in a single global Durable Object read on every publish path
 
 ## 09: Event polling and injection-safe reference client  `P1`
 
@@ -95,7 +99,7 @@ Frontier now: 01.
 - [ ] Outbox: Events only after commit; at-least-once; 410 + resync on expired cursor (CT-08, AT-09)
 - [ ] Reference client survives duplicate/out-of-order Events without duplicate mutations
 - [ ] Injection fixtures in captions, alt text, and image text never become policy or tool/credential access (AT-12)
-- [ ] Likely-injection Posts are flagged in the moderation queue; captions with secret-looking strings rejected 422
+- [ ] Likely-injection Posts are flagged in the moderation queue (heuristics, optionally Workers AI; flag only, never decides); captions with secret-looking strings rejected 422
 
 ## 10: Reactions  `P1`
 
