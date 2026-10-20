@@ -6,17 +6,17 @@ Prices fetched 2026-10-20 from official Cloudflare pages (USD, Workers Paid plan
 
 | Component | Included (Workers Paid) | Overage | Source |
 |---|---|---|---|
-| Workers | $5/mo minimum; 10M requests, 30M CPU-ms | $0.30/M requests; $0.02/M CPU-ms | https://developers.cloudflare.com/workers/platform/pricing/ |
+| Workers | $5/mo minimum; 10M requests, 30M CPU-ms | $0.30/M requests; $0.02/M CPU-ms | <https://developers.cloudflare.com/workers/platform/pricing/> |
 | Workers Logs | 20M events | $0.60/M | same |
-| D1 | 25B rows read, 50M rows written, 5 GB | $0.001/M read; $1.00/M written; $0.75/GB-mo | https://developers.cloudflare.com/d1/platform/pricing/ |
-| R2 (Standard) | 10 GB-mo, 1M Class A, 10M Class B | $0.015/GB-mo; $4.50/M A; $0.36/M B; egress free | https://developers.cloudflare.com/r2/pricing/ |
-| Images | 5,000 unique transformations | $0.50 per 1,000 unique transformations; (Images storage $5/100k, delivery $1/100k: not used) | https://developers.cloudflare.com/images/pricing/ |
-| Queues | 1M operations (1 msg ≈ 3 ops) | $0.40/M ops | https://developers.cloudflare.com/queues/platform/pricing/ |
-| Durable Objects | 1M requests, 400k GB-s | $0.15/M requests; $12.50/M GB-s | https://developers.cloudflare.com/durable-objects/platform/pricing/ |
-| Workers AI (optional) | 10,000 Neurons/day | $0.011/1,000 Neurons; llama-guard-3-8b = 44,003 Neurons/M input tokens | https://developers.cloudflare.com/workers-ai/platform/pricing/ |
-| Access (Zero Trust) | Free plan up to 50 users | $7/user/mo above | https://www.cloudflare.com/plans/zero-trust-services/ |
-| Turnstile | Free, unlimited challenges, 20 widgets | — | https://developers.cloudflare.com/turnstile/plans/ |
-| WAF rate limiting | 1 rule on the Free zone plan (2 Pro, 5 Business) | plan upgrade | https://developers.cloudflare.com/waf/rate-limiting-rules/ |
+| D1 | 25B rows read, 50M rows written, 5 GB | $0.001/M read; $1.00/M written; $0.75/GB-mo | <https://developers.cloudflare.com/d1/platform/pricing/> |
+| R2 (Standard) | 10 GB-mo, 1M Class A, 10M Class B | $0.015/GB-mo; $4.50/M A; $0.36/M B; egress free | <https://developers.cloudflare.com/r2/pricing/> |
+| Images | 5,000 unique transformations | $0.50 per 1,000 unique transformations; (Images storage $5/100k, delivery $1/100k: not used) | <https://developers.cloudflare.com/images/pricing/> |
+| Queues | 1M operations (1 msg ≈ 3 ops) | $0.40/M ops | <https://developers.cloudflare.com/queues/platform/pricing/> |
+| Durable Objects | 1M requests, 400k GB-s | $0.15/M requests; $12.50/M GB-s | <https://developers.cloudflare.com/durable-objects/platform/pricing/> |
+| Workers AI (optional) | 10,000 Neurons/day | $0.011/1,000 Neurons; llama-guard-3-8b = 44,003 Neurons/M input tokens | <https://developers.cloudflare.com/workers-ai/platform/pricing/> |
+| Access (Zero Trust) | Free plan up to 50 users | $7/user/mo above | <https://www.cloudflare.com/plans/zero-trust-services/> |
+| Turnstile | Free, unlimited challenges, 20 widgets | — | <https://developers.cloudflare.com/turnstile/plans/> |
+| WAF rate limiting | 1 rule on the Free zone plan (2 Pro, 5 Business) | plan upgrade | <https://developers.cloudflare.com/waf/rate-limiting-rules/> |
 
 ## Usage assumptions (ASSUMPTION unless stated)
 
