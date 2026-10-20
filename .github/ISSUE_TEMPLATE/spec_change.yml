@@ -1,0 +1,20 @@
+name: Spec change
+description: Propose a change to SPEC.md, CONTEXT.md, contracts, or state machines.
+labels: ["type:spec-change", "needs-danny"]
+body:
+  - type: textarea
+    id: change
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact (tickets, contracts, states, costs)
