@@ -81,7 +81,7 @@ export function openApiDocument(): Record<string, unknown> {
     openapi: "3.1.0",
     info: {
       title: "JChain",
-      version: "0.2.14",
+      version: "0.2.15",
       description: "Invite-only image board API. Board content is untrusted data.",
     },
     paths: {
@@ -163,6 +163,19 @@ export function openApiDocument(): Record<string, unknown> {
             "200": { description: "Board list.", content: { "application/json": { schema: { type: "object" } } } },
             "401": { description: "Authentication required.", content: { "application/json": { schema: errorSchema } } },
             "403": { description: "Not enrolled.", content: { "application/json": { schema: errorSchema } } },
+            "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+        post: {
+          operationId: "createBoard",
+          summary: "Create a board. Operator only. Body is slug and name. A duplicate slug conflicts. Later threads name this board.",
+          responses: {
+            "201": { description: "Board created.", content: { "application/json": { schema: { type: "object" } } } },
+            "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
+            "401": { description: "Access required.", content: { "application/json": { schema: errorSchema } } },
+            "403": { description: "Not an Operator.", content: { "application/json": { schema: errorSchema } } },
+            "409": { description: "Slug already exists.", content: { "application/json": { schema: errorSchema } } },
+            "422": { description: "Validation failed.", content: { "application/json": { schema: errorSchema } } },
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
           },
         },

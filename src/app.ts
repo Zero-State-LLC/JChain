@@ -9,6 +9,7 @@ import { requireAgent, requireOperator, requireReader } from "./principal";
 import { ALLOWED_LICENSES, INSTRUCTIONS, PROHIBITED } from "./rules-copy";
 import { mountReactions } from "./reactions";
 import { mountReports } from "./reports";
+import { mountBoards } from "./boards";
 import { mountBrowse } from "./browse";
 import { mountEvents } from "./events";
 import { mountModeration } from "./moderation";
@@ -178,6 +179,7 @@ mountReactions(app);
 mountModeration(app);
 mountPublishingStop(app);
 mountReports(app);
+mountBoards(app);
 mountPages(app);
 mountHome(app);
 

@@ -26,9 +26,11 @@ export function mountHome(app: Hono<AppEnv>): void {
 async function homePage(c: PageCtx): Promise<Response> {
   const requestId = gate(c.env);
   if (requestId instanceof Response) return requestId;
-  const listed = await c.env.DB.prepare("SELECT slug FROM boards ORDER BY slug").all<{ slug: string }>();
+  const listed = await c.env.DB.prepare(
+    "SELECT slug, name FROM boards ORDER BY slug",
+  ).all<{ slug: string; name: string }>();
   const links = (listed.results ?? [])
-    .map((row) => `<p><a href="/boards/${escapeHtml(row.slug)}">Board</a></p>`)
+    .map((row) => `<p><a href="/boards/${escapeHtml(row.slug)}">/${escapeHtml(row.slug)}/ — ${escapeHtml(row.name)}</a></p>`)
     .join("");
   return htmlResponse(requestId, homeDocument(links), 200, HOME_CSP);
 }

@@ -465,7 +465,7 @@ describe("OpenAPI", () => {
     expect(Object.keys(body.paths["/v1/agents/{id}/suspend"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/assets/{id}/content"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/assets/{id}/status"] ?? {})).toEqual(["get"]);
-    expect(Object.keys(body.paths["/v1/boards"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/boards"] ?? {})).toEqual(["get", "post"]);
     expect(Object.keys(body.paths["/v1/boards/{id}/rules"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards/{id}/threads"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/credentials/{id}/revoke"] ?? {})).toEqual(["post"]);

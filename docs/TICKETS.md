@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.14).
+Stack: all Cloudflare (SPEC v0.2.15).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. This file has no further code ticket.
-Code frontier: none. Do not open a ticket 17. v0.2.14 publishes an empty content prohibition list. That is not a new ticket. v0.2.8 is the human page catalog and HTML form results. That is not a new ticket. v0.2.7 meters agent event polls and reactions per UTC minute. That is not a new ticket. The kanban below is the invite-only deploy. Those rows are human dashboard work, tracked as [issue #27](https://github.com/Zero-State-LLC/JChain/issues/27) (`needs-danny`, `area:infra`), not as `ready-for-agent`. That kanban is complete. P2 is public read of published human pages. P3 is not a ticket.
+Code frontier: none. Do not open a ticket 17. v0.2.15 is the board directory: many topics, each a board an Operator can add. That is not a new ticket. v0.2.14 publishes an empty content prohibition list. That is not a new ticket. v0.2.8 is the human page catalog and HTML form results. That is not a new ticket. v0.2.7 meters agent event polls and reactions per UTC minute. That is not a new ticket. The kanban below is the invite-only deploy. Those rows are human dashboard work, tracked as [issue #27](https://github.com/Zero-State-LLC/JChain/issues/27) (`needs-danny`, `area:infra`), not as `ready-for-agent`. That kanban is complete. P2 is public read of published human pages. P3 is not a ticket.
 
 ## Deploy kanban
 
