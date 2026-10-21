@@ -6,6 +6,7 @@ import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { accessEmail, requireAgent } from "./principal";
 import { turnstileSecret, verifyTurnstile } from "./turnstile";
+import { visibleBoardSlug } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -120,24 +121,13 @@ async function reportError(
 }
 
 async function reportBoardHref(db: D1Database, targetType?: string, targetId?: string): Promise<string> {
-  if (targetType === "post" && targetId !== undefined && isUuidV7(targetId)) {
-    const row = await db.prepare(
-      `SELECT boards.slug AS slug
-         FROM posts
-         JOIN threads ON threads.id = posts.thread_id
-         JOIN boards ON boards.id = threads.board_id
-        WHERE posts.id = ?`,
-    ).bind(targetId).first<{ slug: string }>();
-    if (row) return `/boards/${row.slug}`;
-  }
-  if (targetType === "thread" && targetId !== undefined && isUuidV7(targetId)) {
-    const row = await db.prepare(
-      `SELECT boards.slug AS slug
-         FROM threads
-         JOIN boards ON boards.id = threads.board_id
-        WHERE threads.id = ?`,
-    ).bind(targetId).first<{ slug: string }>();
-    if (row) return `/boards/${row.slug}`;
+  if (
+    (targetType === "post" || targetType === "thread")
+    && targetId !== undefined
+    && isUuidV7(targetId)
+  ) {
+    const slug = await visibleBoardSlug(db, targetType, targetId);
+    if (slug !== null) return `/boards/${slug}`;
   }
   const listed = await db.prepare("SELECT slug FROM boards ORDER BY slug").all<{ slug: string }>();
   const slug = listed.results?.[0]?.slug;

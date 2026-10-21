@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import worker from "../src/index";
 import { decodeCursor, encodeCursor } from "../src/browse";
 import { VALID_PNG } from "./fixtures/bytes";
+import { PROHIBITED } from "../src/rules-copy";
 import { BOARD_ID, INSTRUCTIONS, MODERATOR, OPERATOR, UUID_V7, call, releaseThread, resetAndSeed } from "./harness";
 
 const HELD_CURSOR = encodeCursor("2026-01-01T00:00:00Z", "01900000-0000-7000-8000-000000000099");
@@ -55,7 +56,9 @@ describe("accessible pages", () => {
     expect(feedHtml).toContain("<time");
     expect(feedHtml).toContain("<td>1</td>");
     expect(feedHtml).toContain("<h2>Rules</h2>");
-    expect(feedHtml).toContain(INSTRUCTIONS);
+    const quoted = feedHtml.slice(feedHtml.indexOf("<blockquote>"), feedHtml.indexOf("</blockquote>"));
+    expect(quoted).toContain(INSTRUCTIONS);
+    for (const item of PROHIBITED) expect(quoted).toContain(item);
     expect(feedHtml).toContain('<meta name="viewport" content="width=device-width">');
     expect(feedHtml).not.toContain("Held");
     expect(feedHtml).not.toContain("<script");
@@ -183,6 +186,22 @@ describe("accessible pages", () => {
     const htmlReportErrorBody = await htmlReportError.text();
     expect(htmlReportErrorBody).toContain("Browser reports are for an Operator.");
     expect(htmlReportErrorBody).not.toContain("\"error\"");
+
+    await env.DB.prepare("INSERT INTO boards (id, slug, name) VALUES (?, ?, ?)").bind(
+      "01900000-0000-7000-8000-000000000002",
+      "other",
+      "Other",
+    ).run();
+    const unknown = await page("/reports?target_type=post&target_id=01900000-0000-7000-8000-000000000099");
+    const pendingPost = await page(`/reports?target_type=post&target_id=${String(held.post_id)}`);
+    const pendingThread = await page(`/reports?target_type=thread&target_id=${String(held.thread_id)}`);
+    expect(boardHrefs(pendingPost)).toEqual(boardHrefs(unknown));
+    expect(boardHrefs(pendingThread)).toEqual(boardHrefs(unknown));
+    expect(boardHrefs(pendingPost)).toContain("/boards/other");
+    const visiblePost = await page(`/reports?target_type=post&target_id=${postId}`);
+    const visibleThread = await page(`/reports?target_type=thread&target_id=${threadId}`);
+    expect(boardHrefs(visiblePost)).toEqual(["/boards/beta"]);
+    expect(boardHrefs(visibleThread)).toEqual(["/boards/beta"]);
 
     const actionFields = {
       target_type: "post",
@@ -329,6 +348,10 @@ describe("accessible pages", () => {
     expect(nextHref(last, "Reports")).toBeNull();
   });
 });
+
+function boardHrefs(html: string): string[] {
+  return [...html.matchAll(/href="(\/boards\/[^"]+)"/g)].map((match) => match[1]).sort();
+}
 
 function articleContaining(html: string, marker: string): string {
   const found = html.split("<article>").slice(1).find((part) => part.includes(marker));

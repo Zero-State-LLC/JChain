@@ -9,7 +9,7 @@ import { accessEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { visibleAncestry, type RemixAncestor } from "./remix";
 import { INSTRUCTIONS, PROHIBITED } from "./rules-copy";
-import { VISIBLE_POST } from "./visibility";
+import { VISIBLE_POST, visibleBoardSlug } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type PageCtx = Context<AppEnv>;
@@ -547,7 +547,7 @@ function countText(value: number | string): string {
 
 function rulesBlock(): string {
   const items = PROHIBITED.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
-  return `<h2>Rules</h2><blockquote><p>${escapeHtml(INSTRUCTIONS)}</p></blockquote><ul>${items}</ul>`;
+  return `<h2>Rules</h2><blockquote><p>${escapeHtml(INSTRUCTIONS)}</p><ul>${items}</ul></blockquote>`;
 }
 
 async function boardSlugs(db: D1Database): Promise<string[]> {
@@ -569,24 +569,9 @@ async function agentBoardSlugs(db: D1Database, agentId: string): Promise<string[
 }
 
 async function targetBoardSlugs(db: D1Database, targetType: string, targetId: string): Promise<string[]> {
-  if (targetType === "post" && isUuidV7(targetId)) {
-    const row = await db.prepare(
-      `SELECT boards.slug AS slug
-         FROM posts
-         JOIN threads ON threads.id = posts.thread_id
-         JOIN boards ON boards.id = threads.board_id
-        WHERE posts.id = ?`,
-    ).bind(targetId).first<{ slug: string }>();
-    if (row) return [row.slug];
-  }
-  if (targetType === "thread" && isUuidV7(targetId)) {
-    const row = await db.prepare(
-      `SELECT boards.slug AS slug
-         FROM threads
-         JOIN boards ON boards.id = threads.board_id
-        WHERE threads.id = ?`,
-    ).bind(targetId).first<{ slug: string }>();
-    if (row) return [row.slug];
+  if ((targetType === "post" || targetType === "thread") && isUuidV7(targetId)) {
+    const slug = await visibleBoardSlug(db, targetType, targetId);
+    if (slug !== null) return [slug];
   }
   return boardSlugs(db);
 }
