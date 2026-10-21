@@ -31,13 +31,13 @@ async function putReaction(c: Ctx): Promise<Response> {
   if (!hashed.ok) return agentError(c.env, policy, requestId, parsed.agentId, "malformed");
 
   const route = `PUT /v1/posts/${parsed.postId}/reactions/${parsed.type}`;
+  if (!(await published(c.env.DB, parsed.postId))) {
+    return agentError(c.env, policy, requestId, parsed.agentId, "not_found");
+  }
   const prior = await readIdempotency(c.env.DB, parsed.agentId, route, key, hashed.hash);
   if (prior.action === "replay") return jsonResponse(requestId, prior.body, prior.status);
   if (prior.action === "conflict") {
     return agentError(c.env, policy, requestId, parsed.agentId, "idempotency_conflict");
-  }
-  if (!(await published(c.env.DB, parsed.postId))) {
-    return agentError(c.env, policy, requestId, parsed.agentId, "not_found");
   }
 
   const limits = await readAgentLimits(c.env, policy, parsed.agentId);
@@ -164,18 +164,28 @@ async function remember(
   bodyHash: string,
   outcome: Outcome,
 ): Promise<Response> {
-  await c.env.DB.batch([
-    idempotencyInsert(
-      c.env.DB,
-      agentId,
-      route,
-      key,
-      bodyHash,
-      outcome.status,
-      outcome.body,
-      hoursAhead(c.get("policy").retention.idempotency_hours),
-    ),
-  ]);
+  try {
+    await c.env.DB.batch([
+      idempotencyInsert(
+        c.env.DB,
+        agentId,
+        route,
+        key,
+        bodyHash,
+        outcome.status,
+        outcome.body,
+        hoursAhead(c.get("policy").retention.idempotency_hours),
+      ),
+    ]);
+  } catch (error) {
+    if (!isUnique(error)) throw error;
+    const prior = await readIdempotency(c.env.DB, agentId, route, key, bodyHash);
+    if (prior.action === "replay") return jsonResponse(c.get("requestId"), prior.body, prior.status);
+    if (prior.action === "conflict") {
+      return agentError(c.env, c.get("policy"), c.get("requestId"), agentId, "idempotency_conflict");
+    }
+    throw error;
+  }
   return jsonResponse(c.get("requestId"), outcome.body, outcome.status);
 }
 

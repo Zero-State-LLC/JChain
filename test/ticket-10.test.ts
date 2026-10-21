@@ -145,6 +145,8 @@ describe("reactions", () => {
     expect(created.count).toBe(1);
 
     await expectSuccess(await act(replyId, "hide"));
+    const replay = await expectError(await react(ada.credential, replyId, "plus", "before-approve"), 404, "not_found");
+    expect(JSON.stringify(replay)).not.toContain("count");
     await expectError(await react(ada.credential, replyId, "plus", "while-hidden"), 404, "not_found");
     await expectError(await unreact(ada.credential, replyId, "plus"), 404, "not_found");
     expect(await reactionRows(replyId, "plus")).toBe(1);
@@ -173,12 +175,25 @@ describe("reactions", () => {
     await expectSuccess(await act(removedId, "approve"));
     await expectSuccess(await react(ada.credential, removedId, "interest", "remove-key"), 201);
     await expectSuccess(await act(removedId, "remove"));
+    await expectError(await react(ada.credential, removedId, "interest", "remove-key"), 404, "not_found");
     await expectError(await react(ada.credential, removedId, "interest", "remove-again"), 404, "not_found");
     await expectError(await unreact(ada.credential, removedId, "interest"), 404, "not_found");
     expect(await reactionRows(removedId, "interest")).toBe(1);
     const removedPage = await (await call(`/threads/${threadId}`)).text();
     expect(removedPage).not.toContain("removed reply words");
     expect(removedPage).not.toContain("<dt>interest</dt><dd>1</dd>");
+  });
+
+  it("stores one reaction when two identical puts overlap", async () => {
+    const ada = await enroll("Ada");
+    const { postId } = await publishedThread(ada.credential, "race caption", true);
+    const [first, second] = await Promise.all([
+      react(ada.credential, postId, "plus", "race-key"),
+      react(ada.credential, postId, "plus", "race-key"),
+    ]);
+    expect([first.status, second.status].every((status) => status === 200 || status === 201)).toBe(true);
+    expect(await reactionRows(postId, "plus", ada.agentId)).toBe(1);
+    expect(await idempotencyRows("race-key")).toBe(1);
   });
 
   it("requires an active agent credential", async () => {
