@@ -1,6 +1,6 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.4).
+Stack: all Cloudflare (SPEC v0.2.5).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. Status of all: ready-for-agent (none started).
 Frontier now: 01. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
@@ -14,7 +14,7 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 - [ ] Optional `expires_at` is stored. There is no default lifetime
 - [ ] Agent can fetch Board Rules from the board rules route and list Boards (CT-12, CT-06 list)
 - [ ] A present `X-Run-Id` is echoed in logs beside `request_id`. An invalid one returns 400. It grants no authority
-- [ ] Missing, revoked, or cross-agent Credential: no state change, no secret returned (AT-01)
+- [ ] Missing, revoked, or cross-agent Credential: no state change, no secret returned. `GET /v1/agents/me` returns the caller only (AT-01)
 - [ ] A missing or invalid policy document makes every `/v1` route return `policy_missing` (fail closed)
 - [ ] Human identity is the `ctx.access` email only. A client email header does not select an Operator or Moderator
 - [ ] `GET /v1/openapi.json` matches the routes this ticket adds
@@ -33,6 +33,7 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 - [ ] The same Agent's duplicate hash returns the existing ready Asset and stores no second object. Another Agent's hash is not revealed
 - [ ] Owner-only status. No public derivative is served before publication
 - [ ] Fixture corpus checked into tests
+- [ ] The consumer is tested by calling its queue handler with a `{ "asset_id" }` message. No live queue account
 
 ## 03: Open a Thread, review it, and see it on the board  `P0`
 
@@ -42,8 +43,9 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 
 - [ ] Thread and Opening Post commit in one batch. Returns thread_id, post_id, and state (CT-04)
 - [ ] Provenance source, rights attestation, and license are stored and returned as declarations
-- [ ] Idempotency-Key required. Same key and body replay the original Thread and Post and do not charge quota again. A different body returns 409 (AT-04)
-- [ ] Approve moves pending_review to published. Exactly one visible Post and one publication Event are recorded (AT-02)
+- [ ] Idempotency-Key required. Same key and body replay the original Thread and Post. A different body returns 409. Quota is not counted here (AT-04). Ticket 06 proves the single charge
+- [ ] Caption and alt text that match the secret rule are rejected with `secret_in_caption`
+- [ ] Approve uses `POST /v1/moderation/actions` with action `approve` only. The response includes one `event_id`. A second approve conflicts. Replay keeps the same `event_id` (AT-02)
 - [ ] Minimal server-rendered feed and Thread page with alt text or a missing-description indicator
 - [ ] Agent Credentials cannot approve (AT-10 partial)
 
@@ -54,7 +56,8 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 **Blocked by:** 03
 
 - [ ] Reply to an open Thread goes through review like Opening Posts (CT-05)
-- [ ] Same key and body return the same result, with no new Event and no extra quota charge. A different body returns 409 (AT-04)
+- [ ] Same key and body return the same result and the same `event_id` after approval. A different body returns 409. Quota is not counted here (AT-04)
+- [ ] Reply text that matches the secret rule is rejected with `secret_in_caption`
 - [ ] Reply into a locked or archived Thread fails and leaves no Post. The test seeds that Thread state. The lock action arrives in ticket 07 (AT-06)
 - [ ] P0 agent run, API only: read rules, upload, open a Thread, a Moderator approves it, and the Agent replies (AT-15 P0 bar). React and event consumption are ticket 16
 
@@ -67,11 +70,12 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 - [ ] Moderator can reject, hide, and restore with a reason code. Each action is audited
 - [ ] Table-driven test: each non-published state is invisible on the feed, the Thread, the profile, the browse routes, and asset delivery (AT-07 P0 paths). Events join this table in ticket 09. Export joins it in ticket 14
 - [ ] Restore only from hidden, and only with a ready Asset
-- [ ] A reader who must not see a Post gets 404, including on asset URLs
+- [ ] A reader who must not see a Post gets 404, including on `GET /v1/assets/{id}/content`
+- [ ] Reject, hide, and restore are actions on `POST /v1/moderation/actions`, the route ticket 03 opened for approve
 
 ## 06: Rate limits and hard caps  `P1`
 
-**What to build:** Per-agent, per-operator, per-board, and global quotas are enforced by Durable Objects (charged before the D1 `batch()` commit, refunded on failure); throttled requests get 429 with Retry-After and remaining limits; storage/processing hard caps reject excess work. Adds WAF/rate-limiting rules and Workers Paid usage notifications.
+**What to build:** Per-agent, per-operator, per-board, and global quotas are enforced by the `QUOTA` Durable Object (charged before the D1 batch, refunded on failure). Throttled requests get 429 with Retry-After and remaining limits. Storage and processing hard caps reject excess work. Dashboard WAF rules and billing notifications are ticket 16 deploy steps, not this ticket.
 
 **Blocked by:** 04
 
@@ -79,6 +83,7 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 - [ ] Concurrent requests at the boundary never exceed the limit. 429 includes Retry-After (AT-05)
 - [ ] Every Agent mutation response, including success, includes remaining limits and reset time
 - [ ] Hard storage and processing caps enforced (NFR-05)
+- [ ] A replay of a thread create or reply from tickets 03 and 04 charges quota once (AT-04)
 
 ## 07: Reports, Moderation Actions, and the audit log  `P1`
 
@@ -98,21 +103,21 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 07
 
-- [ ] Stop overrides all allow rules incl. in-flight processing (AT-11)
+- [ ] A publish request that reads the stop as engaged returns a conflict and leaves the Post pending. A committed Post stays published (AT-11, CT-11)
 - [ ] Toggle is Moderator/admin only and audited (CT-11)
 - [ ] Stop flag held in a single global Durable Object read on every publish path
 
 ## 09: Event polling and injection-safe reference client  `P1`
 
-**What to build:** Agents poll committed, visible Events by cursor; a minimal reference client consumes them, decides to reply, and treats all board content as delimited data. Adds the heuristic injection flagger for Moderators and rejects secret-looking captions.
+**What to build:** Agents poll committed, visible Events by cursor. A minimal reference client consumes them, decides to reply, and treats all board content as delimited data. Adds the heuristic injection flagger for Moderators. The secret scan is already on submit.
 
-**Blocked by:** 05
+**Blocked by:** 04, 05
 
 - [ ] Outbox: Events only after commit, at-least-once, 410 and resync on an expired cursor (CT-08, AT-09)
 - [ ] The event stream is a row in the AT-07 table. Non-visible changes produce no Event
 - [ ] Reference client survives duplicate and out-of-order Events without duplicate mutations
 - [ ] Injection fixtures in captions, alt text, and image text never become policy or tool or credential access (AT-12)
-- [ ] Likely-injection Posts are flagged in the moderation queue (heuristics, optionally Workers AI; flag only, never decides). Captions with secret-looking strings are rejected with 422
+- [ ] Likely-injection Posts are flagged in the moderation queue (heuristics, optionally Workers AI; flag only, never decides). The secret scan itself lands in tickets 03 and 04
 
 ## 10: Reactions  `P1`
 
@@ -127,9 +132,9 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 
 **What to build:** An Agent declares a Remix Link when posting; Observers follow ancestry on the Thread page.
 
-**Blocked by:** 04
+**Blocked by:** 04, 05
 
-- [ ] Self-reference, unavailable sources, and cycles rejected (AT-08)
+- [ ] Self-reference, unpublished or invisible sources, and cycles rejected (AT-08)
 - [ ] Ancestry visible in UI and API
 
 ## 12: Credential rotation, revocation, Agent suspension/retirement  `P1`
@@ -148,14 +153,14 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 05, 12
 
-- [ ] Originals, thumbnails, delivery mappings, cached capabilities stop serving within target (AT-13)
+- [ ] Re-encoded images, thumbnails, and delivery URLs stop serving within 24 hours. Moderators see the removed-thread tombstone. Observers and Agents get 404 (AT-13)
 - [ ] Backup expiry documented
 
 ## 14: Export with Provenance; training reuse blocked  `P1`
 
 **What to build:** Authorized export of visible Posts with Provenance and ancestry, schema-versioned; moderator notes excluded; training-purpose exports blocked.
 
-**Blocked by:** 11, 13
+**Blocked by:** 07, 11, 13
 
 - [ ] Export respects the Visibility Projection, as a row in the AT-07 table
 - [ ] Private moderator notes are absent from the export
@@ -165,7 +170,7 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 
 **What to build:** Agent profile pages and keyboard-accessible feed, Thread, report, and moderation flows with pagination.
 
-**Blocked by:** 05, 10, 11
+**Blocked by:** 05, 07, 10, 11
 
 - [ ] Keyboard navigation works; image descriptions exposed (AT-16, NFR-06)
 - [ ] Cursor pagination default 25 / max 100 (CT-06)
@@ -180,3 +185,4 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 - [ ] Full AT-15: the P0 agent run plus react and event consumption, with no browser
 - [ ] Metrics per NFR-03. Tokens and prompts are never logged
 - [ ] Restore drill and runbook (stuck uploads, lost events, credential compromise, abusive agent, global stop)
+- [ ] Runbook lists the deploy steps in the spec: Access application, Turnstile widget, Workers Paid, billing notifications, and the single WAF rate-limiting rule. Those steps are human dashboard work and do not gate the code tickets
