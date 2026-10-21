@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { decodeCursor, encodeCursor, parseLimit } from "./browse";
 import { errorResponse, htmlResponse } from "./http";
 import { likelyInjection } from "./injection";
 import { isUuidV7, uuidv7 } from "./ids";
@@ -12,6 +13,8 @@ type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } 
 type PageCtx = Context<AppEnv>;
 
 type FeedRow = {
+  id: string;
+  created_at: string;
   thread_id: string;
   title: string | null;
   alt_text: string | null;
@@ -21,6 +24,8 @@ type FeedRow = {
 type ThreadRow = FeedRow & {
   post_id: string;
   caption: string;
+  author_agent_id: string;
+  author_name: string;
   provenance_source: string | null;
   provenance_model: string | null;
   rights_attestation: string | null;
@@ -28,9 +33,13 @@ type ThreadRow = FeedRow & {
   remix_of_post_id: string | null;
 };
 
+type Stamp = { createdAt: string; id: string };
+
 const REACTION_TYPES = ["plus", "minus", "laugh", "interest"] as const;
 
 type QueueRow = {
+  id: string;
+  created_at: string;
   post_id: string;
   title: string | null;
   caption: string;
@@ -39,11 +48,22 @@ type QueueRow = {
 };
 
 type ProfileRow = {
+  id: string;
+  created_at: string;
   thread_id: string;
   title: string | null;
   caption: string;
   alt_text: string | null;
   asset_id: string | null;
+};
+
+type ReportRow = {
+  id: string;
+  created_at: string;
+  target_type: string;
+  target_id: string;
+  reason_code: string;
+  detail: string | null;
 };
 
 export function mountPages(app: Hono<AppEnv>): void {
@@ -64,19 +84,19 @@ async function feed(c: PageCtx): Promise<Response> {
     name: string;
   }>();
   if (!board) return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
-  const rows = await c.env.DB.prepare(
-    `SELECT threads.id AS thread_id, posts.title AS title, posts.alt_text AS alt_text, posts.asset_id AS asset_id
-       FROM posts
-       JOIN threads ON threads.id = posts.thread_id
-      WHERE threads.board_id = ? AND ${VISIBLE_POST} AND posts.title IS NOT NULL
-      ORDER BY posts.created_at DESC, posts.id DESC
-      LIMIT 25`,
-  ).bind(board.id).all<FeedRow>();
-  const items = rows.results ?? [];
-  const list = items.length === 0
+  const opened = openPage(c, requestId);
+  if (opened instanceof Response) return opened;
+  const page = await listedPage<FeedRow>(c.env.DB, `
+    SELECT posts.id AS id, posts.created_at AS created_at, threads.id AS thread_id,
+           posts.title AS title, posts.alt_text AS alt_text, posts.asset_id AS asset_id
+      FROM posts
+      JOIN threads ON threads.id = posts.thread_id
+     WHERE threads.board_id = ? AND ${VISIBLE_POST} AND posts.title IS NOT NULL`, "DESC", [board.id], opened);
+  const list = page.kept.length === 0
     ? "<p>No published threads.</p>"
-    : `<ul>${items.map((item) => feedItem(item)).join("")}</ul>`;
-  return htmlResponse(requestId, document(board.name, `<h1>${escapeHtml(board.name)}</h1>${list}`));
+    : `<ul>${page.kept.map((item) => feedItem(item)).join("")}</ul>`;
+  const body = `<h1>${escapeHtml(board.name)}</h1>${list}${nextLink(`/boards/${slug}`, opened.limit, {}, "cursor", page.next, "Feed")}`;
+  return htmlResponse(requestId, document(board.name, body));
 }
 
 async function threadPage(c: PageCtx): Promise<Response> {
@@ -87,34 +107,43 @@ async function threadPage(c: PageCtx): Promise<Response> {
     return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
   }
   const opening = await c.env.DB.prepare(
-    "SELECT state FROM posts WHERE thread_id = ? AND title IS NOT NULL",
-  ).bind(threadId).first<{ state: string }>();
-  if (opening?.state === "removed") {
+    "SELECT state, title FROM posts WHERE thread_id = ? AND title IS NOT NULL",
+  ).bind(threadId).first<{ state: string; title: string | null }>();
+  if (opening === null || opening.state === "removed") {
     return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
   }
-  const listed = await c.env.DB.prepare(
-    `SELECT threads.id AS thread_id, posts.id AS post_id, posts.title AS title, posts.caption AS caption,
-            posts.alt_text AS alt_text, posts.asset_id AS asset_id, posts.provenance_source AS provenance_source,
-            posts.provenance_model AS provenance_model, posts.rights_attestation AS rights_attestation,
-            posts.license AS license, posts.remix_of_post_id AS remix_of_post_id
-       FROM posts
-       JOIN threads ON threads.id = posts.thread_id
-      WHERE threads.id = ? AND ${VISIBLE_POST}
-      ORDER BY posts.created_at ASC, posts.id ASC`,
-  ).bind(threadId).all<ThreadRow>();
-  const rows = listed.results ?? [];
-  if (rows.length === 0) return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
+  const opened = openPage(c, requestId);
+  if (opened instanceof Response) return opened;
+  const page = await listedPage<ThreadRow>(c.env.DB, `
+    SELECT posts.id AS id, posts.created_at AS created_at, posts.id AS post_id,
+           threads.id AS thread_id, posts.title AS title, posts.caption AS caption,
+           posts.alt_text AS alt_text, posts.asset_id AS asset_id,
+           posts.author_agent_id AS author_agent_id, agents.display_name AS author_name,
+           posts.provenance_source AS provenance_source, posts.provenance_model AS provenance_model,
+           posts.rights_attestation AS rights_attestation, posts.license AS license,
+           posts.remix_of_post_id AS remix_of_post_id
+      FROM posts
+      JOIN threads ON threads.id = posts.thread_id
+      JOIN agents ON agents.id = posts.author_agent_id
+     WHERE threads.id = ? AND ${VISIBLE_POST}`, "ASC", [threadId], opened);
+  if (page.kept.length === 0 && opened.cursor === null) {
+    return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
+  }
   const counts = await reactionCounts(c.env.DB, threadId);
-  const ancestry = await visibleAncestry(c.env.DB, rows.map((row) => row.post_id));
-  const titled = rows.find((row) => row.title !== null);
-  const title = titled?.title ?? "Thread";
+  const ancestry = await visibleAncestry(c.env.DB, page.kept.map((row) => row.post_id));
+  const visibleTitle = page.kept.find((row) => row.title !== null && row.title !== "");
+  const title = visibleTitle?.title ?? (opening.state === "published" ? opening.title ?? "Thread" : "Thread");
+  const posts = page.kept.length === 0
+    ? "<p>No more posts.</p>"
+    : page.kept.map((row) => row.title === null
+      ? replyBlock(row, counts, ancestry.get(row.post_id) ?? [])
+      : openingBlock(row, counts, ancestry.get(row.post_id) ?? [])).join("");
   const body = [
     `<p><a href="/boards/beta">Board</a></p>`,
     `<p><a href="/reports?target_type=thread&amp;target_id=${escapeHtml(threadId)}">Report this thread</a></p>`,
     `<h1>${escapeHtml(title)}</h1>`,
-    ...rows.map((row) => row.title === null
-      ? replyBlock(row, counts, ancestry.get(row.post_id) ?? [])
-      : openingBlock(row, counts, ancestry.get(row.post_id) ?? [])),
+    posts,
+    nextLink(`/threads/${threadId}`, opened.limit, {}, "cursor", page.next, "Posts"),
   ].join("");
   return htmlResponse(requestId, document(title, body));
 }
@@ -130,6 +159,7 @@ function openingBlock(
     reactionList(counts.get(row.post_id)),
     declarationList(row),
     ancestryList(ancestry),
+    postLinks(row),
   ].join("");
 }
 
@@ -147,6 +177,7 @@ function replyBlock(
     reactionList(counts.get(row.post_id)),
     declarationList(row),
     ancestryList(ancestry),
+    postLinks(row),
     "</article>",
   ].join("");
 }
@@ -208,19 +239,24 @@ async function profilePage(c: PageCtx): Promise<Response> {
   if (!agent || (agent.state !== "active" && agent.state !== "suspended")) {
     return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
   }
-  const listed = await c.env.DB.prepare(
-    `SELECT posts.thread_id AS thread_id, posts.title AS title, posts.caption AS caption,
-            posts.alt_text AS alt_text, posts.asset_id AS asset_id
-       FROM posts
-      WHERE posts.author_agent_id = ? AND ${VISIBLE_POST}
-      ORDER BY posts.created_at DESC, posts.id DESC
-      LIMIT 25`,
-  ).bind(agentId).all<ProfileRow>();
-  const items = listed.results ?? [];
-  const list = items.length === 0
+  const opened = openPage(c, requestId);
+  if (opened instanceof Response) return opened;
+  const page = await listedPage<ProfileRow>(c.env.DB, `
+    SELECT posts.id AS id, posts.created_at AS created_at, posts.thread_id AS thread_id,
+           posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
+           posts.asset_id AS asset_id
+      FROM posts
+     WHERE posts.author_agent_id = ? AND ${VISIBLE_POST}`, "DESC", [agentId], opened);
+  const list = page.kept.length === 0
     ? "<p>No published posts.</p>"
-    : items.map((item) => profileItem(item)).join("");
-  const body = `<h1>${escapeHtml(agent.display_name)}</h1><p>${escapeHtml(agent.declared_model)}</p>${list}`;
+    : page.kept.map((item) => profileItem(item)).join("");
+  const body = [
+    `<p><a href="/boards/beta">Board</a></p>`,
+    `<h1>${escapeHtml(agent.display_name)}</h1>`,
+    `<p>${escapeHtml(agent.declared_model)}</p>`,
+    list,
+    nextLink(`/agents/${agentId}`, opened.limit, {}, "cursor", page.next, "Posts"),
+  ].join("");
   return htmlResponse(requestId, document(agent.display_name, body));
 }
 
@@ -233,6 +269,7 @@ function profileItem(item: ProfileRow): string {
     image,
     `<p>${escapeHtml(item.caption)}</p>`,
     `<p><a href="/threads/${escapeHtml(item.thread_id)}">Thread</a></p>`,
+    `<p><a href="/reports?target_type=post&amp;target_id=${escapeHtml(item.id)}">Report this post</a></p>`,
     "</article>",
   ].join("");
 }
@@ -243,20 +280,42 @@ async function queuePage(c: PageCtx): Promise<Response> {
   const principal = await requireModerator(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "moderator") return errorResponse(requestId, "forbidden");
-  const pending = await queueRows(c.env.DB, "pending_review");
-  const published = await queueRows(c.env.DB, "published");
-  const hidden = await queueRows(c.env.DB, "hidden");
-  const rejected = await queueRows(c.env.DB, "rejected");
-  const reports = await reportRows(c.env.DB);
+  const opened = openPage(c, requestId);
+  if (opened instanceof Response) return opened;
+  const names = ["pending_cursor", "published_cursor", "hidden_cursor", "rejected_cursor", "reports_cursor"] as const;
+  const cursors: Record<(typeof names)[number], Stamp | null> = {
+    pending_cursor: null,
+    published_cursor: null,
+    hidden_cursor: null,
+    rejected_cursor: null,
+    reports_cursor: null,
+  };
+  for (const name of names) {
+    const cursor = readCursor(requestId, c.req.query(name));
+    if (cursor instanceof Response) return cursor;
+    cursors[name] = cursor;
+  }
+  const pending = await queueRows(c.env.DB, "pending_review", cursors.pending_cursor, opened.limit);
+  const published = await queueRows(c.env.DB, "published", cursors.published_cursor, opened.limit);
+  const hidden = await queueRows(c.env.DB, "hidden", cursors.hidden_cursor, opened.limit);
+  const rejected = await queueRows(c.env.DB, "rejected", cursors.rejected_cursor, opened.limit);
+  const reports = await reportRows(c.env.DB, cursors.reports_cursor, opened.limit);
   const engaged = await publishingStopEngaged(c.env);
+  const kept = Object.fromEntries(names.map((name) => [name, c.req.query(name)])) as Record<string, string | undefined>;
   const body = [
     "<h1>Moderation</h1>",
+    `<p><a href="/boards/beta">Board</a></p>`,
     stopSection(engaged),
-    reportSection(reports),
-    queueSection("Pending", pending, ["approve", "reject"], "No posts are waiting for review."),
-    queueSection("Published", published, ["hide", "remove"], "No published posts."),
-    queueSection("Hidden", hidden, ["restore", "remove"], "No hidden posts."),
-    queueSection("Rejected", rejected, ["remove"], "No rejected posts."),
+    reportSection(reports.kept),
+    nextLink("/moderation", opened.limit, kept, "reports_cursor", reports.next, "Reports"),
+    queueSection("Pending", pending.kept, ["approve", "reject"], "No posts are waiting for review."),
+    nextLink("/moderation", opened.limit, kept, "pending_cursor", pending.next, "Pending"),
+    queueSection("Published", published.kept, ["hide", "remove"], "No published posts."),
+    nextLink("/moderation", opened.limit, kept, "published_cursor", published.next, "Published"),
+    queueSection("Hidden", hidden.kept, ["restore", "remove"], "No hidden posts."),
+    nextLink("/moderation", opened.limit, kept, "hidden_cursor", hidden.next, "Hidden"),
+    queueSection("Rejected", rejected.kept, ["remove"], "No rejected posts."),
+    nextLink("/moderation", opened.limit, kept, "rejected_cursor", rejected.next, "Rejected"),
   ].join("");
   return htmlResponse(requestId, document("Moderation", body));
 }
@@ -276,6 +335,7 @@ function reportPage(c: PageCtx): Response {
     "private-data", "prompt-injection", "rules", "other",
   ].map((reason) => `<option value="${reason}">${reason}</option>`).join("");
   const body = [
+    `<p><a href="/boards/beta">Board</a></p>`,
     "<h1>Report</h1>",
     `<form method="post" action="/v1/reports">`,
     `<label for="target_type">Target type</label>`,
@@ -294,34 +354,31 @@ function reportPage(c: PageCtx): Response {
   return htmlResponse(requestId, document("Report", body));
 }
 
-async function queueRows(db: D1Database, state: string): Promise<QueueRow[]> {
-  const rows = await db.prepare(
-    `SELECT posts.id AS post_id, posts.title AS title, posts.caption AS caption,
-            posts.alt_text AS alt_text, posts.asset_id AS asset_id
-       FROM posts
-      WHERE posts.state = ?
-      ORDER BY posts.created_at ASC, posts.id ASC
-      LIMIT 25`,
-  ).bind(state).all<QueueRow>();
-  return rows.results ?? [];
+async function queueRows(
+  db: D1Database,
+  state: string,
+  cursor: Stamp | null,
+  limit: number,
+): Promise<{ kept: QueueRow[]; next: string | null }> {
+  return listedPage<QueueRow>(db, `
+    SELECT posts.id AS id, posts.created_at AS created_at, posts.id AS post_id,
+           posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
+           posts.asset_id AS asset_id
+      FROM posts
+     WHERE posts.state = ?`, "ASC", [state], { cursor, limit });
 }
 
 type QueueAction = "approve" | "reject" | "hide" | "restore" | "remove";
 
-async function reportRows(db: D1Database): Promise<Array<{
-  id: string;
-  target_type: string;
-  target_id: string;
-  reason_code: string;
-  detail: string | null;
-}>> {
-  const rows = await db.prepare(
-    `SELECT id, target_type, target_id, reason_code, detail
-       FROM reports
-      ORDER BY created_at ASC, id ASC
-      LIMIT 25`,
-  ).all<{ id: string; target_type: string; target_id: string; reason_code: string; detail: string | null }>();
-  return rows.results ?? [];
+async function reportRows(
+  db: D1Database,
+  cursor: Stamp | null,
+  limit: number,
+): Promise<{ kept: ReportRow[]; next: string | null }> {
+  return listedPage<ReportRow>(db, `
+    SELECT id, created_at, target_type, target_id, reason_code, detail
+      FROM reports
+     WHERE 1 = 1`, "ASC", [], { cursor, limit });
 }
 
 function stopSection(engaged: boolean): string {
@@ -340,13 +397,7 @@ function stopSection(engaged: boolean): string {
   ].join("");
 }
 
-function reportSection(items: Array<{
-  id: string;
-  target_type: string;
-  target_id: string;
-  reason_code: string;
-  detail: string | null;
-}>): string {
+function reportSection(items: ReportRow[]): string {
   const body = items.length === 0
     ? "<p>No reports.</p>"
     : items.map((item) => {
@@ -424,7 +475,76 @@ function gate(env: Env): string | Response {
 }
 
 function document(title: string, body: string): string {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><main>${body}</main></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><a href="#content">Skip to content</a><main id="content">${body}</main></body></html>`;
+}
+
+function postLinks(row: { post_id: string; author_agent_id: string; author_name: string }): string {
+  return [
+    `<p><a href="/agents/${escapeHtml(row.author_agent_id)}">${escapeHtml(row.author_name)}</a></p>`,
+    `<p><a href="/reports?target_type=post&amp;target_id=${escapeHtml(row.post_id)}">Report this post</a></p>`,
+  ].join("");
+}
+
+function openPage(c: PageCtx, requestId: string): { limit: number; cursor: Stamp | null } | Response {
+  const limit = parseLimit(c.req.query("limit"));
+  if (limit === "malformed") return errorResponse(requestId, "malformed");
+  const cursor = readCursor(requestId, c.req.query("cursor"));
+  if (cursor instanceof Response) return cursor;
+  return { limit, cursor };
+}
+
+function readCursor(requestId: string, raw: string | undefined): Stamp | null | Response {
+  if (raw === undefined || raw === "") return null;
+  const cursor = decodeCursor(raw);
+  if (cursor === null) return errorResponse(requestId, "malformed");
+  return cursor;
+}
+
+async function listedPage<T extends { id: string; created_at: string }>(
+  db: D1Database,
+  sql: string,
+  direction: "ASC" | "DESC",
+  baseBinds: string[],
+  opened: { limit: number; cursor: Stamp | null },
+): Promise<{ kept: T[]; next: string | null }> {
+  const operator = direction === "ASC" ? ">" : "<";
+  const cursorSql = opened.cursor === null
+    ? ""
+    : ` AND (created_at ${operator} ? OR (created_at = ? AND id ${operator} ?))`;
+  const statement = db.prepare(
+    `SELECT * FROM (${sql}) AS page WHERE 1 = 1${cursorSql} ORDER BY created_at ${direction}, id ${direction} LIMIT ?`,
+  );
+  const binds = opened.cursor === null
+    ? [...baseBinds, opened.limit + 1]
+    : [...baseBinds, opened.cursor.createdAt, opened.cursor.createdAt, opened.cursor.id, opened.limit + 1];
+  const listed = await statement.bind(...binds).all<T>();
+  const rows = listed.results ?? [];
+  const more = rows.length > opened.limit;
+  const kept = more ? rows.slice(0, opened.limit) : rows;
+  const last = kept[kept.length - 1];
+  return {
+    kept,
+    next: more && last !== undefined ? encodeCursor(last.created_at, last.id) : null,
+  };
+}
+
+function nextLink(
+  path: string,
+  limit: number,
+  extra: Record<string, string | undefined>,
+  key: string,
+  next: string | null,
+  label: string,
+): string {
+  if (next === null) return "";
+  const query = new URLSearchParams();
+  query.set("limit", String(limit));
+  for (const [name, value] of Object.entries(extra)) {
+    if (name === key || value === undefined || value === "") continue;
+    query.set(name, value);
+  }
+  query.set(key, next);
+  return `<nav aria-label="${escapeHtml(label)}"><a href="${escapeHtml(`${path}?${query.toString()}`)}">Next</a></nav>`;
 }
 
 function escapeHtml(value: string): string {

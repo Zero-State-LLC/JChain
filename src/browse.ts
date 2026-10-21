@@ -273,7 +273,7 @@ function postItem(row: PostRow, ancestry: { post_id: string; thread_id: string }
   };
 }
 
-function parseLimit(raw: string | undefined): number | "malformed" {
+export function parseLimit(raw: string | undefined): number | "malformed" {
   if (raw === undefined) return 25;
   if (!/^[0-9]+$/.test(raw)) return "malformed";
   const value = Number(raw);
