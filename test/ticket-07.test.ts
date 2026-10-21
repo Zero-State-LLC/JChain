@@ -122,12 +122,16 @@ describe("reports", () => {
     expect(still.target_type).toBe("agent");
   });
 
-  it("renders a report form with a turnstile field", async () => {
+  it("shows an operator report form and tells everyone else to use an operator", async () => {
     const agent = await enroll();
     const threadId = await openThread(agent.credential);
-    const page = await (await call(`/reports?target_type=thread&target_id=${threadId}`)).text();
-    expect(page).toContain(`action="/v1/reports"`);
-    expect(page).toContain(`for="turnstile_token"`);
+    const anon = await (await call(`/reports?target_type=thread&target_id=${threadId}`)).text();
+    expect(anon).toContain("Browser reports are for an Operator.");
+    expect(anon).not.toContain("turnstile");
+    expect(anon).not.toContain("<form");
+    const page = await (await call(`/reports?target_type=thread&target_id=${threadId}`, { email: OPERATOR })).text();
+    expect(page).toContain(`action="/reports"`);
+    expect(page).not.toContain("turnstile");
     expect(page).toContain(`value="${threadId}"`);
     expect(page).toContain(`value="thread" selected`);
     expect(page).toContain("<button type=\"submit\">Report</button>");

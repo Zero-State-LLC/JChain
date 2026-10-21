@@ -1,9 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono, type Context } from "hono";
-import { errorResponse, jsonResponse } from "./http";
+import { htmlError, htmlResult } from "./html";
+import { errorResponse, jsonResponse, type ErrorCode } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import type { Policy } from "./policy";
+import { parsePolicy, type Policy } from "./policy";
 import { requireModerator } from "./principal";
 
 const KEY = "engaged";
@@ -33,18 +34,28 @@ export async function clearPublishingStop(env: Env): Promise<void> {
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
 
+type Format = "json" | "html";
+
 export function mountPublishingStop(app: Hono<AppEnv>): void {
-  app.post("/v1/admin/publishing-stop", setPublishingStop);
+  app.post("/v1/admin/publishing-stop", (c) => setPublishingStop(c, "json"));
+  app.post("/moderation/publishing-stop", (c) => setPublishingStop(c, "html"));
 }
 
-async function setPublishingStop(c: Ctx): Promise<Response> {
-  const requestId = c.get("requestId");
+function stopError(requestId: string, format: Format, code: ErrorCode): Response {
+  if (format === "json") return errorResponse(requestId, code);
+  return htmlError(requestId, code, "Publishing stop", "/moderation", "Moderation");
+}
+
+async function setPublishingStop(c: Ctx, format: Format): Promise<Response> {
+  const requestId = c.get("requestId") || uuidv7();
+  const policy = c.get("policy") ?? parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined);
+  if (!policy) return stopError(requestId, format, "policy_missing");
   const principal = await requireModerator(c.env, c.req.raw, c.executionCtx);
-  if (!principal.ok) return errorResponse(requestId, principal.code);
-  if (principal.kind !== "moderator") return errorResponse(requestId, "forbidden");
-  if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
+  if (!principal.ok) return stopError(requestId, format, principal.code);
+  if (principal.kind !== "moderator") return stopError(requestId, format, "forbidden");
+  if (!sameOrigin(c.req.raw, policy.site_origin)) return stopError(requestId, format, "forbidden");
   const parsed = await readEngaged(c.req.raw);
-  if (!parsed.ok) return errorResponse(requestId, "malformed");
+  if (!parsed.ok) return stopError(requestId, format, "malformed");
   const stub = c.env.PUBLISHING_STOP.getByName("global");
   const previous = await stub.read();
   await stub.set(parsed.engaged);
@@ -63,6 +74,10 @@ async function setPublishingStop(c: Ctx): Promise<Response> {
     message: parsed.engaged ? "publishing stop engaged" : "publishing stop lifted",
     engaged: parsed.engaged,
   }));
+  if (format === "html") {
+    const sentence = parsed.engaged ? "Publishing stop is engaged." : "Publishing stop is disengaged.";
+    return htmlResult(requestId, "Publishing stop", sentence, "/moderation", "Moderation", 200);
+  }
   return jsonResponse(requestId, { engaged: parsed.engaged });
 }
 

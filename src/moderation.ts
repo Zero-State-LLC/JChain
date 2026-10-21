@@ -1,8 +1,9 @@
 import { Hono, type Context } from "hono";
-import { errorResponse, characterLength, jsonResponse } from "./http";
+import { htmlError, htmlResult } from "./html";
+import { errorResponse, characterLength, jsonResponse, type ErrorCode } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import type { Policy } from "./policy";
+import { parsePolicy, type Policy } from "./policy";
 import { requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 
@@ -20,34 +21,62 @@ const REASONS = [
   "other",
 ] as const;
 
+type Format = "json" | "html";
+
 export function mountModeration(app: Hono<AppEnv>): void {
-  app.post("/v1/moderation/actions", moderate);
+  app.post("/v1/moderation/actions", (c) => moderate(c, "json"));
+  app.post("/moderation/actions", (c) => moderate(c, "html"));
 }
 
-async function moderate(c: Ctx): Promise<Response> {
-  const requestId = c.get("requestId");
+function moderationError(requestId: string, format: Format, code: ErrorCode): Response {
+  if (format === "json") return errorResponse(requestId, code);
+  return htmlError(requestId, code, "Moderation", "/moderation", "Moderation");
+}
+
+function moderationDone(
+  requestId: string,
+  format: Format,
+  body: Record<string, unknown>,
+  sentence: string,
+): Response {
+  if (format === "json") return jsonResponse(requestId, body);
+  return htmlResult(requestId, "Moderation", sentence, "/moderation", "Moderation", 200);
+}
+
+async function moderate(c: Ctx, format: Format): Promise<Response> {
+  const requestId = c.get("requestId") || uuidv7();
+  const policy = c.get("policy") ?? parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined);
+  if (!policy) return moderationError(requestId, format, "policy_missing");
   const principal = await requireModerator(c.env, c.req.raw, c.executionCtx);
-  if (!principal.ok) return errorResponse(requestId, principal.code);
-  if (principal.kind !== "moderator") return errorResponse(requestId, "forbidden");
-  if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
+  if (!principal.ok) return moderationError(requestId, format, principal.code);
+  if (principal.kind !== "moderator") return moderationError(requestId, format, "forbidden");
+  if (!sameOrigin(c.req.raw, policy.site_origin)) return moderationError(requestId, format, "forbidden");
   const parsed = await readAction(c.req.raw);
-  if (!parsed.ok) return errorResponse(requestId, "malformed");
+  if (!parsed.ok) return moderationError(requestId, format, "malformed");
   const action = parseAction(parsed.value);
-  if (!action.ok) return errorResponse(requestId, action.code);
-  if (action.targetType === "post" && isMove(action.action)) return movePost(c, requestId, principal.email, action);
+  if (!action.ok) return moderationError(requestId, format, action.code);
+  if (action.targetType === "post" && isMove(action.action)) {
+    return movePost(c, requestId, principal.email, action, format);
+  }
   if (action.targetType === "thread" && isThreadMove(action.action)) {
-    return moveThread(c, requestId, principal.email, action);
+    return moveThread(c, requestId, principal.email, action, format);
   }
   if (action.targetType === "agent" && isAgentMove(action.action)) {
-    return moveAgent(c, requestId, principal.email, action);
+    return moveAgent(c, requestId, principal.email, action, format);
   }
   if (action.targetType === "asset" && action.action === "quarantine_asset") {
-    return quarantine(c, requestId, principal.email, action);
+    return quarantine(c, requestId, principal.email, action, format);
   }
-  return errorResponse(requestId, "state_conflict");
+  return moderationError(requestId, format, "state_conflict");
 }
 
-async function movePost(c: Ctx, requestId: string, actorEmail: string, action: ActionInput): Promise<Response> {
+async function movePost(
+  c: Ctx,
+  requestId: string,
+  actorEmail: string,
+  action: ActionInput,
+  format: Format,
+): Promise<Response> {
   const name = action.action as MoveName;
 
   const post = await c.env.DB.prepare(
@@ -63,13 +92,13 @@ async function movePost(c: Ctx, requestId: string, actorEmail: string, action: A
     asset_id: string | null;
     asset_state: string | null;
   }>();
-  if (!post) return errorResponse(requestId, "not_found");
+  if (!post) return moderationError(requestId, format, "not_found");
   const assetReady = post.asset_id === null || post.asset_state === "ready";
   if (!legal(name, post.state, post.thread_state, assetReady)) {
-    return errorResponse(requestId, "state_conflict");
+    return moderationError(requestId, format, "state_conflict");
   }
   if ((name === "approve" || name === "restore") && await publishingStopEngaged(c.env)) {
-    return errorResponse(requestId, "state_conflict");
+    return moderationError(requestId, format, "state_conflict");
   }
 
   const occurredAt = utcSeconds();
@@ -136,23 +165,30 @@ async function movePost(c: Ctx, requestId: string, actorEmail: string, action: A
   const updated = Number(results[updateIndex]?.meta.changes ?? 0) === 1;
   const audited = Number(results[auditIndex]?.meta.changes ?? 0) === 1;
   const recorded = writtenIndex === null || Number(results[writtenIndex]?.meta.changes ?? 0) === 1;
-  if (!updated || !audited || !recorded) return errorResponse(requestId, "state_conflict");
+  if (!updated || !audited || !recorded) return moderationError(requestId, format, "state_conflict");
   const entry: Record<string, string> = { message: logMessage(name), post_id: action.targetId };
   if (publishedEventId !== null) entry.event_id = publishedEventId;
   console.log(JSON.stringify(entry));
-  const body: Record<string, unknown> = { post_id: action.targetId, state: destination(name) };
+  const state = destination(name);
+  const body: Record<string, unknown> = { post_id: action.targetId, state };
   if (publishedEventId !== null) body.event_id = publishedEventId;
-  return jsonResponse(requestId, body);
+  return moderationDone(requestId, format, body, `Post ${action.targetId} is ${state}.`);
 }
 
-async function moveThread(c: Ctx, requestId: string, actorEmail: string, action: ActionInput): Promise<Response> {
+async function moveThread(
+  c: Ctx,
+  requestId: string,
+  actorEmail: string,
+  action: ActionInput,
+  format: Format,
+): Promise<Response> {
   const name = action.action as ThreadMove;
   const thread = await c.env.DB.prepare("SELECT state FROM threads WHERE id = ?").bind(action.targetId).first<{
     state: string;
   }>();
-  if (!thread) return errorResponse(requestId, "not_found");
+  if (!thread) return moderationError(requestId, format, "not_found");
   const next = threadDestination(name, thread.state);
-  if (next === null) return errorResponse(requestId, "state_conflict");
+  if (next === null) return moderationError(requestId, format, "state_conflict");
   const ok = await auditedUpdate(c.env.DB, {
     actorEmail,
     targetType: "thread",
@@ -164,20 +200,26 @@ async function moveThread(c: Ctx, requestId: string, actorEmail: string, action:
     update: `UPDATE threads SET state = ? WHERE ${threadGuard(name)}`,
     updateValue: next,
   });
-  if (!ok) return errorResponse(requestId, "state_conflict");
+  if (!ok) return moderationError(requestId, format, "state_conflict");
   console.log(JSON.stringify({ message: threadLog(name), thread_id: action.targetId }));
-  return jsonResponse(requestId, { thread_id: action.targetId, state: next });
+  return moderationDone(requestId, format, { thread_id: action.targetId, state: next }, `Thread ${action.targetId} is ${next}.`);
 }
 
-async function moveAgent(c: Ctx, requestId: string, actorEmail: string, action: ActionInput): Promise<Response> {
+async function moveAgent(
+  c: Ctx,
+  requestId: string,
+  actorEmail: string,
+  action: ActionInput,
+  format: Format,
+): Promise<Response> {
   const name = action.action as AgentMove;
   const agent = await c.env.DB.prepare("SELECT state FROM agents WHERE id = ?").bind(action.targetId).first<{
     state: string;
   }>();
-  if (!agent) return errorResponse(requestId, "not_found");
+  if (!agent) return moderationError(requestId, format, "not_found");
   const next = name === "suspend_agent" ? "suspended" : "active";
   const from = name === "suspend_agent" ? "active" : "suspended";
-  if (agent.state !== from) return errorResponse(requestId, "state_conflict");
+  if (agent.state !== from) return moderationError(requestId, format, "state_conflict");
   const guard = "id = ? AND state = ?";
   const ok = await auditedUpdate(c.env.DB, {
     actorEmail,
@@ -191,18 +233,24 @@ async function moveAgent(c: Ctx, requestId: string, actorEmail: string, action: 
     update: `UPDATE agents SET state = ? WHERE ${guard}`,
     updateValue: next,
   });
-  if (!ok) return errorResponse(requestId, "state_conflict");
+  if (!ok) return moderationError(requestId, format, "state_conflict");
   const message = name === "suspend_agent" ? "agent suspended" : "agent resumed";
   console.log(JSON.stringify({ message, agent_id: action.targetId }));
-  return jsonResponse(requestId, { agent_id: action.targetId, state: next });
+  return moderationDone(requestId, format, { agent_id: action.targetId, state: next }, `Agent ${action.targetId} is ${next}.`);
 }
 
-async function quarantine(c: Ctx, requestId: string, actorEmail: string, action: ActionInput): Promise<Response> {
+async function quarantine(
+  c: Ctx,
+  requestId: string,
+  actorEmail: string,
+  action: ActionInput,
+  format: Format,
+): Promise<Response> {
   const asset = await c.env.DB.prepare("SELECT state FROM assets WHERE id = ?").bind(action.targetId).first<{
     state: string;
   }>();
-  if (!asset) return errorResponse(requestId, "not_found");
-  if (asset.state !== "ready") return errorResponse(requestId, "state_conflict");
+  if (!asset) return moderationError(requestId, format, "not_found");
+  if (asset.state !== "ready") return moderationError(requestId, format, "state_conflict");
   const guard = "id = ? AND state = 'ready'";
   const ok = await auditedUpdate(c.env.DB, {
     actorEmail,
@@ -215,9 +263,14 @@ async function quarantine(c: Ctx, requestId: string, actorEmail: string, action:
     update: `UPDATE assets SET state = 'quarantined' WHERE ${guard}`,
     updateValue: null,
   });
-  if (!ok) return errorResponse(requestId, "state_conflict");
+  if (!ok) return moderationError(requestId, format, "state_conflict");
   console.log(JSON.stringify({ message: "asset quarantined", asset_id: action.targetId }));
-  return jsonResponse(requestId, { asset_id: action.targetId, state: "quarantined" });
+  return moderationDone(
+    requestId,
+    format,
+    { asset_id: action.targetId, state: "quarantined" },
+    `Asset ${action.targetId} is quarantined.`,
+  );
 }
 
 type Audited = {

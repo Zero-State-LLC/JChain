@@ -2,6 +2,32 @@
 // hidden, and removed content stays off every read path.
 export const VISIBLE_POST = "posts.state = 'published'";
 
+// A board slug is readable only when the target has a published Post.
+// Pending, hidden, rejected, and removed targets look like an unknown id.
+export async function visibleBoardSlug(
+  db: D1Database,
+  targetType: string,
+  targetId: string,
+): Promise<string | null> {
+  const sql = targetType === "post"
+    ? `SELECT boards.slug AS slug
+         FROM posts
+         JOIN threads ON threads.id = posts.thread_id
+         JOIN boards ON boards.id = threads.board_id
+        WHERE posts.id = ? AND ${VISIBLE_POST}`
+    : targetType === "thread"
+      ? `SELECT boards.slug AS slug
+           FROM threads
+           JOIN posts ON posts.thread_id = threads.id
+           JOIN boards ON boards.id = threads.board_id
+          WHERE threads.id = ? AND ${VISIBLE_POST}
+          LIMIT 1`
+      : null;
+  if (sql === null) return null;
+  const row = await db.prepare(sql).bind(targetId).first<{ slug: string }>();
+  return row?.slug ?? null;
+}
+
 export type AssetReader =
   | { kind: "anonymous" }
   | { kind: "agent"; agentId: string }

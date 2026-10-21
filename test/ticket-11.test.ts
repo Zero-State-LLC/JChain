@@ -165,8 +165,8 @@ describe("remix links", () => {
     const page = await call(`/threads/${tipThread}`);
     expect(page.headers.get("content-security-policy")).toContain("script-src 'none'");
     const html = await page.text();
-    expect(html).toContain(`<a href="/threads/${linkThread}">link words</a> <code>${linkId}</code>`);
-    expect(html).toContain(`<a href="/threads/${rootThread}">&lt;script&gt;remix&lt;/script&gt;</a> <code>${rootId}</code>`);
+    expect(html).toContain(`<a href="/threads/${linkThread}">${linkId}</a> link words`);
+    expect(html).toContain(`<a href="/threads/${rootThread}">${rootId}</a> &lt;script&gt;remix&lt;/script&gt;`);
     expect(html).toContain("&lt;script&gt;remix&lt;/script&gt;");
     expect(html).not.toContain("<script>");
     const feed = await (await call("/boards/beta")).text();
@@ -181,7 +181,7 @@ describe("remix links", () => {
     expect(hiddenLink[0]?.remix_of_post_id).toBeNull();
     expect(hiddenLink[0]?.ancestry).toEqual([]);
     const hiddenPage = await (await call(`/threads/${tipThread}`)).text();
-    expect(hiddenPage).toContain(`<code>${linkId}</code>`);
+    expect(hiddenPage).toContain(`<a href="/threads/${linkThread}">${linkId}</a>`);
     expect(hiddenPage).not.toContain(rootId);
     expect(hiddenPage).not.toContain("remix");
     expect(hiddenPage).not.toContain("<script>");

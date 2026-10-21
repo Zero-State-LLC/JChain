@@ -1,10 +1,12 @@
 import { Hono, type Context } from "hono";
-import { characterLength, errorResponse, jsonResponse } from "./http";
+import { htmlError, htmlResult } from "./html";
+import { characterLength, errorResponse, jsonResponse, type ErrorCode } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import type { Policy } from "./policy";
+import { parsePolicy, type Policy } from "./policy";
 import { accessEmail, requireAgent } from "./principal";
 import { turnstileSecret, verifyTurnstile } from "./turnstile";
+import { visibleBoardSlug } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -22,34 +24,53 @@ const REASONS = [
 
 const TARGETS = ["post", "thread", "agent"] as const;
 
+const OPERATOR_SENTENCE = "Browser reports are for an Operator.";
+
+type Format = "json" | "html";
+
 export function mountReports(app: Hono<AppEnv>): void {
-  app.post("/v1/reports", report);
+  app.post("/v1/reports", (c) => report(c, "json"));
+  app.post("/reports", (c) => report(c, "html"));
 }
 
-async function report(c: Ctx): Promise<Response> {
-  const requestId = c.get("requestId");
-  const header = c.req.raw.headers.get("authorization");
-  if (header !== null) {
-    const agent = await requireAgent(c.env, c.req.raw);
-    if (!agent.ok) return errorResponse(requestId, agent.code);
-    return errorResponse(requestId, "forbidden");
+async function report(c: Ctx, format: Format): Promise<Response> {
+  const requestId = c.get("requestId") || uuidv7();
+  const policy = c.get("policy") ?? parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined);
+  if (!policy) {
+    if (format === "html") {
+      const href = await reportBoardHref(c.env.DB);
+      return htmlError(requestId, "policy_missing", "Report", href, "Board");
+    }
+    return errorResponse(requestId, "policy_missing");
   }
-
   const email = await accessEmail(c.executionCtx);
-  const policy = c.get("policy");
-  if (email !== null && !sameOrigin(c.req.raw, policy.site_origin)) {
-    return errorResponse(requestId, "forbidden");
-  }
-
-  const parsed = await readReport(c.req.raw);
-  if (!parsed.ok) return errorResponse(requestId, "malformed");
-  const body = parseReport(parsed.value);
-  if (!body.ok) return errorResponse(requestId, body.code);
-
   const operator = email === null
     ? null
     : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first<{ email: string }>();
-  if (!operator) {
+  if (format === "html" && operator === null) {
+    const href = await reportBoardHref(c.env.DB);
+    return htmlResult(requestId, "Report", OPERATOR_SENTENCE, href, "Board", 403);
+  }
+
+  if (format === "json") {
+    const header = c.req.raw.headers.get("authorization");
+    if (header !== null) {
+      const agent = await requireAgent(c.env, c.req.raw);
+      if (!agent.ok) return errorResponse(requestId, agent.code);
+      return errorResponse(requestId, "forbidden");
+    }
+  }
+
+  if (email !== null && !sameOrigin(c.req.raw, policy.site_origin)) {
+    return reportError(c, requestId, format, "forbidden");
+  }
+
+  const parsed = await readReport(c.req.raw);
+  if (!parsed.ok) return reportError(c, requestId, format, "malformed");
+  const body = parseReport(parsed.value);
+  if (!body.ok) return reportError(c, requestId, format, body.code);
+
+  if (format === "json" && !operator) {
     const secret = turnstileSecret(c.env);
     if (secret === null) return errorResponse(requestId, "policy_missing");
     if (body.token === null) return errorResponse(requestId, "validation_failed");
@@ -58,7 +79,7 @@ async function report(c: Ctx): Promise<Response> {
   }
 
   const exists = await targetExists(c.env.DB, body.targetType, body.targetId);
-  if (!exists) return errorResponse(requestId, "not_found");
+  if (!exists) return reportError(c, requestId, format, "not_found", body.targetType, body.targetId);
 
   const reportId = uuidv7();
   const createdAt = utcSeconds();
@@ -75,11 +96,42 @@ async function report(c: Ctx): Promise<Response> {
     ).bind(uuidv7(), actor, body.targetType, body.targetId, body.reasonCode, createdAt),
   ]);
   console.log(JSON.stringify({ message: "report filed", report_id: reportId, target_type: body.targetType }));
+  if (format === "html") {
+    const href = await reportBoardHref(c.env.DB, body.targetType, body.targetId);
+    return htmlResult(requestId, "Report", `Report ${reportId} filed.`, href, "Board", 201);
+  }
   return jsonResponse(requestId, {
     report_id: reportId,
     target_type: body.targetType,
     target_id: body.targetId,
   }, 201);
+}
+
+async function reportError(
+  c: Ctx,
+  requestId: string,
+  format: Format,
+  code: ErrorCode,
+  targetType?: string,
+  targetId?: string,
+): Promise<Response> {
+  if (format === "json") return errorResponse(requestId, code);
+  const href = await reportBoardHref(c.env.DB, targetType, targetId);
+  return htmlError(requestId, code, "Report", href, "Board");
+}
+
+async function reportBoardHref(db: D1Database, targetType?: string, targetId?: string): Promise<string> {
+  if (
+    (targetType === "post" || targetType === "thread")
+    && targetId !== undefined
+    && isUuidV7(targetId)
+  ) {
+    const slug = await visibleBoardSlug(db, targetType, targetId);
+    if (slug !== null) return `/boards/${slug}`;
+  }
+  const listed = await db.prepare("SELECT slug FROM boards ORDER BY slug").all<{ slug: string }>();
+  const slug = listed.results?.[0]?.slug;
+  return slug === undefined ? "/" : `/boards/${slug}`;
 }
 
 async function targetExists(db: D1Database, targetType: string, targetId: string): Promise<boolean> {
