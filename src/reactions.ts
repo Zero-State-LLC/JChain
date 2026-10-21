@@ -41,16 +41,25 @@ async function putReaction(c: Ctx): Promise<Response> {
   }
 
   const charged = await chargeAgentWindow(c.env, policy, parsed.agentId, "reactions");
-  if (!charged.ok) return rateLimited(requestId, charged.limits, charged.retryAfter);
+  if (!charged.ok) {
+    const raced = await readIdempotency(c.env.DB, parsed.agentId, route, key, hashed.hash);
+    if (raced.action === "replay") return jsonResponse(requestId, raced.body, raced.status);
+    if (raced.action === "conflict") {
+      return agentError(c.env, policy, requestId, parsed.agentId, "idempotency_conflict");
+    }
+    return rateLimited(requestId, charged.limits, charged.retryAfter);
+  }
   const limits = charged.limits;
   try {
     const owned = await ownReaction(c.env.DB, parsed.postId, parsed.agentId, parsed.type);
     const count = await visibleCount(c.env.DB, parsed.postId, parsed.type);
     if (owned) {
-      return remember(c, parsed.agentId, route, key, hashed.hash, {
+      const stored = await remember(c, parsed.agentId, route, key, hashed.hash, {
         status: 200,
         body: { post_id: parsed.postId, type: parsed.type, count, limits },
       });
+      if (stored.duplicate) await charged.refund();
+      return stored.response;
     }
 
     const reactionId = uuidv7();
@@ -94,22 +103,29 @@ async function putReaction(c: Ctx): Promise<Response> {
       ]);
       if (Number(results[0]?.meta.changes ?? 0) !== 1) {
         const winner = await ownReaction(c.env.DB, parsed.postId, parsed.agentId, parsed.type);
-        if (!winner) return agentError(c.env, policy, requestId, parsed.agentId, "not_found");
+        if (!winner) {
+          await charged.refund();
+          return agentError(c.env, policy, requestId, parsed.agentId, "not_found");
+        }
         const current = await visibleCount(c.env.DB, parsed.postId, parsed.type);
-        return remember(c, parsed.agentId, route, key, hashed.hash, {
+        const stored = await remember(c, parsed.agentId, route, key, hashed.hash, {
           status: 200,
           body: { post_id: parsed.postId, type: parsed.type, count: current, limits },
         });
+        if (stored.duplicate) await charged.refund();
+        return stored.response;
       }
     } catch (error) {
       if (!isUnique(error)) throw error;
       const winner = await ownReaction(c.env.DB, parsed.postId, parsed.agentId, parsed.type);
       if (!winner) throw error;
       const current = await visibleCount(c.env.DB, parsed.postId, parsed.type);
-      return remember(c, parsed.agentId, route, key, hashed.hash, {
+      const stored = await remember(c, parsed.agentId, route, key, hashed.hash, {
         status: 200,
         body: { post_id: parsed.postId, type: parsed.type, count: current, limits },
       });
+      if (stored.duplicate) await charged.refund();
+      return stored.response;
     }
     console.log(JSON.stringify({ message: "reaction added", post_id: parsed.postId, type: parsed.type }));
     return jsonResponse(requestId, body, 201);
@@ -181,7 +197,7 @@ async function remember(
   key: string,
   bodyHash: string,
   outcome: Outcome,
-): Promise<Response> {
+): Promise<{ response: Response; duplicate: boolean }> {
   try {
     await c.env.DB.batch([
       idempotencyInsert(
@@ -198,13 +214,21 @@ async function remember(
   } catch (error) {
     if (!isUnique(error)) throw error;
     const prior = await readIdempotency(c.env.DB, agentId, route, key, bodyHash);
-    if (prior.action === "replay") return jsonResponse(c.get("requestId"), prior.body, prior.status);
+    if (prior.action === "replay") {
+      return {
+        response: jsonResponse(c.get("requestId"), prior.body, prior.status),
+        duplicate: true,
+      };
+    }
     if (prior.action === "conflict") {
-      return agentError(c.env, c.get("policy"), c.get("requestId"), agentId, "idempotency_conflict");
+      return {
+        response: await agentError(c.env, c.get("policy"), c.get("requestId"), agentId, "idempotency_conflict"),
+        duplicate: true,
+      };
     }
     throw error;
   }
-  return jsonResponse(c.get("requestId"), outcome.body, outcome.status);
+  return { response: jsonResponse(c.get("requestId"), outcome.body, outcome.status), duplicate: false };
 }
 
 async function published(db: D1Database, postId: string): Promise<boolean> {
