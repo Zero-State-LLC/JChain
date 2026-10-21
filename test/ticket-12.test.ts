@@ -86,9 +86,12 @@ describe("credential lifecycle", () => {
     await env.DB.prepare("INSERT INTO operators (email, id) VALUES (?, ?)").bind(OTHER, OTHER_ID).run();
     await expectError(await post(`/v1/agents/${agent.agentId}/suspend`, OTHER), 403, "forbidden");
 
+    const reserved = await expectSuccess(await upload(agent.credential, "token-before-stop"), 201);
     const suspended = await expectSuccess(await post(`/v1/agents/${agent.agentId}/suspend`, OPERATOR));
     expect(suspended).toMatchObject({ agent_id: agent.agentId, state: "suspended" });
+    expect(await auditCount(agent.agentId, "suspend_agent")).toBe(1);
     await expectError(await upload(agent.credential, "suspended-upload"), 401, "credential_invalid");
+    await expectError(await putToken(String(reserved.asset_id), String(reserved.upload_token)), 401, "credential_invalid");
     await expectError(await openThread(agent.credential, "suspended-thread"), 401, "credential_invalid");
     await expectError(await post(`/v1/agents/${agent.agentId}/suspend`, OPERATOR), 409, "state_conflict");
     const profile = await expectSuccess(await call(`/v1/agents/${agent.agentId}`, { email: OPERATOR }));
@@ -96,10 +99,12 @@ describe("credential lifecycle", () => {
 
     const resumed = await expectSuccess(await post(`/v1/agents/${agent.agentId}/resume`, MODERATOR));
     expect(resumed.state).toBe("active");
+    expect(await auditCount(agent.agentId, "resume_agent")).toBe(1);
     await expectSuccess(await upload(agent.credential, "resumed-upload"), 201);
 
     const retired = await expectSuccess(await post(`/v1/agents/${agent.agentId}/retire`, MODERATOR));
     expect(retired).toMatchObject({ agent_id: agent.agentId, state: "retired" });
+    expect(await auditCount(agent.agentId, "retire_agent")).toBe(1);
     expect(await activeCount(agent.agentId)).toBe(0);
     await expectError(await upload(agent.credential, "retired-upload"), 401, "credential_invalid");
     await expectError(await openThread(agent.credential, "retired-thread"), 401, "credential_invalid");
@@ -132,6 +137,14 @@ function upload(credential: string, key: string): Promise<Response> {
   });
 }
 
+function putToken(assetId: string, token: string): Promise<Response> {
+  return call(`/v1/uploads/${assetId}/content`, {
+    method: "PUT",
+    raw: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+    headers: { "idempotency-key": "stopped-put", "upload-token": token },
+  });
+}
+
 function openThread(credential: string, key: string): Promise<Response> {
   return call("/v1/threads", {
     bearer: credential,
@@ -155,6 +168,13 @@ async function activeId(agentId: string): Promise<string> {
   ).bind(agentId).first<{ id: string }>();
   if (!row) throw new Error("missing active credential");
   return row.id;
+}
+
+async function auditCount(agentId: string, action: string): Promise<number> {
+  const row = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM moderation_actions WHERE target_id = ? AND action = ?",
+  ).bind(agentId, action).first<{ n: number }>();
+  return Number(row?.n ?? 0);
 }
 
 async function activeCount(agentId: string): Promise<number> {

@@ -225,7 +225,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/uploads/{id}/content": {
         put: {
           operationId: "putUploadContent",
-          summary: "Send raw bytes for one reserved Upload. Authorized by Upload-Token only.",
+          summary: "Send raw bytes for one reserved Upload. Authorized by Upload-Token only. A suspended or retired Agent cannot use the token.",
           parameters: [
             { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
             { $ref: "#/components/parameters/idempotencyKey" },

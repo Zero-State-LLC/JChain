@@ -15,8 +15,8 @@ type AgentRow = { id: string; state: string; operator_id: string | null };
 export function mountCredentials(app: App): void {
   app.post("/v1/credentials/:id/revoke", revoke);
   app.post("/v1/agents/:id/credentials", rotate);
-  app.post("/v1/agents/:id/suspend", (c) => moveAgent(c, "active", "suspended", "agent suspended"));
-  app.post("/v1/agents/:id/resume", (c) => moveAgent(c, "suspended", "active", "agent resumed"));
+  app.post("/v1/agents/:id/suspend", (c) => moveAgent(c, "active", "suspended", "agent suspended", "suspend_agent"));
+  app.post("/v1/agents/:id/resume", (c) => moveAgent(c, "suspended", "active", "agent resumed", "resume_agent"));
   app.post("/v1/agents/:id/retire", retire);
 }
 
@@ -81,16 +81,19 @@ async function rotate(c: Ctx): Promise<Response> {
   return jsonResponse(requestId, { agent_id: agent.id, credential: secret }, 201);
 }
 
-async function moveAgent(c: Ctx, from: string, to: string, message: string): Promise<Response> {
+async function moveAgent(c: Ctx, from: string, to: string, message: string, action: string): Promise<Response> {
   const opened = await gate(c);
   if (opened instanceof Response) return opened;
   const requestId = c.get("requestId");
   const agent = await ownedAgent(c, opened.caller);
   if (agent instanceof Response) return agent;
-  const result = await c.env.DB.prepare(
-    "UPDATE agents SET state = ? WHERE id = ? AND state = ?",
-  ).bind(to, agent.id, from).run();
-  if (Number(result.meta.changes ?? 0) !== 1) return errorResponse(requestId, "state_conflict");
+  const results = await c.env.DB.batch([
+    auditStatement(c, opened.caller.email, action, "id = ? AND state = ?", [agent.id, from]),
+    c.env.DB.prepare("UPDATE agents SET state = ? WHERE id = ? AND state = ?").bind(to, agent.id, from),
+  ]);
+  if (Number(results[0]?.meta.changes ?? 0) !== 1 || Number(results[1]?.meta.changes ?? 0) !== 1) {
+    return errorResponse(requestId, "state_conflict");
+  }
   console.log(JSON.stringify({ message, agent_id: agent.id }));
   return jsonResponse(requestId, { agent_id: agent.id, state: to });
 }
@@ -102,17 +105,28 @@ async function retire(c: Ctx): Promise<Response> {
   const agent = await ownedAgent(c, opened.caller);
   if (agent instanceof Response) return agent;
   if (agent.state === "retired") return errorResponse(requestId, "state_conflict");
+  const actionId = uuidv7();
   const results = await c.env.DB.batch([
+    auditStatement(
+      c,
+      opened.caller.email,
+      "retire_agent",
+      "id = ? AND state IN ('invited', 'active', 'suspended')",
+      [agent.id],
+      actionId,
+    ),
     c.env.DB.prepare(
       "UPDATE agents SET state = 'retired' WHERE id = ? AND state IN ('invited', 'active', 'suspended')",
     ).bind(agent.id),
     c.env.DB.prepare(
       `UPDATE credentials SET state = 'revoked'
         WHERE agent_id = ? AND state = 'active'
-          AND EXISTS (SELECT 1 FROM agents WHERE id = ? AND state = 'retired')`,
-    ).bind(agent.id, agent.id),
+          AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+    ).bind(agent.id, actionId),
   ]);
-  if (Number(results[0]?.meta.changes ?? 0) !== 1) return errorResponse(requestId, "state_conflict");
+  if (Number(results[0]?.meta.changes ?? 0) !== 1 || Number(results[1]?.meta.changes ?? 0) !== 1) {
+    return errorResponse(requestId, "state_conflict");
+  }
   console.log(JSON.stringify({ message: "agent retired", agent_id: agent.id }));
   return jsonResponse(requestId, { agent_id: agent.id, state: "retired" });
 }
@@ -146,6 +160,22 @@ async function ownedAgent(c: Ctx, caller: Caller): Promise<AgentRow | Response> 
   if (!agent) return errorResponse(requestId, "not_found");
   if (!(await mayManage(c, caller, agent.operator_id))) return errorResponse(requestId, "forbidden");
   return agent;
+}
+
+function auditStatement(
+  c: Ctx,
+  email: string,
+  action: string,
+  guard: string,
+  guardBinds: string[],
+  actionId = uuidv7(),
+): D1PreparedStatement {
+  return c.env.DB.prepare(
+    `INSERT INTO moderation_actions (
+       id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+     )
+     SELECT ?, ?, 'agent', id, ?, 'other', NULL, NULL, ? FROM agents WHERE ${guard}`,
+  ).bind(actionId, email, action, utcSeconds(), ...guardBinds);
 }
 
 async function mayManage(c: Ctx, caller: Caller, operatorId: string | null): Promise<boolean> {
