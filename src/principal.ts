@@ -97,6 +97,10 @@ function expired(expiresAt: string): boolean {
   return Number.isNaN(expiry) || expiry <= Date.now();
 }
 
+export async function accessEmail(ctx: object): Promise<string | null> {
+  return humanEmail(ctx);
+}
+
 async function humanEmail(ctx: object): Promise<string | null> {
   const access = accessOf(ctx);
   if (!access) return null;

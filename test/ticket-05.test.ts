@@ -289,7 +289,9 @@ describe("moderation actions", () => {
     expect(await actionCount(postId)).toBe(1);
     const afterReject = await (await call("/moderation", { email: MODERATOR })).text();
     expect(afterReject).not.toContain(note);
-    expect(afterReject).not.toContain(caption);
+    expect(afterReject).toContain("No posts are waiting for review.");
+    expect(afterReject).toContain(caption);
+    expect(afterReject).toContain(`value="remove"`);
     expect(await (await call("/boards/beta")).text()).not.toContain("Audit title");
 
     await releaseThread(author.credential);

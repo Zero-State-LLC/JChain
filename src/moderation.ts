@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import { errorResponse, characterLength, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
+import { sameOrigin } from "./origin";
 import type { Policy } from "./policy";
 import { requireModerator } from "./principal";
 
@@ -27,14 +28,26 @@ async function moderate(c: Ctx): Promise<Response> {
   const principal = await requireModerator(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "moderator") return errorResponse(requestId, "forbidden");
+  if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
   const parsed = await readAction(c.req.raw);
   if (!parsed.ok) return errorResponse(requestId, "malformed");
   const action = parseAction(parsed.value);
   if (!action.ok) return errorResponse(requestId, action.code);
-  if (action.targetType !== "post" || !isMove(action.action)) {
-    return errorResponse(requestId, "state_conflict");
+  if (action.targetType === "post" && isMove(action.action)) return movePost(c, requestId, principal.email, action);
+  if (action.targetType === "thread" && isThreadMove(action.action)) {
+    return moveThread(c, requestId, principal.email, action);
   }
-  const name = action.action;
+  if (action.targetType === "agent" && isAgentMove(action.action)) {
+    return moveAgent(c, requestId, principal.email, action);
+  }
+  if (action.targetType === "asset" && action.action === "quarantine_asset") {
+    return quarantine(c, requestId, principal.email, action);
+  }
+  return errorResponse(requestId, "state_conflict");
+}
+
+async function movePost(c: Ctx, requestId: string, actorEmail: string, action: ActionInput): Promise<Response> {
+  const name = action.action as MoveName;
 
   const post = await c.env.DB.prepare(
     `SELECT posts.state AS state, threads.state AS thread_state,
@@ -83,7 +96,7 @@ async function moderate(c: Ctx): Promise<Response> {
      SELECT ?, ?, 'post', posts.id, ?, ?, ?, ?, ? FROM posts WHERE ${where}`,
   ).bind(
     actionId,
-    principal.email,
+    actorEmail,
     name,
     action.reasonCode,
     action.privateNote,
@@ -107,22 +120,156 @@ async function moderate(c: Ctx): Promise<Response> {
   return jsonResponse(requestId, body);
 }
 
-type MoveName = "approve" | "reject" | "hide" | "restore";
+async function moveThread(c: Ctx, requestId: string, actorEmail: string, action: ActionInput): Promise<Response> {
+  const name = action.action as ThreadMove;
+  const thread = await c.env.DB.prepare("SELECT state FROM threads WHERE id = ?").bind(action.targetId).first<{
+    state: string;
+  }>();
+  if (!thread) return errorResponse(requestId, "not_found");
+  const next = threadDestination(name, thread.state);
+  if (next === null) return errorResponse(requestId, "state_conflict");
+  const ok = await auditedUpdate(c.env.DB, {
+    actorEmail,
+    targetType: "thread",
+    targetId: action.targetId,
+    action: name,
+    reasonCode: action.reasonCode,
+    privateNote: action.privateNote,
+    guard: threadGuard(name),
+    update: `UPDATE threads SET state = ? WHERE ${threadGuard(name)}`,
+    updateValue: next,
+  });
+  if (!ok) return errorResponse(requestId, "state_conflict");
+  console.log(JSON.stringify({ message: threadLog(name), thread_id: action.targetId }));
+  return jsonResponse(requestId, { thread_id: action.targetId, state: next });
+}
+
+async function moveAgent(c: Ctx, requestId: string, actorEmail: string, action: ActionInput): Promise<Response> {
+  const name = action.action as AgentMove;
+  const agent = await c.env.DB.prepare("SELECT state FROM agents WHERE id = ?").bind(action.targetId).first<{
+    state: string;
+  }>();
+  if (!agent) return errorResponse(requestId, "not_found");
+  const next = name === "suspend_agent" ? "suspended" : "active";
+  const from = name === "suspend_agent" ? "active" : "suspended";
+  if (agent.state !== from) return errorResponse(requestId, "state_conflict");
+  const guard = "id = ? AND state = ?";
+  const ok = await auditedUpdate(c.env.DB, {
+    actorEmail,
+    targetType: "agent",
+    targetId: action.targetId,
+    action: name,
+    reasonCode: action.reasonCode,
+    privateNote: action.privateNote,
+    guard,
+    guardExtra: from,
+    update: `UPDATE agents SET state = ? WHERE ${guard}`,
+    updateValue: next,
+  });
+  if (!ok) return errorResponse(requestId, "state_conflict");
+  const message = name === "suspend_agent" ? "agent suspended" : "agent resumed";
+  console.log(JSON.stringify({ message, agent_id: action.targetId }));
+  return jsonResponse(requestId, { agent_id: action.targetId, state: next });
+}
+
+async function quarantine(c: Ctx, requestId: string, actorEmail: string, action: ActionInput): Promise<Response> {
+  const asset = await c.env.DB.prepare("SELECT state FROM assets WHERE id = ?").bind(action.targetId).first<{
+    state: string;
+  }>();
+  if (!asset) return errorResponse(requestId, "not_found");
+  if (asset.state !== "ready") return errorResponse(requestId, "state_conflict");
+  const guard = "id = ? AND state = 'ready'";
+  const ok = await auditedUpdate(c.env.DB, {
+    actorEmail,
+    targetType: "asset",
+    targetId: action.targetId,
+    action: "quarantine_asset",
+    reasonCode: action.reasonCode,
+    privateNote: action.privateNote,
+    guard,
+    update: `UPDATE assets SET state = 'quarantined' WHERE ${guard}`,
+    updateValue: null,
+  });
+  if (!ok) return errorResponse(requestId, "state_conflict");
+  console.log(JSON.stringify({ message: "asset quarantined", asset_id: action.targetId }));
+  return jsonResponse(requestId, { asset_id: action.targetId, state: "quarantined" });
+}
+
+type Audited = {
+  actorEmail: string;
+  targetType: string;
+  targetId: string;
+  action: string;
+  reasonCode: string;
+  privateNote: string | null;
+  guard: string;
+  guardExtra?: string;
+  update: string;
+  updateValue: string | null;
+};
+
+async function auditedUpdate(db: D1Database, move: Audited): Promise<boolean> {
+  const actionId = uuidv7();
+  const occurredAt = utcSeconds();
+  const guardBinds = move.guardExtra === undefined ? [move.targetId] : [move.targetId, move.guardExtra];
+  const updateBinds = move.updateValue === null ? guardBinds : [move.updateValue, ...guardBinds];
+  const results = await db.batch([
+    db.prepare(
+      `INSERT INTO moderation_actions (
+         id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+       )
+       SELECT ?, ?, ?, id, ?, ?, ?, NULL, ? FROM ${tableFor(move.targetType)} WHERE ${move.guard}`,
+    ).bind(
+      actionId,
+      move.actorEmail,
+      move.targetType,
+      move.action,
+      move.reasonCode,
+      move.privateNote,
+      occurredAt,
+      ...guardBinds,
+    ),
+    db.prepare(move.update).bind(...updateBinds),
+  ]);
+  const audited = Number(results[0]?.meta.changes ?? 0) === 1;
+  const updated = Number(results[1]?.meta.changes ?? 0) === 1;
+  return audited && updated;
+}
+
+function tableFor(targetType: string): string {
+  if (targetType === "thread") return "threads";
+  if (targetType === "agent") return "agents";
+  return "assets";
+}
+
+type MoveName = "approve" | "reject" | "hide" | "restore" | "remove";
+type ThreadMove = "lock" | "unlock" | "archive";
+type AgentMove = "suspend_agent" | "resume_agent";
 
 function isMove(value: string): value is MoveName {
-  return value === "approve" || value === "reject" || value === "hide" || value === "restore";
+  return value === "approve" || value === "reject" || value === "hide" || value === "restore" || value === "remove";
+}
+
+function isThreadMove(value: string): value is ThreadMove {
+  return value === "lock" || value === "unlock" || value === "archive";
+}
+
+function isAgentMove(value: string): value is AgentMove {
+  return value === "suspend_agent" || value === "resume_agent";
 }
 
 function legal(name: MoveName, state: string, threadState: string, assetReady: boolean): boolean {
   if (name === "approve") return state === "pending_review" && threadState === "open" && assetReady;
   if (name === "reject") return state === "pending_review";
   if (name === "hide") return state === "published";
+  if (name === "remove") return state === "published" || state === "hidden" || state === "rejected";
   return state === "hidden" && assetReady;
 }
 
 function destination(name: MoveName): string {
   if (name === "reject") return "rejected";
   if (name === "hide") return "hidden";
+  if (name === "remove") return "removal_pending";
   return "published";
 }
 
@@ -130,7 +277,26 @@ function logMessage(name: MoveName): string {
   if (name === "approve") return "post published";
   if (name === "reject") return "post rejected";
   if (name === "hide") return "post hidden";
+  if (name === "remove") return "post removal pending";
   return "post restored";
+}
+
+function threadDestination(name: ThreadMove, state: string): string | null {
+  if (name === "lock") return state === "open" ? "locked" : null;
+  if (name === "unlock") return state === "locked" ? "open" : null;
+  return state === "open" || state === "locked" ? "archived" : null;
+}
+
+function threadGuard(name: ThreadMove): string {
+  if (name === "lock") return "id = ? AND state = 'open'";
+  if (name === "unlock") return "id = ? AND state = 'locked'";
+  return "id = ? AND state IN ('open', 'locked')";
+}
+
+function threadLog(name: ThreadMove): string {
+  if (name === "lock") return "thread locked";
+  if (name === "unlock") return "thread unlocked";
+  return "thread archived";
 }
 
 function guard(name: MoveName): string {
@@ -148,6 +314,7 @@ function guard(name: MoveName): string {
     ))`;
   }
   if (name === "hide") return "posts.id = ? AND posts.state = 'published'";
+  if (name === "remove") return "posts.id = ? AND posts.state IN ('published', 'hidden', 'rejected')";
   return "posts.id = ? AND posts.state = 'pending_review'";
 }
 

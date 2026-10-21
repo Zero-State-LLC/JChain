@@ -3,8 +3,10 @@ import { newCredentialSecret, sha256Hex } from "./credential";
 import { characterLength, errorResponse, isValidRunId, jsonResponse } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
 import { openApiDocument } from "./openapi";
+import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { requireAgent, requireOperator, requireReader } from "./principal";
+import { mountReports } from "./reports";
 import { mountBrowse } from "./browse";
 import { mountModeration } from "./moderation";
 import { mountPages } from "./pages";
@@ -52,6 +54,7 @@ app.post("/v1/agents", async (c) => {
   const principal = await requireOperator(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "operator") return errorResponse(requestId, "forbidden");
+  if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
   const body = await readObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const parsed = parseEnroll(body.value);
@@ -132,6 +135,7 @@ mountUploads(app);
 mountThreads(app);
 mountBrowse(app);
 mountModeration(app);
+mountReports(app);
 mountPages(app);
 
 app.notFound((c) => errorResponse(c.get("requestId") || uuidv7(), "not_found"));
