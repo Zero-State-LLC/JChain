@@ -38,7 +38,10 @@ describe("publishing stop", () => {
     ]);
     const stored = await env.DB.prepare("SELECT COUNT(*) AS n FROM idempotency_keys").first<{ n: number }>();
     expect(Number(stored?.n ?? 0)).toBe(0);
-    expect(logs.map((line) => JSON.parse(line) as { message: string; engaged: boolean })).toEqual([
+    const stopLogs = logs
+      .map((line) => JSON.parse(line) as { message?: string; engaged?: boolean })
+      .filter((entry) => entry.message === "publishing stop engaged" || entry.message === "publishing stop lifted");
+    expect(stopLogs).toEqual([
       { message: "publishing stop engaged", engaged: true },
       { message: "publishing stop engaged", engaged: true },
       { message: "publishing stop lifted", engaged: false },

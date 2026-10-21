@@ -1,0 +1,466 @@
+import { applyD1Migrations, createExecutionContext, createMessageBatch, getQueueResult } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import worker from "../src/index";
+import { VALID_PNG } from "./fixtures/bytes";
+import { BOARD_ID, MODERATOR, OPERATOR, call, resetAndSeed } from "./harness";
+
+const MISSING_ID = "01900000-0000-7000-8000-000000000099";
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+beforeAll(async () => {
+  await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+});
+
+beforeEach(resetAndSeed);
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("reactions", () => {
+  it("keeps one reaction per actor, post, and type", async () => {
+    const logs: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((message?: unknown) => {
+      logs.push(String(message));
+    });
+    const ada = await enroll("Ada");
+    const bea = await enroll("Bea");
+    const caption = "react-caption-10";
+    const { threadId, postId } = await publishedThread(ada.credential, caption, false);
+    await expectError(await react(ada.credential, postId, "plus", "pending-key"), 404, "not_found");
+    expect(await reactionRows(postId, "plus")).toBe(0);
+    expect(await idempotencyRows("pending-key")).toBe(0);
+
+    await expectSuccess(await act(postId, "approve"));
+    const created = await expectSuccess(await react(ada.credential, postId, "plus", "pending-key"), 201);
+    expect(created.post_id).toBe(postId);
+    expect(created.type).toBe("plus");
+    expect(created.count).toBe(1);
+    expectLimits(created.limits, { threads: 0, replies: 6, mutations: 19 });
+    expect(await reactionRows(postId, "plus")).toBe(1);
+    expect(await reactionRows(postId, "plus", ada.agentId)).toBe(1);
+    expect(await idempotencyRows("pending-key")).toBe(1);
+
+    const replayed = await expectSuccess(await react(ada.credential, postId, "plus", "pending-key"), 201);
+    expect(replayed.count).toBe(1);
+    expect(replayed.limits).toEqual(created.limits);
+    expect(replayed.request_id).not.toBe(created.request_id);
+    expect(await reactionRows(postId, "plus")).toBe(1);
+    expect(await idempotencyRows("pending-key")).toBe(1);
+
+    const conflict = await react(ada.credential, postId, "plus", "pending-key", { extra: true });
+    const conflictBody = await expectError(conflict, 409, "idempotency_conflict");
+    expectLimits(conflictBody.limits, { threads: 0, replies: 6, mutations: 19 });
+    expect(await reactionRows(postId, "plus")).toBe(1);
+
+    await expectError(await call(`/v1/posts/${postId}/reactions/plus`, {
+      method: "PUT",
+      bearer: ada.credential,
+      headers: { "idempotency-key": "array-key", "content-type": "application/json" },
+      raw: new TextEncoder().encode("[1]"),
+    }), 400, "malformed");
+    expect(await reactionRows(postId, "plus")).toBe(1);
+    expect(await idempotencyRows("array-key")).toBe(0);
+
+    const again = await expectSuccess(await react(ada.credential, postId, "plus", "again-plus"), 200);
+    expect(again.count).toBe(1);
+    expect(await reactionRows(postId, "plus", ada.agentId)).toBe(1);
+
+    const beaPlus = await expectSuccess(await react(bea.credential, postId, "plus", "bea-plus"), 201);
+    expect(beaPlus.count).toBe(2);
+    expectLimits(beaPlus.limits, { threads: 1, replies: 6, mutations: 20 });
+    const stored = await expectSuccess(await react(ada.credential, postId, "plus", "pending-key"), 201);
+    expect(stored.count).toBe(1);
+    expect(stored.limits).toEqual(created.limits);
+
+    const duringStop = await expectSuccess(await call("/v1/admin/publishing-stop", {
+      email: MODERATOR,
+      body: { engaged: true },
+    }));
+    expect(duringStop.engaged).toBe(true);
+    const laugh = await expectSuccess(await react(ada.credential, postId, "laugh", "laugh-key"), 201);
+    expect(laugh.count).toBe(1);
+    expectLimits(laugh.limits, { threads: 0, replies: 6, mutations: 19 });
+    await expectSuccess(await call("/v1/admin/publishing-stop", {
+      email: MODERATOR,
+      body: { engaged: false },
+    }));
+
+    const page = await call(`/threads/${threadId}`);
+    expect(page.headers.get("content-security-policy")).toContain("script-src 'none'");
+    const html = await page.text();
+    expect(html).toContain("<dt>plus</dt><dd>2</dd>");
+    expect(html).toContain("<dt>minus</dt><dd>0</dd>");
+    expect(html).toContain("<dt>laugh</dt><dd>1</dd>");
+    expect(html).toContain("<dt>interest</dt><dd>0</dd>");
+    expect(html).not.toContain(ada.credential);
+
+    const events = await expectSuccess(await call("/v1/events", { bearer: ada.credential }));
+    const items = events.items as Array<{ type: string }>;
+    expect(items).toHaveLength(1);
+    expect(items[0]?.type).toBe("post.published");
+    expect(JSON.stringify(items)).not.toContain(caption);
+
+    const replied = await expectSuccess(await call(`/v1/threads/${threadId}/posts`, {
+      bearer: ada.credential,
+      headers: { "idempotency-key": "reply-after-reaction" },
+      body: { text: "a reply after reactions" },
+    }), 201);
+    expectLimits(replied.limits, { threads: 0, replies: 5, mutations: 18 });
+    const afterReply = await expectSuccess(await call("/v1/events", { bearer: ada.credential }));
+    expect(afterReply.items).toHaveLength(1);
+
+    const removed = await expectSuccess(await unreact(ada.credential, postId, "plus"));
+    expect(removed.count).toBe(1);
+    expect(await reactionRows(postId, "plus", ada.agentId)).toBe(0);
+    expect(await reactionRows(postId, "plus", bea.agentId)).toBe(1);
+    const removedAgain = await expectSuccess(await unreact(ada.credential, postId, "plus"));
+    expect(removedAgain.count).toBe(1);
+    const afterDelete = await (await call(`/threads/${threadId}`)).text();
+    expect(afterDelete).toContain("<dt>plus</dt><dd>1</dd>");
+    expect(afterDelete).toContain("<dt>laugh</dt><dd>1</dd>");
+
+    const reactionLogs = logs.filter((line) => line.includes("reaction added") || line.includes("reaction removed"));
+    expect(reactionLogs.length).toBeGreaterThan(0);
+    for (const line of reactionLogs) {
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      expect(Object.keys(parsed).sort()).toEqual(["message", "post_id", "type"]);
+      expect(parsed.post_id).toBe(postId);
+      expect(["reaction added", "reaction removed"]).toContain(parsed.message);
+    }
+    expect(reactionLogs.join("\n")).not.toContain(caption);
+    expect(reactionLogs.join("\n")).not.toContain(ada.credential);
+  });
+
+  it("conceals reactions on a post the caller cannot see", async () => {
+    const ada = await enroll("Ada");
+    const { threadId } = await publishedThread(ada.credential, "opening stays", true);
+    const replyId = await replyTo(ada.credential, threadId, "hidden reply words");
+    await expectError(await react(ada.credential, replyId, "plus", "before-approve"), 404, "not_found");
+    expect(await reactionRows(replyId, "plus")).toBe(0);
+    expect(await idempotencyRows("before-approve")).toBe(0);
+
+    await expectSuccess(await act(replyId, "approve"));
+    const created = await expectSuccess(await react(ada.credential, replyId, "plus", "before-approve"), 201);
+    expect(created.count).toBe(1);
+
+    await expectSuccess(await act(replyId, "hide"));
+    const replay = await expectError(await react(ada.credential, replyId, "plus", "before-approve"), 404, "not_found");
+    expect(JSON.stringify(replay)).not.toContain("count");
+    await expectError(await react(ada.credential, replyId, "plus", "while-hidden"), 404, "not_found");
+    await expectError(await unreact(ada.credential, replyId, "plus"), 404, "not_found");
+    expect(await reactionRows(replyId, "plus")).toBe(1);
+    expect(await idempotencyRows("while-hidden")).toBe(0);
+    const hiddenPage = await call(`/threads/${threadId}`);
+    expect(hiddenPage.status).toBe(200);
+    const hiddenHtml = await hiddenPage.text();
+    expect(hiddenHtml).toContain("opening stays");
+    expect(hiddenHtml).not.toContain("hidden reply words");
+    expect(hiddenHtml).toContain("<dt>plus</dt><dd>0</dd>");
+    expect(hiddenHtml).not.toContain("<dt>plus</dt><dd>1</dd>");
+
+    await expectSuccess(await act(replyId, "restore"));
+    const restored = await (await call(`/threads/${threadId}`)).text();
+    expect(restored).toContain("hidden reply words");
+    expect(restored).toContain("<dt>plus</dt><dd>1</dd>");
+    expect(restored).toContain("<dt>plus</dt><dd>0</dd>");
+
+    const rejectedId = await replyTo(ada.credential, threadId, "rejected reply words");
+    await expectSuccess(await act(rejectedId, "reject"));
+    await expectError(await react(ada.credential, rejectedId, "laugh", "rejected-key"), 404, "not_found");
+    expect(await reactionRows(rejectedId, "laugh")).toBe(0);
+    expect(await (await call(`/threads/${threadId}`)).text()).not.toContain("rejected reply words");
+
+    const removedId = await replyTo(ada.credential, threadId, "removed reply words");
+    await expectSuccess(await act(removedId, "approve"));
+    await expectSuccess(await react(ada.credential, removedId, "interest", "remove-key"), 201);
+    await expectSuccess(await act(removedId, "remove"));
+    await expectError(await react(ada.credential, removedId, "interest", "remove-key"), 404, "not_found");
+    await expectError(await react(ada.credential, removedId, "interest", "remove-again"), 404, "not_found");
+    await expectError(await unreact(ada.credential, removedId, "interest"), 404, "not_found");
+    expect(await reactionRows(removedId, "interest")).toBe(1);
+    const removedPage = await (await call(`/threads/${threadId}`)).text();
+    expect(removedPage).not.toContain("removed reply words");
+    expect(removedPage).not.toContain("<dt>interest</dt><dd>1</dd>");
+  });
+
+  it("stores one reaction when two identical puts overlap", async () => {
+    const ada = await enroll("Ada");
+    const { postId } = await publishedThread(ada.credential, "race caption", true);
+    const [first, second] = await Promise.all([
+      react(ada.credential, postId, "plus", "race-key"),
+      react(ada.credential, postId, "plus", "race-key"),
+    ]);
+    expect([first.status, second.status].every((status) => status === 200 || status === 201)).toBe(true);
+    expect(await reactionRows(postId, "plus", ada.agentId)).toBe(1);
+    expect(await idempotencyRows("race-key")).toBe(1);
+  });
+
+  it("requires an active agent credential", async () => {
+    const ada = await enroll("Ada");
+    const anon = await call(`/v1/posts/${MISSING_ID}/reactions/plus`, {
+      method: "PUT",
+      headers: { "idempotency-key": "anon" },
+    });
+    const anonBody = await anon.json() as { error?: { code?: string }; limits?: unknown };
+    expect(anon.status).toBe(401);
+    expect(anonBody.error?.code).toBe("credential_invalid");
+    expect(anonBody.limits).toBeUndefined();
+    await expectError(await call(`/v1/posts/${MISSING_ID}/reactions/plus`, {
+      method: "PUT",
+      bearer: "jc_not-valid",
+      headers: { "idempotency-key": "bad" },
+    }), 401, "credential_invalid");
+    await expectError(await call(`/v1/posts/${MISSING_ID}/reactions/plus`, {
+      method: "PUT",
+      email: OPERATOR,
+      headers: { "idempotency-key": "operator" },
+    }), 401, "credential_invalid");
+    await expectError(await call(`/v1/posts/${MISSING_ID}/reactions/plus`, {
+      method: "DELETE",
+      email: MODERATOR,
+    }), 401, "credential_invalid");
+
+    const unknown = await react(ada.credential, MISSING_ID, "nope", "unknown-type");
+    expectLimits((await expectError(unknown, 400, "malformed")).limits, { threads: 1, replies: 6, mutations: 20 });
+    await expectError(await call(`/v1/posts/${MISSING_ID}/reactions/plus`, {
+      method: "PUT",
+      bearer: ada.credential,
+    }), 400, "malformed");
+    await expectError(await call(`/v1/posts/${MISSING_ID}/reactions/plus`, {
+      method: "PUT",
+      bearer: ada.credential,
+      headers: { "idempotency-key": "x".repeat(129) },
+    }), 400, "malformed");
+    const missingPost = await call(`/v1/posts/not-a-uuid/reactions/plus`, {
+      method: "PUT",
+      bearer: ada.credential,
+      headers: { "idempotency-key": "bad-id" },
+    });
+    expectLimits((await expectError(missingPost, 404, "not_found")).limits, { threads: 1, replies: 6, mutations: 20 });
+    await expectError(await call(`/v1/posts/${MISSING_ID}/reactions/plus`, {
+      method: "DELETE",
+      bearer: ada.credential,
+      body: { extra: true },
+    }), 400, "malformed");
+
+    await env.DB.prepare("UPDATE agents SET state = 'suspended' WHERE id = ?").bind(ada.agentId).run();
+    await expectError(await react(ada.credential, MISSING_ID, "plus", "suspended"), 401, "credential_invalid");
+  });
+});
+
+function react(
+  credential: string,
+  postId: string,
+  type: string,
+  key: string,
+  body?: Record<string, unknown>,
+): Promise<Response> {
+  return call(`/v1/posts/${postId}/reactions/${type}`, {
+    method: "PUT",
+    bearer: credential,
+    headers: { "idempotency-key": key },
+    body,
+  });
+}
+
+function unreact(credential: string, postId: string, type: string): Promise<Response> {
+  return call(`/v1/posts/${postId}/reactions/${type}`, {
+    method: "DELETE",
+    bearer: credential,
+  });
+}
+
+function act(targetId: string, action: string): Promise<Response> {
+  return call("/v1/moderation/actions", {
+    email: MODERATOR,
+    body: { target_type: "post", target_id: targetId, action, reason_code: "rules" },
+  });
+}
+
+async function enroll(name: string): Promise<{ credential: string; agentId: string }> {
+  const response = await call("/v1/agents", {
+    email: OPERATOR,
+    body: { display_name: name, declared_model: "fixture-model" },
+  });
+  const body = await expectSuccess(response, 201);
+  return { credential: String(body.credential), agentId: String(body.agent_id) };
+}
+
+async function replyTo(credential: string, threadId: string, text: string): Promise<string> {
+  const replied = await expectSuccess(await call(`/v1/threads/${threadId}/posts`, {
+    bearer: credential,
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: { text },
+  }), 201);
+  return String(replied.post_id);
+}
+
+async function publishedThread(
+  credential: string,
+  caption: string,
+  approve: boolean,
+): Promise<{ threadId: string; postId: string }> {
+  const assetId = await readyAsset(credential);
+  const opened = await expectSuccess(await call("/v1/threads", {
+    bearer: credential,
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: threadBody(assetId, { caption }),
+  }), 201);
+  const threadId = String(opened.thread_id);
+  const postId = String(opened.post_id);
+  if (approve) await expectSuccess(await act(postId, "approve"));
+  return { threadId, postId };
+}
+
+function threadBody(assetId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    board_id: BOARD_ID,
+    asset_id: assetId,
+    title: "Visible title",
+    caption: "A caption",
+    alt_text: "A square",
+    provenance: { source: "model", model: "fixture-model" },
+    rights_attestation: "I made this.",
+    license: "cc0",
+    ...extra,
+  };
+}
+
+async function readyAsset(credential: string): Promise<string> {
+  const sha256 = await sha256HexBytes(VALID_PNG);
+  const reserved = await expectSuccess(await call("/v1/uploads", {
+    bearer: credential,
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: { content_type: "image/png", byte_size: VALID_PNG.byteLength, sha256 },
+  }), 201);
+  const assetId = String(reserved.asset_id);
+  await expectSuccess(await call(`/v1/uploads/${assetId}/content`, {
+    method: "PUT",
+    raw: VALID_PNG,
+    headers: { "idempotency-key": crypto.randomUUID(), "upload-token": String(reserved.upload_token) },
+  }));
+  await expectSuccess(await call(`/v1/uploads/${assetId}/complete`, {
+    method: "POST",
+    bearer: credential,
+    headers: { "idempotency-key": crypto.randomUUID() },
+  }), 202);
+  await settle(assetId);
+  return assetId;
+}
+
+async function settle(assetId: string): Promise<void> {
+  const ctx = createExecutionContext();
+  const batch = createMessageBatch("asset-upload", [{
+    id: `msg-${assetId}`,
+    timestamp: new Date(),
+    attempts: 1,
+    body: { asset_id: assetId },
+  }]);
+  if (!worker.queue) throw new Error("queue handler missing");
+  await worker.queue(batch, scriptedEnv(), ctx);
+  await getQueueResult(batch, ctx);
+}
+
+function scriptedEnv(): Env {
+  const payload = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 1]);
+  const handle = {
+    transform() {
+      return handle;
+    },
+    draw() {
+      return handle;
+    },
+    async output() {
+      return {
+        contentType: () => "image/webp",
+        response: () => new Response(payload),
+        image: () => new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(payload);
+            controller.close();
+          },
+        }),
+      };
+    },
+  };
+  const images = new Proxy(env.IMAGES, {
+    get(target, property, receiver) {
+      if (property === "info") {
+        return async (): Promise<ImageInfoResponse> => ({
+          format: "image/png",
+          fileSize: VALID_PNG.byteLength,
+          width: 1,
+          height: 1,
+        });
+      }
+      if (property === "input") return () => handle;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  return new Proxy(env, {
+    get(target, property) {
+      if (property === "IMAGES") return images;
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as Env;
+}
+
+async function reactionRows(postId: string, type: string, agentId?: string): Promise<number> {
+  const row = agentId === undefined
+    ? await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM reactions WHERE post_id = ? AND type = ?",
+    ).bind(postId, type).first<{ n: number }>()
+    : await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM reactions WHERE post_id = ? AND type = ? AND actor_agent_id = ?",
+    ).bind(postId, type, agentId).first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
+
+async function idempotencyRows(key: string): Promise<number> {
+  const row = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM idempotency_keys WHERE idempotency_key = ?",
+  ).bind(key).first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
+
+async function sha256HexBytes(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function expectLimits(
+  value: unknown,
+  remaining: { threads: number; replies: number; mutations: number },
+): void {
+  const limits = value as {
+    threads: { remaining: number; reset_at: string };
+    replies: { remaining: number; reset_at: string };
+    mutations: { remaining: number; reset_at: string };
+  };
+  expect(limits.threads.remaining).toBe(remaining.threads);
+  expect(limits.replies.remaining).toBe(remaining.replies);
+  expect(limits.mutations.remaining).toBe(remaining.mutations);
+  expect(limits.threads.reset_at).toMatch(TIMESTAMP);
+  expect(limits.replies.reset_at).toBe(limits.threads.reset_at);
+  expect(limits.mutations.reset_at).toMatch(TIMESTAMP);
+  expect(limits.mutations.reset_at.endsWith("T00:00:00Z")).toBe(true);
+}
+
+async function expectError(
+  response: Response,
+  status: number,
+  code: string,
+): Promise<{ limits?: unknown }> {
+  const body = await response.json() as { error?: { code?: string }; limits?: unknown };
+  expect(response.status, JSON.stringify(body)).toBe(status);
+  expect(body.error?.code).toBe(code);
+  return body;
+}
+
+async function expectSuccess(response: Response, status = 200): Promise<Record<string, unknown>> {
+  const body = await response.json() as Record<string, unknown>;
+  expect(response.status, JSON.stringify(body)).toBe(status);
+  return body;
+}

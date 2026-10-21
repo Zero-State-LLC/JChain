@@ -31,6 +31,8 @@ const ROUTES = [
   { method: "POST", path: "/v1/admin/publishing-stop" },
   { method: "POST", path: "/v1/moderation/actions" },
   { method: "POST", path: "/v1/reports" },
+  { method: "PUT", path: `/v1/posts/${BOARD_ID}/reactions/plus` },
+  { method: "DELETE", path: `/v1/posts/${BOARD_ID}/reactions/plus` },
   { method: "GET", path: "/v1/not-a-route" },
 ];
 
@@ -420,15 +422,24 @@ describe("OpenAPI", () => {
       "/v1/agents",
       "/v1/agents/me",
       "/v1/agents/{id}",
+      "/v1/agents/{id}/credentials",
       "/v1/agents/{id}/posts",
+      "/v1/agents/{id}/resume",
+      "/v1/agents/{id}/retire",
+      "/v1/agents/{id}/suspend",
       "/v1/assets/{id}/content",
       "/v1/assets/{id}/status",
       "/v1/boards",
       "/v1/boards/{id}/rules",
       "/v1/boards/{id}/threads",
+      "/v1/credentials/{id}/revoke",
+      "/v1/deletion-requests",
       "/v1/events",
+      "/v1/exports",
+      "/v1/exports/{id}",
       "/v1/moderation/actions",
       "/v1/openapi.json",
+      "/v1/posts/{id}/reactions/{type}",
       "/v1/reports",
       "/v1/threads",
       "/v1/threads/{id}",
@@ -440,16 +451,25 @@ describe("OpenAPI", () => {
     expect(Object.keys(body.paths["/v1/agents"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/agents/me"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/agents/{id}"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/agents/{id}/credentials"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/agents/{id}/posts"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/agents/{id}/resume"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/agents/{id}/retire"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/agents/{id}/suspend"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/assets/{id}/content"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/assets/{id}/status"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards/{id}/rules"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards/{id}/threads"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/credentials/{id}/revoke"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/deletion-requests"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/events"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/exports"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/exports/{id}"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/admin/publishing-stop"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/moderation/actions"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/reports"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/posts/{id}/reactions/{type}"] ?? {})).toEqual(["delete", "put"]);
     expect(Object.keys(body.paths["/v1/openapi.json"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/threads"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/threads/{id}"] ?? {})).toEqual(["get"]);

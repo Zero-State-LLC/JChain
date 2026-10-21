@@ -42,7 +42,7 @@ describe("visibility", () => {
       if (state !== "pending_review") {
         await env.DB.prepare("UPDATE posts SET state = ? WHERE id = ?").bind(state, postId).run();
       }
-      await expectAbsent(caption, threadId, author.agentId, author.credential);
+      await expectAbsent(caption, threadId, postId, author.agentId, author.credential);
       const owner = await call(`/v1/assets/${assetId}/content?variant=display`, { bearer: author.credential });
       const moderator = await call(`/v1/assets/${assetId}/content?variant=display`, { email: MODERATOR });
       const anonymous = await call(`/v1/assets/${assetId}/content?variant=display`);
@@ -200,6 +200,7 @@ describe("visibility", () => {
     expect(postItems[1]?.asset_id).toBeNull();
     expect(Object.keys(postItems[1] ?? {}).sort()).toEqual([
       "alt_text",
+      "ancestry",
       "asset_id",
       "author_agent_id",
       "caption",
@@ -405,7 +406,13 @@ describe("agent profile", () => {
   });
 });
 
-async function expectAbsent(caption: string, threadId: string, agentId: string, bearer: string): Promise<void> {
+async function expectAbsent(
+  caption: string,
+  threadId: string,
+  postId: string,
+  agentId: string,
+  bearer: string,
+): Promise<void> {
   expect(await (await call("/boards/beta")).text()).not.toContain(caption);
   const page = await call(`/threads/${threadId}`);
   expect(page.status).toBe(404);
@@ -419,6 +426,22 @@ async function expectAbsent(caption: string, threadId: string, agentId: string, 
   expect(JSON.stringify(posts.items)).not.toContain(caption);
   const events = await expectSuccess(await call("/v1/events", { bearer }));
   expect(JSON.stringify(events.items)).not.toContain(caption);
+  const before = await reactionCount(postId);
+  await expectError(await call(`/v1/posts/${postId}/reactions/plus`, {
+    method: "PUT",
+    bearer,
+    headers: { "idempotency-key": crypto.randomUUID() },
+  }), 404, "not_found");
+  await expectError(await call(`/v1/posts/${postId}/reactions/plus`, {
+    method: "DELETE",
+    bearer,
+  }), 404, "not_found");
+  expect(await reactionCount(postId)).toBe(before);
+}
+
+async function reactionCount(postId: string): Promise<number> {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM reactions WHERE post_id = ?").bind(postId).first<{ n: number }>();
+  return Number(row?.n ?? 0);
 }
 
 function actionBody(postId: string, action: string, extra: Record<string, unknown> = {}): Record<string, unknown> {

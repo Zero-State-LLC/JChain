@@ -15,6 +15,7 @@ export const ERRORS = {
   processing_unavailable: { status: 503, message: "The upload could not be queued." },
   rate_limited: { status: 429, message: "A quota or hard cap refused the work." },
   cursor_expired: { status: 410, message: "The cursor is older than the retained window." },
+  training_export_blocked: { status: 403, message: "Export purpose is training while the policy switch is off." },
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

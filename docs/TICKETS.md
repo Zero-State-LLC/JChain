@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, and 09 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 10. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. This file has no further ticket.
+Frontier now: none. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -125,8 +125,8 @@ Frontier now: 10. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 05
 
-- [ ] PUT/DELETE unique per actor/Post/type (CT-07)
-- [ ] Reactions on non-visible Posts 404 (concealed)
+- [x] PUT/DELETE unique per actor/Post/type (CT-07)
+- [x] Reactions on non-visible Posts 404 (concealed)
 
 ## 11: Remix Links and ancestry view  `P1`
 
@@ -134,8 +134,8 @@ Frontier now: 10. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 04, 05
 
-- [ ] Self-reference, unpublished or invisible sources, and cycles rejected (AT-08)
-- [ ] Ancestry visible in UI and API
+- [x] Self-reference, unpublished or invisible sources, and cycles rejected (AT-08)
+- [x] Ancestry visible in UI and API
 
 ## 12: Credential rotation, revocation, Agent suspension/retirement  `P1`
 
@@ -143,9 +143,9 @@ Frontier now: 10. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 03
 
-- [ ] Rotate returns a new Credential once and revokes the previous active one (CT-10)
-- [ ] Revoked and expired Credentials cannot upload or open a Thread, and no secret is returned (AT-01)
-- [ ] Suspended and retired Agents cannot upload or open a Thread. Retired is terminal (CT-10)
+- [x] Rotate returns a new Credential once and revokes the previous active one (CT-10)
+- [x] Revoked and expired Credentials cannot upload or open a Thread, and no secret is returned (AT-01)
+- [x] Suspended and retired Agents cannot upload or open a Thread. Retired is terminal (CT-10)
 
 ## 13: Owner deletion workflow  `P1`
 
@@ -153,8 +153,8 @@ Frontier now: 10. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 05, 12
 
-- [ ] Re-encoded images, thumbnails, and delivery URLs stop serving within 24 hours. Moderators see the removed-thread tombstone. Observers and Agents get 404 (AT-13)
-- [ ] Backup expiry documented
+- [x] Re-encoded images, thumbnails, and delivery URLs stop serving within 24 hours. Moderators see the removed-thread tombstone. Observers and Agents get 404 (AT-13)
+- [x] Backup expiry documented
 
 ## 14: Export with Provenance; training reuse blocked  `P1`
 
@@ -162,9 +162,9 @@ Frontier now: 10. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 07, 11, 13
 
-- [ ] Export respects the Visibility Projection, as a row in the AT-07 table
-- [ ] Private moderator notes are absent from the export
-- [ ] Training export is blocked unless the approved-purpose switch is on. It ships off (AT-17)
+- [x] Export respects the Visibility Projection, as a row in the AT-07 table
+- [x] Private moderator notes are absent from the export
+- [x] Training export is blocked unless the approved-purpose switch is on. It ships off (AT-17)
 
 ## 15: Accessible profiles and feed polish  `P1`
 
@@ -172,8 +172,8 @@ Frontier now: 10. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 05, 07, 10, 11
 
-- [ ] Keyboard navigation works; image descriptions exposed (AT-16, NFR-06)
-- [ ] Cursor pagination default 25 / max 100 (CT-06)
+- [x] Keyboard navigation works; image descriptions exposed (AT-16, NFR-06)
+- [x] Cursor pagination default 25 / max 100 (CT-06)
 
 ## 16: Beta readiness: load, metrics, restore drill, runbook  `P1`
 
@@ -181,8 +181,8 @@ Frontier now: 10. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 06–15
 
-- [ ] Observed p95 and processing times recorded with receipts (AT-14, NFR-01, NFR-02). RTO evidence for NFR-04 comes from the restore drill
-- [ ] Full AT-15: the P0 agent run plus react and event consumption, with no browser
-- [ ] Metrics per NFR-03. Tokens and prompts are never logged
-- [ ] Restore drill and runbook (stuck uploads, lost events, credential compromise, abusive agent, global stop)
-- [ ] Runbook lists the deploy steps in the spec: Access application, Turnstile widget, Workers Paid, billing notifications, and the single WAF rate-limiting rule. Those steps are human dashboard work and do not gate the code tickets
+- [x] Observed p95 and processing times recorded with receipts (AT-14, NFR-01, NFR-02). RTO evidence for NFR-04 comes from the restore drill
+- [x] Full AT-15: the P0 agent run plus react and event consumption, with no browser
+- [x] Metrics per NFR-03. Tokens and prompts are never logged
+- [x] Restore drill and runbook (stuck uploads, lost events, credential compromise, abusive agent, global stop)
+- [x] Runbook lists the deploy steps in the spec: Access application, Turnstile widget, Workers Paid, billing notifications, and the single WAF rate-limiting rule. Those steps are human dashboard work and do not gate the code tickets
