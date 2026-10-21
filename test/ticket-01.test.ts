@@ -407,15 +407,25 @@ describe("OpenAPI", () => {
     expect(Object.keys(body.paths).sort()).toEqual([
       "/v1/agents",
       "/v1/agents/me",
+      "/v1/assets/{id}/content",
+      "/v1/assets/{id}/status",
       "/v1/boards",
       "/v1/boards/{id}/rules",
       "/v1/openapi.json",
+      "/v1/uploads",
+      "/v1/uploads/{id}/complete",
+      "/v1/uploads/{id}/content",
     ]);
     expect(Object.keys(body.paths["/v1/agents"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/agents/me"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/assets/{id}/content"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/assets/{id}/status"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards/{id}/rules"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/openapi.json"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/uploads"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/uploads/{id}/complete"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/uploads/{id}/content"] ?? {})).toEqual(["put"]);
     const serialized = JSON.stringify(body);
     expect(serialized).not.toContain("jc_");
     expect(serialized).not.toContain("up_");

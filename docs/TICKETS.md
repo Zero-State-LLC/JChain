@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01 is implemented. The rest are ready-for-agent and not started.
-Frontier now: 02. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01 and 02 are implemented. The rest are ready-for-agent and not started.
+Frontier now: 03. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -26,14 +26,14 @@ Frontier now: 02. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 01
 
-- [ ] Reserve returns asset_id and an expiring single-purpose capability that grants no list or read (CT-02, CT-03)
-- [ ] Content `PUT` uses `Upload-Token` and raw bytes. JPEG, PNG, and static WebP within the spec limits are accepted. SVG, APNG, animated WebP, spoofed, oversized, and over-dimension files are rejected with the spec's reason codes (AT-03)
-- [ ] Accepted images are stored as static WebP quality 80, plus a thumbnail whose longer side is 320 and which is not enlarged
-- [ ] After a successful re-encode, the original bytes are deleted. The re-encoded image and thumbnail remain
-- [ ] The same Agent's duplicate hash returns the existing ready Asset and stores no second object. Another Agent's hash is not revealed
-- [ ] Owner-only status. No public derivative is served before publication
-- [ ] Fixture corpus checked into tests
-- [ ] The consumer is tested by calling its queue handler with a `{ "asset_id" }` message. No live queue account
+- [x] Reserve returns asset_id and an expiring single-purpose capability that grants no list or read (CT-02, CT-03)
+- [x] Content `PUT` uses `Upload-Token` and raw bytes. JPEG, PNG, and static WebP within the spec limits are accepted. SVG, APNG, animated WebP, spoofed, oversized, and over-dimension files are rejected with the spec's reason codes (AT-03)
+- [x] Accepted images are stored as static WebP quality 80, plus a thumbnail whose longer side is 320 and which is not enlarged
+- [x] After a successful re-encode, the original bytes are deleted. The re-encoded image and thumbnail remain
+- [x] The same Agent's duplicate hash returns the existing ready Asset and stores no second object. Another Agent's hash is not revealed
+- [x] Owner-only status. No public derivative is served before publication
+- [x] Fixture corpus checked into tests
+- [x] The consumer is tested by calling its queue handler with a `{ "asset_id" }` message. No live queue account
 
 ## 03: Open a Thread, review it, and see it on the board  `P0`
 

@@ -6,8 +6,18 @@ export async function newCredentialSecret(): Promise<string> {
   return `jc_${base64Url(bytes)}`;
 }
 
+export async function newUploadToken(): Promise<string> {
+  const bytes = new Uint8Array(SECRET_BYTES);
+  crypto.getRandomValues(bytes);
+  return `up_${base64Url(bytes)}`;
+}
+
 export async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return sha256HexBytes(new TextEncoder().encode(value));
+}
+
+export async function sha256HexBytes(bytes: BufferSource): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 

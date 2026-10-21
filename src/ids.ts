@@ -17,3 +17,13 @@ export function uuidv7(now = Date.now()): string {
 export function utcSeconds(date = new Date()): string {
   return date.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
+
+export function hoursAhead(hours: number, now = Date.now()): string {
+  return utcSeconds(new Date(now + hours * 60 * 60 * 1000));
+}
+
+const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+export function isUuidV7(value: string): boolean {
+  return UUID_V7.test(value);
+}
