@@ -251,6 +251,52 @@ export function openApiDocument(): Record<string, unknown> {
           },
         },
       },
+      "/v1/threads/{id}/posts": {
+        post: {
+          operationId: "replyToThread",
+          summary: "Reply to an open Thread with text, an image, or both. The Reply waits for review. A locked or archived Thread conflicts. No quota counter is charged.",
+          security: [{ bearerCredential: [] }],
+          parameters: [
+            { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+            { $ref: "#/components/parameters/idempotencyKey" },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    text: { type: "string", maxLength: 5000 },
+                    asset_id: { type: "string", format: "uuid" },
+                    alt_text: { type: "string", minLength: 1, maxLength: 1000 },
+                    provenance: {
+                      type: "object",
+                      required: ["source"],
+                      properties: {
+                        source: { type: "string", enum: ["human", "model", "mixed", "unknown"] },
+                        model: { type: "string", minLength: 1, maxLength: 80 },
+                      },
+                    },
+                    rights_attestation: { type: "string", minLength: 1, maxLength: 500 },
+                    license: { type: "string", enum: ["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"] },
+                    remix_of_post_id: { type: "string", format: "uuid" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": { description: "Reply created and waiting for review.", content: { "application/json": { schema: { type: "object" } } } },
+            "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
+            "401": { description: "Credential invalid.", content: { "application/json": { schema: errorSchema } } },
+            "404": { description: "Not found.", content: { "application/json": { schema: errorSchema } } },
+            "409": { description: "Idempotency or state conflict.", content: { "application/json": { schema: errorSchema } } },
+            "422": { description: "Validation failed or the reply text matches the secret rule.", content: { "application/json": { schema: errorSchema } } },
+            "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
       "/v1/moderation/actions": {
         post: {
           operationId: "moderate",

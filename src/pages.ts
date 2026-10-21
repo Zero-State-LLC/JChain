@@ -16,10 +16,10 @@ type FeedRow = {
 
 type ThreadRow = FeedRow & {
   caption: string;
-  provenance_source: string;
+  provenance_source: string | null;
   provenance_model: string | null;
-  rights_attestation: string;
-  license: string;
+  rights_attestation: string | null;
+  license: string | null;
   remix_of_post_id: string | null;
 };
 
@@ -51,7 +51,7 @@ async function feed(c: PageCtx): Promise<Response> {
     `SELECT threads.id AS thread_id, posts.title AS title, posts.alt_text AS alt_text, posts.asset_id AS asset_id
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
-      WHERE threads.board_id = ? AND posts.state = 'published'
+      WHERE threads.board_id = ? AND posts.state = 'published' AND posts.title IS NOT NULL
       ORDER BY posts.created_at DESC, posts.id DESC
       LIMIT 25`,
   ).bind(board.id).all<FeedRow>();
@@ -69,7 +69,7 @@ async function threadPage(c: PageCtx): Promise<Response> {
   if (threadId === undefined || !isUuidV7(threadId)) {
     return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
   }
-  const row = await c.env.DB.prepare(
+  const listed = await c.env.DB.prepare(
     `SELECT threads.id AS thread_id, posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
             posts.asset_id AS asset_id, posts.provenance_source AS provenance_source,
             posts.provenance_model AS provenance_model, posts.rights_attestation AS rights_attestation,
@@ -77,31 +77,60 @@ async function threadPage(c: PageCtx): Promise<Response> {
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
       WHERE threads.id = ? AND posts.state = 'published'
-      ORDER BY posts.created_at ASC, posts.id ASC
-      LIMIT 1`,
-  ).bind(threadId).first<ThreadRow>();
-  if (!row) return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
-  const title = row.title ?? "";
-  const model = row.provenance_model === null
-    ? ""
-    : `<dt>Model</dt><dd>${escapeHtml(row.provenance_model)}</dd>`;
-  const remix = row.remix_of_post_id === null
-    ? ""
-    : `<p>Remix of <code>${escapeHtml(row.remix_of_post_id)}</code></p>`;
+      ORDER BY posts.created_at ASC, posts.id ASC`,
+  ).bind(threadId).all<ThreadRow>();
+  const rows = listed.results ?? [];
+  if (rows.length === 0) return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
+  const titled = rows.find((row) => row.title !== null);
+  const title = titled?.title ?? "Thread";
   const body = [
     `<p><a href="/boards/beta">Board</a></p>`,
     `<h1>${escapeHtml(title)}</h1>`,
+    ...rows.map((row) => row.title === null ? replyBlock(row) : openingBlock(row)),
+  ].join("");
+  return htmlResponse(requestId, document(title, body));
+}
+
+function openingBlock(row: ThreadRow): string {
+  return [
     imageTag(row.asset_id, row.alt_text, "display"),
     `<p>${escapeHtml(row.caption)}</p>`,
+    declarationList(row),
+    remixLine(row),
+  ].join("");
+}
+
+function replyBlock(row: ThreadRow): string {
+  const image = row.asset_id === null ? "" : imageTag(row.asset_id, row.alt_text, "display");
+  return [
+    "<article>",
+    "<h2>Reply</h2>",
+    image,
+    `<p>${escapeHtml(row.caption)}</p>`,
+    declarationList(row),
+    remixLine(row),
+    "</article>",
+  ].join("");
+}
+
+function declarationList(row: ThreadRow): string {
+  if (row.provenance_source === null) return "";
+  const model = row.provenance_model === null
+    ? ""
+    : `<dt>Model</dt><dd>${escapeHtml(row.provenance_model)}</dd>`;
+  return [
     "<dl>",
     `<dt>Source</dt><dd>${escapeHtml(row.provenance_source)}</dd>`,
     model,
-    `<dt>Rights</dt><dd>${escapeHtml(row.rights_attestation)}</dd>`,
-    `<dt>License</dt><dd>${escapeHtml(row.license)}</dd>`,
+    `<dt>Rights</dt><dd>${escapeHtml(row.rights_attestation ?? "")}</dd>`,
+    `<dt>License</dt><dd>${escapeHtml(row.license ?? "")}</dd>`,
     "</dl>",
-    remix,
   ].join("");
-  return htmlResponse(requestId, document(title || "Thread", body));
+}
+
+function remixLine(row: ThreadRow): string {
+  if (row.remix_of_post_id === null) return "";
+  return `<p>Remix of <code>${escapeHtml(row.remix_of_post_id)}</code></p>`;
 }
 
 async function queuePage(c: PageCtx): Promise<Response> {
@@ -131,12 +160,12 @@ function feedItem(item: FeedRow): string {
 }
 
 function queueItem(item: QueueRow): string {
-  const title = item.title ?? "";
+  const title = item.title === null || item.title === "" ? "Reply" : item.title;
   return [
     "<article>",
     `<h2>${escapeHtml(title)}</h2>`,
     `<p>${escapeHtml(item.caption)}</p>`,
-    imageTag(item.asset_id, item.alt_text, "thumb"),
+    item.asset_id === null ? "" : imageTag(item.asset_id, item.alt_text, "thumb"),
     `<form method="post" action="/v1/moderation/actions">`,
     `<input type="hidden" name="target_type" value="post">`,
     `<input type="hidden" name="target_id" value="${escapeHtml(item.post_id)}">`,

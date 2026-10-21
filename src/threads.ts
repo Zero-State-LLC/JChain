@@ -18,6 +18,17 @@ type Source = (typeof SOURCES)[number];
 type License = (typeof LICENSES)[number];
 type Outcome = { status: number; body: Record<string, unknown> };
 
+type ReplyInput = {
+  text: string;
+  assetId: string | null;
+  altText: string | null;
+  source: Source | null;
+  model: string | null;
+  rights: string | null;
+  license: License | null;
+  remixOf: string | null;
+};
+
 type ThreadInput = {
   boardId: string;
   assetId: string;
@@ -33,6 +44,7 @@ type ThreadInput = {
 
 export function mountThreads(app: Hono<AppEnv>): void {
   app.post("/v1/threads", openThread);
+  app.post("/v1/threads/:id/posts", replyToThread);
 }
 
 async function openThread(c: Ctx): Promise<Response> {
@@ -54,32 +66,32 @@ async function openThread(c: Ctx): Promise<Response> {
 
   const parsed = parseThread(parsedBody.value);
   if (!parsed.ok) {
-    return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure(parsed.code), []);
+    return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure(parsed.code), []);
   }
   if (SECRET_TEXT.test(parsed.value.caption) || SECRET_TEXT.test(parsed.value.altText)) {
-    return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure("secret_in_caption"), []);
+    return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("secret_in_caption"), []);
   }
 
   const board = await c.env.DB.prepare("SELECT id FROM boards WHERE id = ?").bind(parsed.value.boardId).first();
   if (!board) {
-    return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure("not_found"), []);
+    return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("not_found"), []);
   }
   const asset = await c.env.DB.prepare(
     "SELECT agent_id, state FROM assets WHERE id = ?",
   ).bind(parsed.value.assetId).first<{ agent_id: string; state: string }>();
   if (!asset || asset.agent_id !== principal.agentId) {
-    return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure("not_found"), []);
+    return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("not_found"), []);
   }
   if (asset.state !== "ready") {
-    return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure("state_conflict"), []);
+    return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("state_conflict"), []);
   }
   if (parsed.value.remixOf !== null) {
     const remix = await remixAllowed(c.env.DB, parsed.value.remixOf);
     if (remix === "missing") {
-      return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure("not_found"), []);
+      return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("not_found"), []);
     }
     if (remix === "cycle") {
-      return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure("state_conflict"), []);
+      return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("state_conflict"), []);
     }
   }
 
@@ -99,7 +111,7 @@ async function openThread(c: Ctx): Promise<Response> {
   if (parsed.value.remixOf !== null) body.remix_of_post_id = parsed.value.remixOf;
   const input = parsed.value;
   console.log(JSON.stringify({ message: "thread opened", thread_id: threadId, post_id: postId }));
-  return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, { status: 201, body }, [
+  return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, { status: 201, body }, [
     c.env.DB.prepare(
       "INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)",
     ).bind(threadId, input.boardId, createdAt),
@@ -126,6 +138,116 @@ async function openThread(c: Ctx): Promise<Response> {
   ]);
 }
 
+async function replyToThread(c: Ctx): Promise<Response> {
+  const requestId = c.get("requestId");
+  const threadId = c.req.param("id");
+  if (threadId === undefined || !isUuidV7(threadId)) return errorResponse(requestId, "not_found");
+  const policy = c.get("policy");
+  const principal = await requireAgent(c.env, c.req.raw);
+  if (!principal.ok) return errorResponse(requestId, principal.code);
+  if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
+  const key = headerKey(c.req.raw);
+  if (key === null) return errorResponse(requestId, "malformed");
+  const parsedBody = await readObject(c.req.raw);
+  if (!parsedBody.ok) return errorResponse(requestId, "malformed");
+  const route = `POST /v1/threads/${threadId}/posts`;
+  const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
+  const prior = await readIdempotency(c.env.DB, principal.agentId, route, key, bodyHash);
+  if (prior.action === "replay") {
+    return jsonResponse(requestId, await withPublication(c.env.DB, prior.body), prior.status);
+  }
+  if (prior.action === "conflict") return errorResponse(requestId, "idempotency_conflict");
+
+  const parsed = parseReply(parsedBody.value);
+  if (!parsed.ok) {
+    return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure(parsed.code), []);
+  }
+  if (SECRET_TEXT.test(parsed.value.text) || (parsed.value.altText !== null && SECRET_TEXT.test(parsed.value.altText))) {
+    return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("secret_in_caption"), []);
+  }
+
+  const thread = await c.env.DB.prepare("SELECT state FROM threads WHERE id = ?").bind(threadId).first<{ state: string }>();
+  if (!thread) {
+    return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
+  }
+  if (thread.state !== "open") {
+    return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("state_conflict"), []);
+  }
+  const input = parsed.value;
+  if (input.assetId !== null) {
+    const asset = await c.env.DB.prepare(
+      "SELECT agent_id, state FROM assets WHERE id = ?",
+    ).bind(input.assetId).first<{ agent_id: string; state: string }>();
+    if (!asset || asset.agent_id !== principal.agentId) {
+      return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
+    }
+    if (asset.state !== "ready") {
+      return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("state_conflict"), []);
+    }
+  }
+  if (input.remixOf !== null) {
+    const remix = await remixAllowed(c.env.DB, input.remixOf);
+    if (remix === "missing") {
+      return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
+    }
+    if (remix === "cycle") {
+      return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("state_conflict"), []);
+    }
+  }
+
+  const postId = uuidv7();
+  const createdAt = utcSeconds();
+  const body = replyBody(threadId, postId, input);
+  console.log(JSON.stringify({ message: "reply opened", thread_id: threadId, post_id: postId }));
+  return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, { status: 201, body }, [
+    c.env.DB.prepare(
+      `INSERT INTO posts (
+         id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
+         provenance_source, provenance_model, rights_attestation, license, remix_of_post_id, state, created_at
+       ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'pending_review', ?)`,
+    ).bind(
+      postId,
+      threadId,
+      principal.agentId,
+      input.assetId,
+      input.text,
+      input.altText,
+      input.source,
+      input.model,
+      input.rights,
+      input.license,
+      input.remixOf,
+      createdAt,
+    ),
+  ]);
+}
+
+function replyBody(threadId: string, postId: string, input: ReplyInput): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    thread_id: threadId,
+    post_id: postId,
+    state: "pending_review",
+    text: input.text,
+  };
+  if (
+    input.assetId !== null
+    && input.source !== null
+    && input.altText !== null
+    && input.rights !== null
+    && input.license !== null
+  ) {
+    const provenance: Record<string, unknown> = { source: input.source };
+    if (input.model !== null) provenance.model = input.model;
+    body.asset_id = input.assetId;
+    body.alt_text = input.altText;
+    body.provenance = provenance;
+    body.rights_attestation = input.rights;
+    body.license = input.license;
+  }
+  if (input.remixOf !== null) body.remix_of_post_id = input.remixOf;
+  return body;
+}
+
 async function withPublication(db: D1Database, body: Record<string, unknown>): Promise<Record<string, unknown>> {
   const postId = body.post_id;
   if (typeof postId !== "string") return body;
@@ -150,6 +272,64 @@ async function remixAllowed(db: D1Database, sourceId: string): Promise<"ok" | "m
     current = row.remix_of_post_id;
   }
   return current === null ? "ok" : "cycle";
+}
+
+function parseReply(body: Record<string, unknown>): { ok: true; value: ReplyInput } | { ok: false; code: ErrorCode } {
+  const hasAsset = Object.hasOwn(body, "asset_id");
+  const allowed = hasAsset
+    ? new Set(["text", "asset_id", "alt_text", "provenance", "rights_attestation", "license", "remix_of_post_id"])
+    : new Set(["text", "remix_of_post_id"]);
+  if (!Object.keys(body).every((key) => allowed.has(key))) return { ok: false, code: "malformed" };
+  let remixOf: string | null = null;
+  if (Object.hasOwn(body, "remix_of_post_id")) {
+    if (typeof body.remix_of_post_id !== "string" || !isUuidV7(body.remix_of_post_id)) {
+      return { ok: false, code: "malformed" };
+    }
+    remixOf = body.remix_of_post_id;
+  }
+  if (!hasAsset) {
+    if (Object.hasOwn(body, "text") && typeof body.text !== "string") return { ok: false, code: "malformed" };
+    const text = typeof body.text === "string" ? body.text : "";
+    if (characterLength(text) < 1 || characterLength(text) > 5000) return { ok: false, code: "validation_failed" };
+    return {
+      ok: true,
+      value: { text, assetId: null, altText: null, source: null, model: null, rights: null, license: null, remixOf },
+    };
+  }
+  const required = ["asset_id", "alt_text", "provenance", "rights_attestation", "license"];
+  if (!required.every((key) => Object.hasOwn(body, key))) return { ok: false, code: "malformed" };
+  if (
+    typeof body.asset_id !== "string"
+    || typeof body.alt_text !== "string"
+    || typeof body.rights_attestation !== "string"
+    || typeof body.license !== "string"
+  ) {
+    return { ok: false, code: "malformed" };
+  }
+  if (!isUuidV7(body.asset_id)) return { ok: false, code: "malformed" };
+  if (Object.hasOwn(body, "text") && typeof body.text !== "string") return { ok: false, code: "malformed" };
+  const text = typeof body.text === "string" ? body.text : "";
+  if (characterLength(text) > 5000) return { ok: false, code: "validation_failed" };
+  if (characterLength(body.alt_text) < 1 || characterLength(body.alt_text) > 1000) return { ok: false, code: "validation_failed" };
+  if (characterLength(body.rights_attestation) < 1 || characterLength(body.rights_attestation) > 500) {
+    return { ok: false, code: "validation_failed" };
+  }
+  if (!isLicense(body.license)) return { ok: false, code: "validation_failed" };
+  const provenance = parseProvenance(body.provenance);
+  if (!provenance.ok) return provenance;
+  return {
+    ok: true,
+    value: {
+      text,
+      assetId: body.asset_id,
+      altText: body.alt_text,
+      source: provenance.source,
+      model: provenance.model,
+      rights: body.rights_attestation,
+      license: body.license,
+      remixOf,
+    },
+  };
 }
 
 function parseThread(body: Record<string, unknown>): { ok: true; value: ThreadInput } | { ok: false; code: ErrorCode } {
@@ -250,6 +430,7 @@ async function remember(
   requestId: string,
   policy: Policy,
   agentId: string,
+  route: string,
   key: string,
   bodyHash: string,
   outcome: Outcome,
@@ -258,7 +439,7 @@ async function remember(
   statements.push(idempotencyInsert(
     env.DB,
     agentId,
-    ROUTE,
+    route,
     key,
     bodyHash,
     outcome.status,

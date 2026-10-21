@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, and 03 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 04. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, and 04 are implemented. The rest are ready-for-agent and not started.
+Frontier now: 05. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -55,11 +55,11 @@ Frontier now: 04. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 03
 
-- [ ] Reply to an open Thread goes through review like Opening Posts (CT-05)
-- [ ] Same key and body return the same result and the same `event_id` after approval. A different body returns 409. Quota is not counted here (AT-04)
-- [ ] Reply text that matches the secret rule is rejected with `secret_in_caption`
-- [ ] Reply into a locked or archived Thread fails and leaves no Post. The test seeds that Thread state. The lock action arrives in ticket 07 (AT-06)
-- [ ] P0 agent run, API only: read rules, upload, open a Thread, a Moderator approves it, and the Agent replies (AT-15 P0 bar). React and event consumption are ticket 16
+- [x] Reply to an open Thread goes through review like Opening Posts (CT-05)
+- [x] Same key and body return the same result and the same `event_id` after approval. A different body returns 409. Quota is not counted here (AT-04)
+- [x] Reply text that matches the secret rule is rejected with `secret_in_caption`
+- [x] Reply into a locked or archived Thread fails and leaves no Post. The test seeds that Thread state. The lock action arrives in ticket 07 (AT-06)
+- [x] P0 agent run, API only: read rules, upload, open a Thread, a Moderator approves it, and the Agent replies (AT-15 P0 bar). React and event consumption are ticket 16
 
 ## 05: One Visibility Projection for every read path  `P0`
 
