@@ -31,28 +31,61 @@ type AppEnv = { Bindings: Env; Variables: Vars };
 
 const app = new Hono<AppEnv>();
 
+function logRequest(
+  method: string,
+  path: string,
+  started: number,
+  requestId: string,
+  runId: string | undefined,
+  status: number,
+  errorCode: string | undefined,
+): void {
+  const entry: Record<string, string | number> = {
+    message: "request",
+    request_id: requestId,
+    method,
+    path,
+    status,
+    latency_ms: Date.now() - started,
+  };
+  if (runId !== undefined) entry.run_id = runId;
+  if (errorCode !== undefined) entry.error_code = errorCode;
+  console.log(JSON.stringify(entry));
+}
+
+async function loggedErrorCode(response: Response): Promise<string | undefined> {
+  if (response.status < 400) return undefined;
+  const type = response.headers.get("content-type") ?? "";
+  if (!type.includes("json")) return undefined;
+  try {
+    const body = await response.clone().json() as { error?: { code?: unknown } };
+    return typeof body.error?.code === "string" ? body.error.code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 app.use("/v1/*", async (c, next) => {
+  const started = Date.now();
   const requestId = uuidv7();
   c.set("requestId", requestId);
+  const method = c.req.method;
+  const path = new URL(c.req.url).pathname;
   const rawPolicy = c.env.POLICY;
   const policy = parsePolicy(typeof rawPolicy === "string" ? rawPolicy : undefined);
   if (!policy) {
     console.error(JSON.stringify({ message: "policy invalid", request_id: requestId }));
+    logRequest(method, path, started, requestId, undefined, 503, "policy_missing");
     return errorResponse(requestId, "policy_missing");
   }
   c.set("policy", policy);
-  const runId = c.req.header("x-run-id");
-  if (runId !== undefined && !isValidRunId(runId)) return errorResponse(requestId, "malformed");
-  if (runId !== undefined) {
-    console.log(JSON.stringify({
-      message: "request",
-      request_id: requestId,
-      run_id: runId,
-      method: c.req.method,
-      path: c.req.path,
-    }));
+  const runHeader = c.req.header("x-run-id");
+  if (runHeader !== undefined && !isValidRunId(runHeader)) {
+    logRequest(method, path, started, requestId, undefined, 400, "malformed");
+    return errorResponse(requestId, "malformed");
   }
   await next();
+  logRequest(method, path, started, requestId, runHeader, c.res.status, await loggedErrorCode(c.res));
 });
 
 app.post("/v1/agents", async (c) => {
