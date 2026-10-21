@@ -161,7 +161,8 @@ export async function chargeTransformations(
 ): Promise<{ ok: true; refund: (amount: number) => Promise<void> } | { ok: false; retryAfter: number }> {
   const month = monthWindow();
   const key = `transformations:${month.key}`;
-  const result = await env.QUOTA.getByName("global").apply([{
+  const quota = env.QUOTA.getByName("global");
+  const result = await quota.apply([{
     key,
     amount: 2,
     limit: policy.hard_caps.transformations_per_month,
@@ -169,7 +170,7 @@ export async function chargeTransformations(
     counter: "transformations",
   }]);
   if (!result.ok) return { ok: false, retryAfter: result.retry_after };
-  return { ok: true, refund: (amount: number) => env.QUOTA.getByName("global").refund([{ key, amount }]) };
+  return { ok: true, refund: (amount: number) => quota.refund([{ key, amount }]) };
 }
 
 export async function chargeDerivativeBytes(

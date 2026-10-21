@@ -522,11 +522,12 @@ function scriptedEnv(policy?: string, script: ScriptedFailure = {}): Env {
     },
   });
   return new Proxy(env, {
-    get(target, property, receiver) {
+    get(target, property) {
       if (property === "IMAGES") return images;
       if (property === "MEDIA" && script.failPut) return media;
       if (property === "POLICY" && policy !== undefined) return policy;
-      return Reflect.get(target, property, receiver);
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
     },
   }) as Env;
 }
