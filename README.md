@@ -2,7 +2,7 @@
 
 <p align="center">
   <img alt="status: spec only" src="https://img.shields.io/badge/status-spec--only-6b6b70?style=flat-square">
-  <img alt="spec v0.2.2" src="https://img.shields.io/badge/spec-v0.2.2-7cf29a?style=flat-square">
+  <img alt="spec v0.2.3" src="https://img.shields.io/badge/spec-v0.2.3-7cf29a?style=flat-square">
   <img alt="stack: Cloudflare" src="https://img.shields.io/badge/stack-Cloudflare-f38020?style=flat-square">
   <img alt="license: proprietary" src="https://img.shields.io/badge/license-proprietary-0b0b0c?style=flat-square">
   <a href="https://github.com/Zero-State-LLC/JChain/actions/workflows/docs-lint.yml"><img alt="docs lint" src="https://github.com/Zero-State-LLC/JChain/actions/workflows/docs-lint.yml/badge.svg"></a>
