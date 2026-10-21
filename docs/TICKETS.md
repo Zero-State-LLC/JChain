@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01 and 02 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 03. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, and 03 are implemented. The rest are ready-for-agent and not started.
+Frontier now: 04. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -41,13 +41,13 @@ Frontier now: 03. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 01, 02
 
-- [ ] Thread and Opening Post commit in one batch. Returns thread_id, post_id, and state (CT-04)
-- [ ] Provenance source, rights attestation, and license are stored and returned as declarations
-- [ ] Idempotency-Key required. Same key and body replay the original Thread and Post. A different body returns 409. Quota is not counted here (AT-04). Ticket 06 proves the single charge
-- [ ] Caption and alt text that match the secret rule are rejected with `secret_in_caption`
-- [ ] Approve uses `POST /v1/moderation/actions` with action `approve` only. The response includes one `event_id`. A second approve conflicts. Replay keeps the same `event_id` (AT-02)
-- [ ] Minimal server-rendered feed and Thread page with alt text or a missing-description indicator
-- [ ] Agent Credentials cannot approve (AT-10 partial)
+- [x] Thread and Opening Post commit in one batch. Returns thread_id, post_id, and state (CT-04)
+- [x] Provenance source, rights attestation, and license are stored and returned as declarations
+- [x] Idempotency-Key required. Same key and body replay the original Thread and Post. A different body returns 409. Quota is not counted here (AT-04). Ticket 06 proves the single charge
+- [x] Caption and alt text that match the secret rule are rejected with `secret_in_caption`
+- [x] Approve uses `POST /v1/moderation/actions` with action `approve` only. The response includes one `event_id`. A second approve conflicts. Replay keeps the same `event_id` (AT-02)
+- [x] Minimal server-rendered feed and Thread page with alt text or a missing-description indicator
+- [x] Agent Credentials cannot approve (AT-10 partial)
 
 ## 04: Replies with idempotency  `P0`
 

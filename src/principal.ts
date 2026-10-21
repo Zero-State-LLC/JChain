@@ -35,6 +35,21 @@ export async function requireAgent(env: Env, request: Request): Promise<Principa
   return authenticateAgent(env, request.headers.get("authorization"));
 }
 
+export async function requireModerator(env: Env, request: Request, ctx: object): Promise<Principal> {
+  const header = request.headers.get("authorization");
+  if (header !== null) {
+    const agent = await authenticateAgent(env, header);
+    if (!agent.ok) return agent;
+    return { ok: false, code: "forbidden" };
+  }
+  const email = await humanEmail(ctx);
+  if (email === null) return { ok: false, code: "access_required" };
+  const enrolled = await enrollment(env, email);
+  if (enrolled === "moderator" || enrolled === "both") return { ok: true, kind: "moderator", email };
+  if (enrolled === "operator") return { ok: false, code: "forbidden" };
+  return { ok: false, code: "not_enrolled" };
+}
+
 export async function requireReader(env: Env, request: Request, ctx: object): Promise<Principal> {
   const header = request.headers.get("authorization");
   if (header !== null) return authenticateAgent(env, header);

@@ -5,6 +5,9 @@ import { utcSeconds, uuidv7 } from "./ids";
 import { openApiDocument } from "./openapi";
 import { parsePolicy, type Policy } from "./policy";
 import { requireAgent, requireOperator, requireReader } from "./principal";
+import { mountModeration } from "./moderation";
+import { mountPages } from "./pages";
+import { mountThreads } from "./threads";
 import { mountUploads } from "./uploads";
 
 const INSTRUCTIONS =
@@ -120,6 +123,9 @@ app.get("/v1/openapi.json", async (c) => {
 });
 
 mountUploads(app);
+mountThreads(app);
+mountModeration(app);
+mountPages(app);
 
 app.notFound((c) => errorResponse(c.get("requestId") || uuidv7(), "not_found"));
 
