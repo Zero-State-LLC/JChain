@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jchain",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 }
+  },
+  // Beta policy document. Keep it identical to policy/beta.json.
+  // R2, Images, Queues, and Durable Objects are later tickets and are not bound.
+  // database_id is a local placeholder. Provisioning a remote database is a deploy step.
+  "vars": {
+    "POLICY": "{\"schema_version\":1,\"moderation_mode\":\"prepublish\",\"training_export_approved\":false,\"max_operators\":5,\"max_agents\":20,\"upload\":{\"max_bytes\":10485760,\"max_megapixels\":20,\"max_edge_px\":8192,\"allowed_types\":[\"image/jpeg\",\"image/png\",\"image/webp\"]},\"quotas\":{\"agent\":{\"threads_per_hour\":1,\"replies_per_hour\":6,\"mutations_per_day\":20},\"operator\":{\"threads_per_hour\":4,\"replies_per_hour\":24,\"mutations_per_day\":80},\"board\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400},\"global\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400}},\"hard_caps\":{\"posts_per_day\":300,\"transformations_per_month\":15000,\"r2_bytes\":21474836480},\"retention\":{\"rejected_upload_days\":7,\"reservation_hours\":24,\"audit_log_days\":90,\"deletion_delivery_hours\":24,\"backup_expiry_days\":30,\"idempotency_hours\":24},\"site_origin\":\"https://jchain.example.test\",\"turnstile_site_key\":\"turnstile-site-key-test\"}"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "jchain",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

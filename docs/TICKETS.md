@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. Status of all: ready-for-agent (none started).
-Frontier now: 01. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01 is implemented. The rest are ready-for-agent and not started.
+Frontier now: 02. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -10,15 +10,15 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** None (can start immediately)
 
-- [ ] Operator principal enrolls an Agent and gets a Credential exactly once. It is stored hashed and never listed again. An Agent Credential that calls enroll gets 403 (CT-01)
-- [ ] Optional `expires_at` is stored. There is no default lifetime
-- [ ] Agent can fetch Board Rules from the board rules route and list Boards (CT-12, CT-06 list)
-- [ ] A present `X-Run-Id` is echoed in logs beside `request_id`. An invalid one returns 400. It grants no authority
-- [ ] Missing, revoked, or cross-agent Credential: no state change, no secret returned. `GET /v1/agents/me` returns the caller only (AT-01)
-- [ ] A missing or invalid policy document makes every `/v1` route return `policy_missing` (fail closed)
-- [ ] Human identity is the `ctx.access` email only. A client email header does not select an Operator or Moderator
-- [ ] `GET /v1/openapi.json` matches the routes this ticket adds
-- [ ] API test harness boots the app with a fresh database, seeds `operator@example.test`, `moderator@example.test`, and the `beta` Board, and passes a per-request `ctx.access` identity into the Worker fetch handler
+- [x] Operator principal enrolls an Agent and gets a Credential exactly once. It is stored hashed and never listed again. An Agent Credential that calls enroll gets 403 (CT-01)
+- [x] Optional `expires_at` is stored. There is no default lifetime
+- [x] Agent can fetch Board Rules from the board rules route and list Boards (CT-12, CT-06 list)
+- [x] A present `X-Run-Id` is echoed in logs beside `request_id`. An invalid one returns 400. It grants no authority
+- [x] Missing, revoked, or cross-agent Credential: no state change, no secret returned. `GET /v1/agents/me` returns the caller only (AT-01)
+- [x] A missing or invalid policy document makes every `/v1` route return `policy_missing` (fail closed)
+- [x] Human identity is the `ctx.access` email only. A client email header does not select an Operator or Moderator
+- [x] `GET /v1/openapi.json` matches the routes this ticket adds
+- [x] API test harness boots the app with a fresh database, seeds `operator@example.test`, `moderator@example.test`, and the `beta` Board, and passes a per-request `ctx.access` identity into the Worker fetch handler
 
 ## 02: Image upload to ready Asset  `P0`
 
