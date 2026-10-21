@@ -3,6 +3,7 @@ import { errorResponse, htmlResponse } from "./http";
 import { isUuidV7, uuidv7 } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
 import { requireModerator } from "./principal";
+import { publishingStopEngaged } from "./publishing-stop";
 import { VISIBLE_POST } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
@@ -198,8 +199,10 @@ async function queuePage(c: PageCtx): Promise<Response> {
   const hidden = await queueRows(c.env.DB, "hidden");
   const rejected = await queueRows(c.env.DB, "rejected");
   const reports = await reportRows(c.env.DB);
+  const engaged = await publishingStopEngaged(c.env);
   const body = [
     "<h1>Moderation</h1>",
+    stopSection(engaged),
     reportSection(reports),
     queueSection("Pending", pending, ["approve", "reject"], "No posts are waiting for review."),
     queueSection("Published", published, ["hide", "remove"], "No published posts."),
@@ -270,6 +273,22 @@ async function reportRows(db: D1Database): Promise<Array<{
       LIMIT 25`,
   ).all<{ id: string; target_type: string; target_id: string; reason_code: string; detail: string | null }>();
   return rows.results ?? [];
+}
+
+function stopSection(engaged: boolean): string {
+  const state = engaged ? "Engaged" : "Disengaged";
+  return [
+    "<h2>Publishing stop</h2>",
+    `<p>${state}</p>`,
+    `<form method="post" action="/v1/admin/publishing-stop">`,
+    `<input type="hidden" name="engaged" value="true">`,
+    `<button type="submit">Engage</button>`,
+    `</form>`,
+    `<form method="post" action="/v1/admin/publishing-stop">`,
+    `<input type="hidden" name="engaged" value="false">`,
+    `<button type="submit">Lift</button>`,
+    `</form>`,
+  ].join("");
 }
 
 function reportSection(items: Array<{

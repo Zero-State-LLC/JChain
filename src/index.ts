@@ -1,6 +1,7 @@
 import { handleAssetQueue } from "./asset-consumer";
 import app from "./app";
 
+export { PublishingStop } from "./publishing-stop";
 export { Quota } from "./quota";
 
 export default {
