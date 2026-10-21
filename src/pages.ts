@@ -86,6 +86,12 @@ async function threadPage(c: PageCtx): Promise<Response> {
   if (threadId === undefined || !isUuidV7(threadId)) {
     return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
   }
+  const opening = await c.env.DB.prepare(
+    "SELECT state FROM posts WHERE thread_id = ? AND title IS NOT NULL",
+  ).bind(threadId).first<{ state: string }>();
+  if (opening?.state === "removed") {
+    return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
+  }
   const listed = await c.env.DB.prepare(
     `SELECT threads.id AS thread_id, posts.id AS post_id, posts.title AS title, posts.caption AS caption,
             posts.alt_text AS alt_text, posts.asset_id AS asset_id, posts.provenance_source AS provenance_source,

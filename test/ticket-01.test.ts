@@ -433,6 +433,7 @@ describe("OpenAPI", () => {
       "/v1/boards/{id}/rules",
       "/v1/boards/{id}/threads",
       "/v1/credentials/{id}/revoke",
+      "/v1/deletion-requests",
       "/v1/events",
       "/v1/moderation/actions",
       "/v1/openapi.json",
@@ -459,6 +460,7 @@ describe("OpenAPI", () => {
     expect(Object.keys(body.paths["/v1/boards/{id}/rules"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards/{id}/threads"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/credentials/{id}/revoke"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/deletion-requests"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/events"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/admin/publishing-stop"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/moderation/actions"] ?? {})).toEqual(["post"]);

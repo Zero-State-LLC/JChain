@@ -119,6 +119,10 @@ async function threadResource(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   const threadId = c.req.param("id");
   if (threadId === undefined || !isUuidV7(threadId)) return errorResponse(requestId, "not_found");
+  if (await openingRemoved(c.env.DB, threadId)) {
+    if (principal.kind !== "moderator") return errorResponse(requestId, "not_found");
+    return jsonResponse(requestId, { thread_id: threadId, state: "removed" });
+  }
   const thread = await c.env.DB.prepare(
     `SELECT threads.id AS id, threads.board_id AS board_id, threads.state AS state
        FROM threads
@@ -134,6 +138,18 @@ async function threadPosts(c: Ctx): Promise<Response> {
   if (opened instanceof Response) return opened;
   const threadId = c.req.param("id");
   if (threadId === undefined || !isUuidV7(threadId)) return errorResponse(opened.requestId, "not_found");
+  if (await openingRemoved(c.env.DB, threadId)) {
+    if (!opened.moderator) return errorResponse(opened.requestId, "not_found");
+    const rows = await listPosts(
+      c.env.DB,
+      `WHERE posts.thread_id = ? AND ${VISIBLE_POST}`,
+      "ASC",
+      threadId,
+      opened.cursor,
+      opened.limit,
+    );
+    return jsonResponse(opened.requestId, await postPage(c.env.DB, rows, opened.limit));
+  }
   const visible = await c.env.DB.prepare(
     `SELECT id FROM threads
       WHERE id = ? AND EXISTS (SELECT 1 FROM posts WHERE posts.thread_id = threads.id AND ${VISIBLE_POST})`,
@@ -148,6 +164,13 @@ async function threadPosts(c: Ctx): Promise<Response> {
     opened.limit,
   );
   return jsonResponse(opened.requestId, await postPage(c.env.DB, rows, opened.limit));
+}
+
+async function openingRemoved(db: D1Database, threadId: string): Promise<boolean> {
+  const opening = await db.prepare(
+    "SELECT state FROM posts WHERE thread_id = ? AND title IS NOT NULL",
+  ).bind(threadId).first<{ state: string }>();
+  return opening?.state === "removed";
 }
 
 async function listPosts(
@@ -180,6 +203,7 @@ type Opened = {
   requestId: string;
   limit: number;
   cursor: { createdAt: string; id: string } | null;
+  moderator: boolean;
 };
 
 async function openList(c: Ctx): Promise<Opened | Response> {
@@ -189,10 +213,11 @@ async function openList(c: Ctx): Promise<Opened | Response> {
   const limit = parseLimit(c.req.query("limit"));
   if (limit === "malformed") return errorResponse(requestId, "malformed");
   const rawCursor = c.req.query("cursor");
-  if (rawCursor === undefined) return { requestId, limit, cursor: null };
+  const moderator = principal.kind === "moderator";
+  if (rawCursor === undefined) return { requestId, limit, cursor: null, moderator };
   const cursor = decodeCursor(rawCursor);
   if (cursor === null) return errorResponse(requestId, "malformed");
-  return { requestId, limit, cursor };
+  return { requestId, limit, cursor, moderator };
 }
 
 function page<T extends { id: string; created_at: string }>(
