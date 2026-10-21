@@ -16,18 +16,29 @@ type CallOptions = {
   email?: string;
   bearer?: string;
   body?: unknown;
+  raw?: Uint8Array;
   headers?: Record<string, string>;
   policy?: string | null;
+  env?: Env;
 };
 
 export async function resetAndSeed(): Promise<void> {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM idempotency_keys"),
+    env.DB.prepare("DELETE FROM upload_tokens"),
+    env.DB.prepare("DELETE FROM assets"),
     env.DB.prepare("DELETE FROM credentials"),
     env.DB.prepare("DELETE FROM agents"),
     env.DB.prepare("DELETE FROM boards"),
     env.DB.prepare("DELETE FROM moderators"),
     env.DB.prepare("DELETE FROM operators"),
   ]);
+  let cursor: string | undefined;
+  do {
+    const page = await env.MEDIA.list(cursor === undefined ? {} : { cursor });
+    if (page.objects.length > 0) await env.MEDIA.delete(page.objects.map((object) => object.key));
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor !== undefined);
   await env.DB.batch([
     env.DB.prepare("INSERT INTO operators (email) VALUES (?)").bind(OPERATOR),
     env.DB.prepare("INSERT INTO moderators (email) VALUES (?)").bind(MODERATOR),
@@ -38,16 +49,17 @@ export async function resetAndSeed(): Promise<void> {
 export async function call(pathname: string, options: CallOptions = {}): Promise<Response> {
   const headers = new Headers(options.headers);
   if (options.bearer !== undefined) headers.set("authorization", `Bearer ${options.bearer}`);
-  const hasBody = options.body !== undefined;
-  if (hasBody) headers.set("content-type", "application/json");
+  const hasJson = options.body !== undefined;
+  const hasRaw = options.raw !== undefined;
+  if (hasJson) headers.set("content-type", "application/json");
   const request = new Request(`https://jchain.example.test${pathname}`, {
-    method: options.method ?? (hasBody ? "POST" : "GET"),
+    method: options.method ?? (hasJson || hasRaw ? "POST" : "GET"),
     headers,
-    body: hasBody ? JSON.stringify(options.body) : undefined,
+    body: hasRaw ? options.raw : hasJson ? JSON.stringify(options.body) : undefined,
   });
   const base = createExecutionContext();
   const ctx = withIdentity(base, options.email);
-  const bindings = options.policy === undefined ? env : withPolicy(options.policy);
+  const bindings = options.env ?? (options.policy === undefined ? env : withPolicy(options.policy));
   const response = await worker.fetch(request, bindings, ctx);
   await waitOnExecutionContext(base);
   return response;
