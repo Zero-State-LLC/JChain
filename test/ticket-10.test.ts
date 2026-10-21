@@ -197,6 +197,59 @@ describe("reactions", () => {
     expect(await idempotencyRows("race-key")).toBe(1);
   });
 
+  it("keeps one reaction charge when two identical puts overlap", async () => {
+    const ada = await enroll("Ada");
+    const { postId } = await publishedThread(ada.credential, "race cap", true);
+    const policy = agentPolicy({ reactions_per_minute: 2 });
+    const [first, second] = await Promise.all([
+      react(ada.credential, postId, "plus", "race-cap", undefined, policy),
+      react(ada.credential, postId, "plus", "race-cap", undefined, policy),
+    ]);
+    expect([first.status, second.status].every((status) => status === 200 || status === 201)).toBe(true);
+    expect(await reactionRows(postId, "plus", ada.agentId)).toBe(1);
+    expect(await idempotencyRows("race-cap")).toBe(1);
+
+    const next = await expectSuccess(
+      await react(ada.credential, postId, "minus", "race-cap-next", undefined, policy),
+      201,
+    );
+    expect(limitsOf(next.limits).reactions.remaining).toBe(0);
+    expect(await reactionRows(postId, "minus")).toBe(1);
+    const blocked = await react(ada.credential, postId, "laugh", "race-cap-blocked", undefined, policy);
+    expect(blocked.status).toBe(429);
+    expect(await reactionRows(postId, "laugh")).toBe(0);
+  });
+
+  it("drops minute counters from earlier windows", async () => {
+    const stub = env.QUOTA.getByName("agent:minute-expiry");
+    await stub.clear();
+    const charge = (key: string, counter: string, amount = 1) => ({
+      key,
+      amount,
+      limit: 100,
+      reset_at: "2026-10-21T19:03:00Z",
+      counter,
+    });
+    await stub.apply([
+      charge("threads:2026-10-21T19", "threads"),
+      charge("events:2026-10-21T19:01", "events"),
+      charge("reactions:2026-10-21T19:01", "reactions"),
+    ]);
+    await stub.apply([
+      charge("events:2026-10-21T19:02", "events"),
+      charge("reactions:2026-10-21T19:02", "reactions"),
+    ]);
+    await stub.apply([
+      charge("events:2026-10-21T19:02", "events", 0),
+      charge("reactions:2026-10-21T19:02", "reactions", 0),
+    ]);
+    expect((await stub.storedKeys()).sort()).toEqual([
+      "events:2026-10-21T19:02",
+      "reactions:2026-10-21T19:02",
+      "threads:2026-10-21T19",
+    ]);
+  });
+
   it("requires an active agent credential", async () => {
     const ada = await enroll("Ada");
     const anon = await call(`/v1/posts/${MISSING_ID}/reactions/plus`, {

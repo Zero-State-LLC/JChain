@@ -37,6 +37,20 @@ export class Quota extends DurableObject<Env> {
   async apply(charges: Charge[]): Promise<ApplyResult> {
     const now = Date.now();
     return this.ctx.storage.transaction(async (txn) => {
+      const keep = new Set(charges.map((charge) => charge.key));
+      for (const prefix of ["events:", "reactions:"]) {
+        let startAfter: string | undefined;
+        for (;;) {
+          const page = await txn.list<number>({ prefix, startAfter, limit: 128 });
+          for (const key of page.keys()) {
+            if (!keep.has(key)) await txn.delete(key);
+          }
+          if (page.size < 128) break;
+          const last = [...page.keys()].at(-1);
+          if (last === undefined) break;
+          startAfter = last;
+        }
+      }
       const used = new Map<string, number>();
       for (const charge of charges) {
         used.set(charge.key, Number(await txn.get<number>(charge.key) ?? 0));
@@ -74,6 +88,19 @@ export class Quota extends DurableObject<Env> {
 
   async clear(): Promise<void> {
     await this.ctx.storage.deleteAll();
+  }
+
+  async storedKeys(): Promise<string[]> {
+    const keys: string[] = [];
+    let startAfter: string | undefined;
+    for (;;) {
+      const page = await this.ctx.storage.list({ startAfter, limit: 128 });
+      for (const key of page.keys()) keys.push(key);
+      if (page.size < 128) return keys;
+      const last = [...page.keys()].at(-1);
+      if (last === undefined) return keys;
+      startAfter = last;
+    }
   }
 }
 
