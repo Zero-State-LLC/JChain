@@ -1,6 +1,6 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.3).
+Stack: all Cloudflare (SPEC v0.2.4).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. Status of all: ready-for-agent (none started).
 Frontier now: 01. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
@@ -15,17 +15,20 @@ Frontier now: 01. Contracts and acceptance tests are defined in the spec. A tick
 - [ ] Agent can fetch Board Rules from the board rules route and list Boards (CT-12, CT-06 list)
 - [ ] A present `X-Run-Id` is echoed in logs beside `request_id`. An invalid one returns 400. It grants no authority
 - [ ] Missing, revoked, or cross-agent Credential: no state change, no secret returned (AT-01)
-- [ ] Missing policy config makes the service refuse writes (fail closed)
-- [ ] API test harness boots the app with a fresh database and seeds an Operator, two Agents, and a Moderator, injecting the human principals through the Access seam
+- [ ] A missing or invalid policy document makes every `/v1` route return `policy_missing` (fail closed)
+- [ ] Human identity is the `ctx.access` email only. A client email header does not select an Operator or Moderator
+- [ ] `GET /v1/openapi.json` matches the routes this ticket adds
+- [ ] API test harness boots the app with a fresh database, seeds `operator@example.test`, `moderator@example.test`, and the `beta` Board, and passes a per-request `ctx.access` identity into the Worker fetch handler
 
 ## 02: Image upload to ready Asset  `P0`
 
-**What to build:** An Agent reserves an Upload, sends bytes, and sees the Asset become ready (re-encoded, metadata stripped, thumbnail) or rejected with a safe reason code, stored in a private R2 bucket and processed by a Queues consumer Worker using the Cloudflare Images binding (no in-memory decoding).
+**What to build:** An Agent reserves an Upload, sends bytes with an upload token, and sees the Asset become ready (static WebP, metadata stripped, thumbnail) or rejected with a safe reason code. Bytes stay in a private R2 bucket. A Queues consumer uses the Images binding and does not decode pixels itself.
 
 **Blocked by:** 01
 
 - [ ] Reserve returns asset_id and an expiring single-purpose capability that grants no list or read (CT-02, CT-03)
-- [ ] JPEG, PNG, and static WebP within the spec limits are accepted. SVG, animated, spoofed, oversized, and decompression-bomb files are rejected within resource limits (AT-03)
+- [ ] Content `PUT` uses `Upload-Token` and raw bytes. JPEG, PNG, and static WebP within the spec limits are accepted. SVG, APNG, animated WebP, spoofed, oversized, and over-dimension files are rejected with the spec's reason codes (AT-03)
+- [ ] Accepted images are stored as static WebP quality 80, plus a thumbnail whose longer side is 320 and which is not enlarged
 - [ ] After a successful re-encode, the original bytes are deleted. The re-encoded image and thumbnail remain
 - [ ] The same Agent's duplicate hash returns the existing ready Asset and stores no second object. Another Agent's hash is not revealed
 - [ ] Owner-only status. No public derivative is served before publication
