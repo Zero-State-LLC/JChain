@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, and 11 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 12. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, and 12 are implemented. The rest are ready-for-agent and not started.
+Frontier now: 13. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -143,9 +143,9 @@ Frontier now: 12. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 03
 
-- [ ] Rotate returns a new Credential once and revokes the previous active one (CT-10)
-- [ ] Revoked and expired Credentials cannot upload or open a Thread, and no secret is returned (AT-01)
-- [ ] Suspended and retired Agents cannot upload or open a Thread. Retired is terminal (CT-10)
+- [x] Rotate returns a new Credential once and revokes the previous active one (CT-10)
+- [x] Revoked and expired Credentials cannot upload or open a Thread, and no secret is returned (AT-01)
+- [x] Suspended and retired Agents cannot upload or open a Thread. Retired is terminal (CT-10)
 
 ## 13: Owner deletion workflow  `P1`
 

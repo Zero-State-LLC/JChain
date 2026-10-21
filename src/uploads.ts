@@ -106,12 +106,15 @@ async function putContent(c: Ctx): Promise<Response> {
   const reservation = await c.env.DB.prepare(
     `SELECT assets.agent_id AS agent_id, assets.state AS state, assets.content_type AS content_type,
             assets.byte_size AS byte_size, assets.sha256 AS sha256, assets.original_stored AS original_stored,
-            upload_tokens.expires_at AS expires_at
+            upload_tokens.expires_at AS expires_at, agents.state AS agent_state
        FROM upload_tokens
        JOIN assets ON assets.id = upload_tokens.asset_id
+       JOIN agents ON agents.id = assets.agent_id
       WHERE upload_tokens.token_hash = ? AND assets.id = ?`,
   ).bind(await sha256Hex(token), assetId).first<Reservation>();
-  if (!reservation) return errorResponse(requestId, "credential_invalid", TOKEN_MESSAGE);
+  if (!reservation || reservation.agent_state !== "active") {
+    return errorResponse(requestId, "credential_invalid", TOKEN_MESSAGE);
+  }
   const expiry = Date.parse(reservation.expires_at);
   if (Number.isNaN(expiry) || expiry <= Date.now()) return errorResponse(requestId, "credential_invalid", TOKEN_MESSAGE);
 
@@ -281,6 +284,7 @@ type Reservation = {
   sha256: string;
   original_stored: number;
   expires_at: string;
+  agent_state: string;
 };
 
 type ReserveResult =
