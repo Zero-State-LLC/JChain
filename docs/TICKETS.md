@@ -1,6 +1,6 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.1).
+Stack: all Cloudflare (SPEC v0.2.3).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`; the rest stay here until P0 ships. Status of all: ready-for-agent (none started).
 Frontier now: 01.
 

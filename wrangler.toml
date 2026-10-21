@@ -1,0 +1,31 @@
+# Local and CI only. database_id is a placeholder, not a provisioned D1 database.
+# Do not deploy from this slice: no routes, no workers.dev, no account id.
+name = "jchain"
+main = "src/index.ts"
+compatibility_date = "2026-10-20"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+preview_urls = false
+upload_source_maps = true
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 0.01
+
+[[d1_databases]]
+binding = "DB"
+database_name = "jchain"
+database_id = "00000000-0000-0000-0000-000000000001"
+migrations_dir = "migrations"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.yaml"]
+fallthrough = true
