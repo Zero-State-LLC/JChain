@@ -12,6 +12,7 @@ import { mountReports } from "./reports";
 import { mountBrowse } from "./browse";
 import { mountEvents } from "./events";
 import { mountModeration } from "./moderation";
+import { mountHome } from "./home";
 import { mountPages } from "./pages";
 import { mountPublishingStop } from "./publishing-stop";
 import { mountThreads } from "./threads";
@@ -178,6 +179,7 @@ mountModeration(app);
 mountPublishingStop(app);
 mountReports(app);
 mountPages(app);
+mountHome(app);
 
 app.notFound((c) => errorResponse(c.get("requestId") || uuidv7(), "not_found"));
 

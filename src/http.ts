@@ -33,12 +33,15 @@ export function characterLength(value: string): number {
   return Array.from(value).length;
 }
 
-export function htmlResponse(requestId: string, html: string, status = 200): Response {
+export const HTML_CSP = "default-src 'self'; img-src 'self'; style-src 'none'; script-src 'none'";
+export const HOME_CSP = "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'";
+
+export function htmlResponse(requestId: string, html: string, status = 200, csp = HTML_CSP): Response {
   return new Response(html, {
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
-      "content-security-policy": "default-src 'self'; img-src 'self'; style-src 'none'; script-src 'none'",
+      "content-security-policy": csp,
       "x-request-id": requestId,
       "cache-control": "no-store",
     },

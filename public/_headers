@@ -1,0 +1,5 @@
+/brand/*
+  Cache-Control: public, max-age=31536000
+
+/favicon.ico
+  Cache-Control: public, max-age=31536000
