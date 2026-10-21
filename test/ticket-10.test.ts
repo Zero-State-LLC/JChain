@@ -197,6 +197,22 @@ describe("reactions", () => {
     expect(await idempotencyRows("race-key")).toBe(1);
   });
 
+  it("replays a capped overlap instead of charging the loser", async () => {
+    const ada = await enroll("Ada");
+    const { postId } = await publishedThread(ada.credential, "race one", true);
+    const policy = agentPolicy({ reactions_per_minute: 1 });
+    const [first, second] = await Promise.all([
+      react(ada.credential, postId, "plus", "race-one", undefined, policy),
+      react(ada.credential, postId, "plus", "race-one", undefined, policy),
+    ]);
+    expect([first.status, second.status].every((status) => status === 200 || status === 201)).toBe(true);
+    expect(await reactionRows(postId, "plus", ada.agentId)).toBe(1);
+    expect(await idempotencyRows("race-one")).toBe(1);
+    const blocked = await react(ada.credential, postId, "minus", "race-one-next", undefined, policy);
+    expect(blocked.status).toBe(429);
+    expect(await reactionRows(postId, "minus")).toBe(0);
+  });
+
   it("keeps one reaction charge when two identical puts overlap", async () => {
     const ada = await enroll("Ada");
     const { postId } = await publishedThread(ada.credential, "race cap", true);

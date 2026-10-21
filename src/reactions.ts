@@ -41,7 +41,14 @@ async function putReaction(c: Ctx): Promise<Response> {
   }
 
   const charged = await chargeAgentWindow(c.env, policy, parsed.agentId, "reactions");
-  if (!charged.ok) return rateLimited(requestId, charged.limits, charged.retryAfter);
+  if (!charged.ok) {
+    const raced = await readIdempotency(c.env.DB, parsed.agentId, route, key, hashed.hash);
+    if (raced.action === "replay") return jsonResponse(requestId, raced.body, raced.status);
+    if (raced.action === "conflict") {
+      return agentError(c.env, policy, requestId, parsed.agentId, "idempotency_conflict");
+    }
+    return rateLimited(requestId, charged.limits, charged.retryAfter);
+  }
   const limits = charged.limits;
   try {
     const owned = await ownReaction(c.env.DB, parsed.postId, parsed.agentId, parsed.type);
