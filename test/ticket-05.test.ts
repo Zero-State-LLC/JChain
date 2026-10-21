@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { VALID_PNG } from "./fixtures/bytes";
-import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, resetAndSeed } from "./harness";
+import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, releaseThread, resetAndSeed } from "./harness";
 
 const MISSING_ID = "01900000-0000-7000-8000-000000000099";
 const HIDDEN_STATES = ["pending_review", "rejected", "hidden", "removal_pending", "removed"] as const;
@@ -106,6 +106,7 @@ describe("visibility", () => {
     expect(again.deduped).toBe(true);
     expect(again.asset_id).toBe(assetId);
 
+    await releaseThread(author.credential);
     const pending = await expectSuccess(await openThread(author.credential, threadBody(assetId, {
       title: "Pending reuse title",
       caption: "pending reuse caption",
@@ -139,6 +140,7 @@ describe("visibility", () => {
       caption: "older caption words",
     })), 201);
     await act(String(older.post_id), "approve");
+    await releaseThread(author.credential);
     const newer = await expectSuccess(await openThread(author.credential, threadBody(assetId, {
       title: "Newer board title",
       caption: "newer caption words",
@@ -290,6 +292,7 @@ describe("moderation actions", () => {
     expect(afterReject).not.toContain(caption);
     expect(await (await call("/boards/beta")).text()).not.toContain("Audit title");
 
+    await releaseThread(author.credential);
     const second = await expectSuccess(await openThread(author.credential, threadBody(assetId, {
       title: "Hide title",
       caption: "hide-caption-05",

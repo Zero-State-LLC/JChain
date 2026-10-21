@@ -1,5 +1,6 @@
 import { isUuidV7 } from "./ids";
 import type { Policy } from "./policy";
+import { chargeDerivativeBytes, chargeTransformations, logRejected } from "./quota";
 
 export const ASSET_QUEUE = "asset-upload";
 export const ASSET_DLQ = "asset-upload-dlq";
@@ -24,6 +25,7 @@ type AssetEnv = {
   DB: D1Database;
   MEDIA: R2Bucket;
   IMAGES: ImagesBinding;
+  QUOTA: Env["QUOTA"];
 };
 
 type AssetRow = {
@@ -121,12 +123,20 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
     return;
   }
 
+  const transformations = await chargeTransformations(env, policy);
+  if (!transformations.ok) {
+    logRejected(asset.agent_id, "global", "transformations");
+    await rejectAsset(env.DB, assetId, "processing_failed");
+    return;
+  }
+
   let display: Uint8Array;
   let thumb: Uint8Array;
   try {
     display = await encode(env.IMAGES, bytes, false);
     thumb = await encode(env.IMAGES, bytes, true);
   } catch {
+    await transformations.refund();
     await env.MEDIA.delete([derivativeKey(assetId, "display"), derivativeKey(assetId, "thumb")]);
     await rejectAsset(env.DB, assetId, "processing_failed");
     return;
@@ -138,10 +148,18 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
   await env.MEDIA.put(derivativeKey(assetId, "thumb"), thumb, {
     httpMetadata: { contentType: WEBP },
   });
+  const bytesCharged = await chargeDerivativeBytes(env, policy, display.byteLength + thumb.byteLength);
+  if (!bytesCharged.ok) {
+    logRejected(asset.agent_id, "global", "r2_bytes");
+    await env.MEDIA.delete([derivativeKey(assetId, "display"), derivativeKey(assetId, "thumb")]);
+    await rejectAsset(env.DB, assetId, "processing_failed");
+    return;
+  }
   const updated = await env.DB.prepare(
     "UPDATE assets SET state = 'ready', reason_code = NULL, original_stored = 0 WHERE id = ? AND state = 'validating'",
   ).bind(assetId).run();
   if (Number(updated.meta.changes ?? 0) !== 1) {
+    await bytesCharged.refund();
     await env.MEDIA.delete([derivativeKey(assetId, "display"), derivativeKey(assetId, "thumb")]);
     return;
   }

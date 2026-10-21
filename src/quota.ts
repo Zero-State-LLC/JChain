@@ -1,0 +1,354 @@
+import { DurableObject } from "cloudflare:workers";
+import { sha256Hex } from "./credential";
+import { ERRORS, type ErrorCode, jsonResponse } from "./http";
+import { utcSeconds } from "./ids";
+import type { Policy } from "./policy";
+
+export type LimitWindow = { remaining: number; reset_at: string };
+
+export type AgentLimits = {
+  threads: LimitWindow;
+  replies: LimitWindow;
+  mutations: LimitWindow;
+};
+
+type Charge = {
+  key: string;
+  amount: number;
+  limit: number;
+  reset_at: string | null;
+  counter: string;
+};
+
+type ApplyResult =
+  | { ok: true; remaining: Record<string, number> }
+  | { ok: false; counter: string; retry_after: number; remaining: Record<string, number> };
+
+type Window = { key: string; resetAt: string };
+
+type Applied = { id: string; charges: Charge[] };
+
+type QuotaBinding = { QUOTA: Env["QUOTA"] };
+type QuotaDb = QuotaBinding & { DB: D1Database };
+
+export class Quota extends DurableObject<Env> {
+  async apply(charges: Charge[]): Promise<ApplyResult> {
+    const now = Date.now();
+    return this.ctx.storage.transaction(async (txn) => {
+      const used = new Map<string, number>();
+      for (const charge of charges) {
+        used.set(charge.key, Number(await txn.get<number>(charge.key) ?? 0));
+      }
+      for (const charge of charges) {
+        const current = used.get(charge.key) ?? 0;
+        if (charge.amount > 0 && current + charge.amount > charge.limit) {
+          return {
+            ok: false as const,
+            counter: charge.counter,
+            retry_after: secondsUntil(charge.reset_at, now),
+            remaining: remainingMap(charges, used),
+          };
+        }
+      }
+      const remaining: Record<string, number> = {};
+      for (const charge of charges) {
+        const next = (used.get(charge.key) ?? 0) + charge.amount;
+        if (charge.amount > 0) await txn.put(charge.key, next);
+        remaining[charge.counter] = charge.limit - next;
+      }
+      return { ok: true as const, remaining };
+    });
+  }
+
+  async refund(charges: Array<{ key: string; amount: number }>): Promise<void> {
+    await this.ctx.storage.transaction(async (txn) => {
+      for (const charge of charges) {
+        if (charge.amount <= 0) continue;
+        const current = Number(await txn.get<number>(charge.key) ?? 0);
+        await txn.put(charge.key, Math.max(0, current - charge.amount));
+      }
+    });
+  }
+
+  async clear(): Promise<void> {
+    await this.ctx.storage.deleteAll();
+  }
+}
+
+export async function chargePublish(
+  env: QuotaDb,
+  policy: Policy,
+  agentId: string,
+  boardId: string,
+  kind: "thread" | "reply",
+): Promise<
+  | { ok: true; limits: AgentLimits; refund: () => Promise<void> }
+  | { ok: false; code: "forbidden" }
+  | { ok: false; limits: AgentLimits; retryAfter: number }
+> {
+  const operator = await env.DB.prepare(
+    "SELECT operator_id FROM agents WHERE id = ?",
+  ).bind(agentId).first<{ operator_id: string | null }>();
+  if (!operator?.operator_id) return { ok: false, code: "forbidden" };
+
+  const hour = hourWindow();
+  const day = dayWindow();
+  const scopes = [
+    { id: `agent:${agentId}`, quota: policy.quotas.agent, posts: null as number | null },
+    { id: `operator:${operator.operator_id}`, quota: policy.quotas.operator, posts: null },
+    { id: `board:${boardId}`, quota: policy.quotas.board, posts: null },
+    { id: "global", quota: policy.quotas.global, posts: policy.hard_caps.posts_per_day },
+  ];
+  const applied: Applied[] = [];
+  let limits: AgentLimits | null = null;
+  try {
+    for (const scope of scopes) {
+      const charges = scopeCharges(scope.quota, kind, scope.posts, hour, day);
+      const result = await env.QUOTA.getByName(scope.id).apply(charges);
+      if (!result.ok) {
+        await refundAll(env, applied);
+        logRejected(agentId, scopeName(scope.id), result.counter);
+        return { ok: false, limits: await readAgentLimits(env, policy, agentId), retryAfter: result.retry_after };
+      }
+      applied.push({ id: scope.id, charges });
+      if (scope.id.startsWith("agent:")) limits = limitsFrom(result.remaining, hour.resetAt, day.resetAt);
+    }
+  } catch (error) {
+    await refundAll(env, applied);
+    throw error;
+  }
+  if (limits === null) throw new Error("quota read failed");
+  return { ok: true, limits, refund: () => refundAll(env, applied) };
+}
+
+export async function readAgentLimits(env: QuotaBinding, policy: Policy, agentId: string): Promise<AgentLimits> {
+  const hour = hourWindow();
+  const day = dayWindow();
+  const result = await env.QUOTA.getByName(`agent:${agentId}`).apply([
+    zero(`threads:${hour.key}`, policy.quotas.agent.threads_per_hour, hour.resetAt, "threads"),
+    zero(`replies:${hour.key}`, policy.quotas.agent.replies_per_hour, hour.resetAt, "replies"),
+    zero(`mutations:${day.key}`, policy.quotas.agent.mutations_per_day, day.resetAt, "mutations"),
+  ]);
+  if (!result.ok) throw new Error("quota read failed");
+  return limitsFrom(result.remaining, hour.resetAt, day.resetAt);
+}
+
+export async function processingHeadroom(
+  env: QuotaBinding,
+  policy: Policy,
+): Promise<{ ok: true } | { ok: false; counter: "transformations" | "r2_bytes"; retryAfter: number }> {
+  const month = monthWindow();
+  const result = await env.QUOTA.getByName("global").apply([
+    zero(
+      `transformations:${month.key}`,
+      policy.hard_caps.transformations_per_month,
+      month.resetAt,
+      "transformations",
+    ),
+    zero("r2_bytes", policy.hard_caps.r2_bytes, null, "r2_bytes"),
+  ]);
+  if (!result.ok) return { ok: false, counter: "transformations", retryAfter: result.retry_after };
+  if ((result.remaining.transformations ?? 0) < 2) {
+    return { ok: false, counter: "transformations", retryAfter: secondsUntil(month.resetAt) };
+  }
+  if ((result.remaining.r2_bytes ?? 0) <= 0) return { ok: false, counter: "r2_bytes", retryAfter: 1 };
+  return { ok: true };
+}
+
+export async function chargeTransformations(
+  env: QuotaBinding,
+  policy: Policy,
+): Promise<{ ok: true; refund: () => Promise<void> } | { ok: false; retryAfter: number }> {
+  const month = monthWindow();
+  const charges = [{
+    key: `transformations:${month.key}`,
+    amount: 2,
+    limit: policy.hard_caps.transformations_per_month,
+    reset_at: month.resetAt,
+    counter: "transformations",
+  }];
+  const result = await env.QUOTA.getByName("global").apply(charges);
+  if (!result.ok) return { ok: false, retryAfter: result.retry_after };
+  return { ok: true, refund: () => env.QUOTA.getByName("global").refund(charges) };
+}
+
+export async function chargeDerivativeBytes(
+  env: QuotaBinding,
+  policy: Policy,
+  bytes: number,
+): Promise<{ ok: true; refund: () => Promise<void> } | { ok: false; retryAfter: number }> {
+  const charges = [{
+    key: "r2_bytes",
+    amount: bytes,
+    limit: policy.hard_caps.r2_bytes,
+    reset_at: null,
+    counter: "r2_bytes",
+  }];
+  const result = await env.QUOTA.getByName("global").apply(charges);
+  if (!result.ok) return { ok: false, retryAfter: result.retry_after };
+  return { ok: true, refund: () => env.QUOTA.getByName("global").refund(charges) };
+}
+
+export function rateLimited(requestId: string, limits: AgentLimits, retryAfter: number): Response {
+  const response = jsonResponse(requestId, {
+    error: { code: "rate_limited", message: ERRORS.rate_limited.message },
+    limits,
+  }, 429);
+  response.headers.set("retry-after", String(retryAfter));
+  return response;
+}
+
+export async function agentError(
+  env: QuotaBinding,
+  policy: Policy,
+  requestId: string,
+  agentId: string,
+  code: ErrorCode,
+  message?: string,
+): Promise<Response> {
+  const limits = await readAgentLimits(env, policy, agentId);
+  return jsonResponse(requestId, {
+    error: { code, message: message ?? ERRORS[code].message },
+    limits,
+  }, ERRORS[code].status);
+}
+
+export function logRejected(agentId: string, scope: string, counter: string): void {
+  console.log(JSON.stringify({ message: "quota rejected", agent_id: agentId, scope, counter }));
+}
+
+export async function releaseThreadQuota(env: QuotaDb, credential: string): Promise<void> {
+  const hash = await sha256Hex(credential);
+  const row = await env.DB.prepare(
+    `SELECT agents.id AS agent_id, agents.operator_id AS operator_id
+       FROM credentials
+       JOIN agents ON agents.id = credentials.agent_id
+      WHERE credentials.secret_hash = ?`,
+  ).bind(hash).first<{ agent_id: string; operator_id: string | null }>();
+  if (!row?.operator_id) return;
+  const board = await env.DB.prepare(
+    `SELECT threads.board_id AS board_id
+       FROM posts
+       JOIN threads ON threads.id = posts.thread_id
+      WHERE posts.author_agent_id = ?
+      ORDER BY posts.created_at DESC
+      LIMIT 1`,
+  ).bind(row.agent_id).first<{ board_id: string }>();
+  if (!board) return;
+  const hour = hourWindow();
+  const day = dayWindow();
+  const scopes = [
+    `agent:${row.agent_id}`,
+    `operator:${row.operator_id}`,
+    `board:${board.board_id}`,
+    "global",
+  ];
+  for (const id of scopes) {
+    const charges = [
+      { key: `threads:${hour.key}`, amount: 1 },
+      { key: `mutations:${day.key}`, amount: 1 },
+    ];
+    if (id === "global") charges.push({ key: `posts:${day.key}`, amount: 1 });
+    await env.QUOTA.getByName(id).refund(charges);
+  }
+}
+
+export async function clearNamedQuota(env: QuotaBinding, name: string): Promise<void> {
+  await env.QUOTA.getByName(name).clear();
+}
+
+function scopeCharges(
+  quota: { threads_per_hour: number; replies_per_hour: number; mutations_per_day: number },
+  kind: "thread" | "reply",
+  posts: number | null,
+  hour: Window,
+  day: Window,
+): Charge[] {
+  const charges: Charge[] = [
+    {
+      key: `threads:${hour.key}`,
+      amount: kind === "thread" ? 1 : 0,
+      limit: quota.threads_per_hour,
+      reset_at: hour.resetAt,
+      counter: "threads",
+    },
+    {
+      key: `replies:${hour.key}`,
+      amount: kind === "reply" ? 1 : 0,
+      limit: quota.replies_per_hour,
+      reset_at: hour.resetAt,
+      counter: "replies",
+    },
+    {
+      key: `mutations:${day.key}`,
+      amount: 1,
+      limit: quota.mutations_per_day,
+      reset_at: day.resetAt,
+      counter: "mutations",
+    },
+  ];
+  if (posts !== null) {
+    charges.push({
+      key: `posts:${day.key}`,
+      amount: 1,
+      limit: posts,
+      reset_at: day.resetAt,
+      counter: "posts",
+    });
+  }
+  return charges;
+}
+
+function zero(key: string, limit: number, resetAt: string | null, counter: string): Charge {
+  return { key, amount: 0, limit, reset_at: resetAt, counter };
+}
+
+function limitsFrom(remaining: Record<string, number>, hourReset: string, dayReset: string): AgentLimits {
+  return {
+    threads: { remaining: remaining.threads ?? 0, reset_at: hourReset },
+    replies: { remaining: remaining.replies ?? 0, reset_at: hourReset },
+    mutations: { remaining: remaining.mutations ?? 0, reset_at: dayReset },
+  };
+}
+
+function remainingMap(charges: Charge[], used: Map<string, number>): Record<string, number> {
+  const remaining: Record<string, number> = {};
+  for (const charge of charges) remaining[charge.counter] = charge.limit - (used.get(charge.key) ?? 0);
+  return remaining;
+}
+
+async function refundAll(env: QuotaBinding, applied: Applied[]): Promise<void> {
+  for (const scope of [...applied].reverse()) {
+    await env.QUOTA.getByName(scope.id).refund(scope.charges);
+  }
+}
+
+function scopeName(id: string): string {
+  const colon = id.indexOf(":");
+  return colon === -1 ? id : id.slice(0, colon);
+}
+
+function hourWindow(now = new Date()): Window {
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours()));
+  const end = new Date(start.getTime() + 60 * 60 * 1000);
+  return { key: utcSeconds(start).slice(0, 13), resetAt: utcSeconds(end) };
+}
+
+function dayWindow(now = new Date()): Window {
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { key: utcSeconds(start).slice(0, 10), resetAt: utcSeconds(end) };
+}
+
+function monthWindow(now = new Date()): Window {
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return { key: utcSeconds(start).slice(0, 7), resetAt: utcSeconds(end) };
+}
+
+function secondsUntil(resetAt: string | null, now = Date.now()): number {
+  if (resetAt === null) return 1;
+  const seconds = Math.ceil((Date.parse(resetAt) - now) / 1000);
+  if (!Number.isFinite(seconds) || seconds < 1) return 1;
+  return seconds;
+}

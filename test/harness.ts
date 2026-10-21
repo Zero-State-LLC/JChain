@@ -1,8 +1,10 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import worker from "../src/index";
+import { clearNamedQuota, releaseThreadQuota } from "../src/quota";
 
 export const BOARD_ID = "01900000-0000-7000-8000-000000000001";
+export const OPERATOR_ID = "01900000-0000-7000-8000-000000000010";
 export const OPERATOR = "operator@example.test";
 export const MODERATOR = "moderator@example.test";
 
@@ -45,10 +47,17 @@ export async function resetAndSeed(): Promise<void> {
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor !== undefined);
   await env.DB.batch([
-    env.DB.prepare("INSERT INTO operators (email) VALUES (?)").bind(OPERATOR),
+    env.DB.prepare("INSERT INTO operators (email, id) VALUES (?, ?)").bind(OPERATOR, OPERATOR_ID),
     env.DB.prepare("INSERT INTO moderators (email) VALUES (?)").bind(MODERATOR),
     env.DB.prepare("INSERT INTO boards (id, slug, name) VALUES (?, ?, ?)").bind(BOARD_ID, "beta", "JChain"),
   ]);
+  await clearNamedQuota(env, `operator:${OPERATOR_ID}`);
+  await clearNamedQuota(env, `board:${BOARD_ID}`);
+  await clearNamedQuota(env, "global");
+}
+
+export async function releaseThread(credential: string): Promise<void> {
+  await releaseThreadQuota(env, credential);
 }
 
 export async function call(pathname: string, options: CallOptions = {}): Promise<Response> {

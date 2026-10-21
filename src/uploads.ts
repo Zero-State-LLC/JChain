@@ -12,6 +12,7 @@ import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency
 import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import type { Policy } from "./policy";
 import { requireAgent, requireModerator } from "./principal";
+import { agentError, logRejected, processingHeadroom, rateLimited, readAgentLimits } from "./quota";
 import { type AssetReader, projectAsset } from "./visibility";
 
 type UploadEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
@@ -40,13 +41,15 @@ async function reserve(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
-  if (key === null) return errorResponse(requestId, "malformed");
+  if (key === null) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
   const parsedBody = await readObject(c.req.raw);
-  if (!parsedBody.ok) return errorResponse(requestId, "malformed");
+  if (!parsedBody.ok) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
   const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
   const prior = await readIdempotency(c.env.DB, principal.agentId, RESERVE_ROUTE, key, bodyHash);
   if (prior.action === "replay") return jsonResponse(requestId, prior.body, prior.status);
-  if (prior.action === "conflict") return errorResponse(requestId, "idempotency_conflict");
+  if (prior.action === "conflict") {
+    return agentError(c.env, policy, requestId, principal.agentId, "idempotency_conflict");
+  }
 
   const parsed = parseReserve(parsedBody.value, policy);
   if (!parsed.ok) return remember(c.env, requestId, policy, principal.agentId, RESERVE_ROUTE, key, bodyHash, failure(parsed.code), []);
@@ -66,6 +69,12 @@ async function reserve(c: Ctx): Promise<Response> {
       { status: 200, body: { asset_id: existing.id, deduped: true } },
       [],
     );
+  }
+
+  const blocked = await processingHeadroom(c.env, policy);
+  if (!blocked.ok) {
+    logRejected(principal.agentId, "global", blocked.counter);
+    return rateLimited(requestId, await readAgentLimits(c.env, policy, principal.agentId), blocked.retryAfter);
   }
 
   const assetId = uuidv7();
@@ -112,13 +121,15 @@ async function putContent(c: Ctx): Promise<Response> {
     if (reservation.state === "reserved" && reservation.original_stored === 0) {
       await rejectStored(c.env, assetId, "too_large", null);
     }
-    return errorResponse(requestId, "payload_too_large");
+    return agentError(c.env, policy, requestId, reservation.agent_id, "payload_too_large");
   }
 
   const bodyHash = await sha256HexBytes(capped.bytes);
   const prior = await readIdempotency(c.env.DB, reservation.agent_id, route, key, bodyHash);
   if (prior.action === "replay") return jsonResponse(requestId, prior.body, prior.status);
-  if (prior.action === "conflict") return errorResponse(requestId, "idempotency_conflict");
+  if (prior.action === "conflict") {
+    return agentError(c.env, policy, requestId, reservation.agent_id, "idempotency_conflict");
+  }
   if (reservation.state !== "reserved") {
     return remember(c.env, requestId, policy, reservation.agent_id, route, key, bodyHash, failure("state_conflict"), []);
   }
@@ -135,6 +146,12 @@ async function putContent(c: Ctx): Promise<Response> {
   }
   if (isAnimated(capped.bytes, sniffed)) {
     return rejectUpload(c, reservation.agent_id, route, key, bodyHash, assetId, "animated", "validation_failed", capped.bytes);
+  }
+
+  const blocked = await processingHeadroom(c.env, policy);
+  if (!blocked.ok) {
+    logRejected(reservation.agent_id, "global", blocked.counter);
+    return rateLimited(requestId, await readAgentLimits(c.env, policy, reservation.agent_id), blocked.retryAfter);
   }
 
   await c.env.MEDIA.put(originalKey(assetId), capped.bytes, {
@@ -157,21 +174,29 @@ async function complete(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
-  if (key === null) return errorResponse(requestId, "malformed");
-  if (await hasBody(c.req.raw)) return errorResponse(requestId, "malformed");
+  if (key === null) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
+  if (await hasBody(c.req.raw)) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
 
   const route = `POST /v1/uploads/${assetId}/complete`;
   const bodyHash = await sha256Hex("");
   const prior = await readIdempotency(c.env.DB, principal.agentId, route, key, bodyHash);
   if (prior.action === "replay") return jsonResponse(requestId, prior.body, prior.status);
-  if (prior.action === "conflict") return errorResponse(requestId, "idempotency_conflict");
+  if (prior.action === "conflict") {
+    return agentError(c.env, policy, requestId, principal.agentId, "idempotency_conflict");
+  }
 
   const asset = await c.env.DB.prepare(
     "SELECT state, original_stored FROM assets WHERE id = ? AND agent_id = ?",
   ).bind(assetId, principal.agentId).first<{ state: string; original_stored: number }>();
-  if (!asset) return errorResponse(requestId, "not_found");
+  if (!asset) return agentError(c.env, policy, requestId, principal.agentId, "not_found");
   if (asset.state !== "reserved" || asset.original_stored !== 1) {
     return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("state_conflict"), []);
+  }
+
+  const blocked = await processingHeadroom(c.env, policy);
+  if (!blocked.ok) {
+    logRejected(principal.agentId, "global", blocked.counter);
+    return rateLimited(requestId, await readAgentLimits(c.env, policy, principal.agentId), blocked.retryAfter);
   }
 
   const claimed = await c.env.DB.prepare(
@@ -186,7 +211,7 @@ async function complete(c: Ctx): Promise<Response> {
     await c.env.DB.prepare(
       "UPDATE assets SET state = 'reserved' WHERE id = ? AND agent_id = ? AND state = 'uploaded'",
     ).bind(assetId, principal.agentId).run();
-    return errorResponse(requestId, "processing_unavailable");
+    return agentError(c.env, policy, requestId, principal.agentId, "processing_unavailable");
   }
   const outcome = { status: 202, body: { asset_id: assetId, state: "uploaded" } };
   return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, outcome, []);
@@ -298,6 +323,7 @@ async function remember(
   outcome: Outcome,
   statements: D1PreparedStatement[],
 ): Promise<Response> {
+  if (outcome.body.limits === undefined) outcome.body.limits = await readAgentLimits(env, policy, agentId);
   statements.push(idempotencyInsert(
     env.DB,
     agentId,

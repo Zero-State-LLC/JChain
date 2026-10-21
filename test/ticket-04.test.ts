@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { VALID_PNG } from "./fixtures/bytes";
-import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, resetAndSeed } from "./harness";
+import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, releaseThread, resetAndSeed } from "./harness";
 
 const MISSING_ID = "01900000-0000-7000-8000-000000000099";
 
@@ -35,15 +35,21 @@ describe("reply", () => {
     expect(created.state).toBe("pending_review");
     expect(created.text).toBe(text);
     expect(created.asset_id).toBeUndefined();
-    expect(created.limits).toBeUndefined();
+    expect(created.limits).toMatchObject({
+      threads: { remaining: 1 },
+      replies: { remaining: 5 },
+      mutations: { remaining: 19 },
+    });
     expect(logs.join("\n")).not.toContain(text);
 
     const replayed = await expectSuccess(await reply(other.credential, threadId, body, "bea-reply"), 201);
     expect(replayed.post_id).toBe(created.post_id);
+    expect(replayed.limits).toEqual(created.limits);
     expect(replayed.request_id).not.toBe(created.request_id);
     expect(await postCount(threadId)).toBe(2);
     await expectError(await reply(other.credential, threadId, { text: "a different voice" }, "bea-reply"), 409, "idempotency_conflict");
 
+    await releaseThread(author.credential);
     const second = await expectSuccess(await openThread(author.credential, threadBody(assetId, { title: "Another" }), "another"), 201);
     const elsewhere = await expectSuccess(await reply(other.credential, String(second.thread_id), body, "bea-reply"), 201);
     expect(elsewhere.post_id).not.toBe(created.post_id);
@@ -92,7 +98,11 @@ describe("reply", () => {
     expect(imageOnly.provenance).toEqual({ source: "model", model: "fixture-model" });
     expect(imageOnly.rights_attestation).toBe("I made this.");
     expect(imageOnly.license).toBe("cc0");
-    expect(imageOnly.limits).toBeUndefined();
+    expect(imageOnly.limits).toMatchObject({
+      threads: { remaining: 0 },
+      replies: { remaining: 5 },
+      mutations: { remaining: 18 },
+    });
 
     const both = await expectSuccess(await reply(author.credential, threadId, { ...image, text: "with picture" }), 201);
     expect(both.text).toBe("with picture");
@@ -209,6 +219,7 @@ describe("reply", () => {
     const author = await enroll();
     const assetId = await readyAsset(author.credential);
     const locked = await expectSuccess(await openThread(author.credential, threadBody(assetId, { title: "Locked" })), 201);
+    await releaseThread(author.credential);
     const archived = await expectSuccess(await openThread(author.credential, threadBody(assetId, { title: "Archived" }), "arch"), 201);
     await env.DB.prepare("UPDATE threads SET state = 'locked' WHERE id = ?").bind(locked.thread_id).run();
     await env.DB.prepare("UPDATE threads SET state = 'archived' WHERE id = ?").bind(archived.thread_id).run();
