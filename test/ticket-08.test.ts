@@ -175,6 +175,29 @@ describe("publishing stop", () => {
     expect(await (await call(`/threads/${threadId}`)).text()).toContain("a pending reply");
     expect(await (await call("/boards/beta")).text()).toContain("Visible title");
   });
+
+  it("restores the previous flag when the audit insert fails", async () => {
+    const failedEngage = await call("/v1/admin/publishing-stop", {
+      email: MODERATOR,
+      body: { engaged: true },
+      env: failingAuditEnv(),
+    });
+    expect(failedEngage.status).toBeGreaterThanOrEqual(500);
+    expect(await (await call("/moderation", { email: MODERATOR })).text()).toContain("<p>Disengaged</p>");
+    expect(await stopAudits()).toHaveLength(0);
+
+    await expectSuccess(await stop(true));
+    const failedLift = await call("/v1/admin/publishing-stop", {
+      email: MODERATOR,
+      body: { engaged: false },
+      env: failingAuditEnv(),
+    });
+    expect(failedLift.status).toBeGreaterThanOrEqual(500);
+    const page = await (await call("/moderation", { email: MODERATOR })).text();
+    expect(page).toContain("<p>Engaged</p>");
+    expect(page).not.toContain("<p>Disengaged</p>");
+    expect((await stopAudits()).some((row) => row.action === "lift")).toBe(false);
+  });
 });
 
 type StopAudit = {
@@ -208,6 +231,39 @@ function stop(engaged: boolean, headers: Record<string, string> = {}, extra: {
 
 function stopBody(body: unknown): Promise<Response> {
   return call("/v1/admin/publishing-stop", { email: MODERATOR, body });
+}
+
+function failingAuditEnv(): Env {
+  const db = new Proxy(env.DB, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (property !== "prepare") return typeof value === "function" ? value.bind(target) : value;
+      return (sql: string) => {
+        const statement = target.prepare(sql);
+        return sql.includes("'publishing_stop'") ? failOnRun(statement) : statement;
+      };
+    },
+  });
+  return new Proxy(env, {
+    get(target, property) {
+      if (property === "DB") return db;
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as Env;
+}
+
+function failOnRun(statement: D1PreparedStatement): D1PreparedStatement {
+  return new Proxy(statement, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (property === "run") return () => Promise.reject(new Error("audit failed"));
+      if (property === "bind") {
+        return (...args: Parameters<D1PreparedStatement["bind"]>) => failOnRun(target.bind(...args));
+      }
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 async function stopAudits(): Promise<StopAudit[]> {

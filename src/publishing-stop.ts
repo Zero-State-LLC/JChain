@@ -45,13 +45,20 @@ async function setPublishingStop(c: Ctx): Promise<Response> {
   if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
   const parsed = await readEngaged(c.req.raw);
   if (!parsed.ok) return errorResponse(requestId, "malformed");
-  await c.env.PUBLISHING_STOP.getByName("global").set(parsed.engaged);
+  const stub = c.env.PUBLISHING_STOP.getByName("global");
+  const previous = await stub.read();
+  await stub.set(parsed.engaged);
   const action = parsed.engaged ? "engage" : "lift";
-  await c.env.DB.prepare(
-    `INSERT INTO moderation_actions (
-       id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
-     ) VALUES (?, ?, 'publishing_stop', 'global', ?, 'rules', NULL, NULL, ?)`,
-  ).bind(uuidv7(), principal.email, action, utcSeconds()).run();
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO moderation_actions (
+         id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+       ) VALUES (?, ?, 'publishing_stop', 'global', ?, 'rules', NULL, NULL, ?)`,
+    ).bind(uuidv7(), principal.email, action, utcSeconds()).run();
+  } catch (error) {
+    await stub.set(previous);
+    throw error;
+  }
   console.log(JSON.stringify({
     message: parsed.engaged ? "publishing stop engaged" : "publishing stop lifted",
     engaged: parsed.engaged,
