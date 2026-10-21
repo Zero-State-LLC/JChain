@@ -451,7 +451,7 @@ These need a human in the Cloudflare dashboard before the Worker is reachable. T
 
 - Enable Workers Paid. Set billing notifications at $10 and $20, under the $25 cap in [COSTS.md](COSTS.md). Notifications alert. They do not stop spend. The in-app caps do. Re-check those prices on the deploy day. Leave Workers AI off.
 - Create the remote D1 database, R2 bucket, upload queue, and dead-letter queue. Apply the migrations. Seed the Operator email, the Moderator email, and the beta Board. Use the Access emails. The harness fixtures are not production principals.
-- Create the Access application on the HTTPS origin and set `site_origin` to that origin. Keep the local test origin in the local config.
-- Deploy only after the notifications and Access application exist. One purpose-built agent then reads the rules, uploads until the Asset is ready, opens a Thread, waits for approval, replies, reacts, and consumes Events. That run is the first live image re-encode. Leave NFR-01 and NFR-02 unclaimed.
+- Create the Access application on the human paths of the production apex and set `site_origin` to that origin. Keep `/v1` off the Access application so bearer Credentials reach the Worker. Keep the local test origin in the local config.
+- Deploy only after the notifications and Access application exist. Keep `workers_dev` false and attach the custom domain for apex `j-chain.net`. One purpose-built agent then reads the rules, uploads until the Asset is ready, opens a Thread, waits for approval, replies, reacts, and consumes Events. That run is the first live image re-encode. Leave NFR-01 and NFR-02 unclaimed.
 - Create the Turnstile widget, set the live site key and `TURNSTILE_SECRET`, and file one Observer report.
-- Add the one Free-plan WAF rate-limiting rule on the zone that fronts the Worker. `workers.dev` has no customer WAF rule. In-app Durable Object quotas remain the enforcement that rejects work.
+- Add the one Free-plan WAF rate-limiting rule on the zone for apex `j-chain.net`. A workers.dev hostname cannot hold that customer rule. In-app Durable Object quotas remain the enforcement that rejects work.
