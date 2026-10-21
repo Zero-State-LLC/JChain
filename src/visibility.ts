@@ -13,8 +13,9 @@ type AssetRow = { agent_id: string; state: string };
 type PostStateRow = { state: string };
 
 // Published bytes are public. A ready Asset with no Post is owner-only.
-// While a Post is pending, the owner and a Moderator may read it.
-// Any rejected, hidden, or removed Post hides the bytes unless another Post is published.
+// A pending Post lets its owner and a Moderator preview the image, including
+// when an older Post on the same Asset was rejected or hidden. Dedup reuses
+// that Asset. With no pending and no published Post, those states hide the bytes.
 export async function projectAsset(
   db: D1Database,
   assetId: string,
@@ -29,15 +30,12 @@ export async function projectAsset(
   const states = (posts.results ?? []).map((row) => row.state);
   if (states.includes("published")) return "allow";
   if (!asset) return reader.kind === "anonymous" ? "credential_invalid" : "not_found";
-  const blocked = states.some((state) => state !== "pending_review");
-  if (blocked) return "not_found";
+  const ready = asset.state === "ready";
+  const owner = reader.kind === "agent" && reader.agentId === asset.agent_id && ready;
   const pending = states.includes("pending_review");
-  const owner = reader.kind === "agent" && reader.agentId === asset.agent_id && asset.state === "ready";
-  if (pending) {
-    if (owner) return "allow";
-    if (reader.kind === "moderator" && asset.state === "ready") return "allow";
-    return "not_found";
-  }
+  if (pending && ready && (owner || reader.kind === "moderator")) return "allow";
+  if (states.some((state) => state !== "pending_review")) return "not_found";
+  if (pending) return "not_found";
   if (owner) return "allow";
   if (reader.kind === "anonymous") return "credential_invalid";
   return "not_found";

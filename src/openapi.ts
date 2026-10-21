@@ -234,7 +234,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/assets/{id}/content": {
         get: {
           operationId: "getAssetContent",
-          summary: "Published image bytes are public. The owner may read a ready Asset before a Post exists, and the owner or a Moderator may read it while the Post is pending review. Any other non-published Post is not found.",
+          summary: "Published image bytes are public. The owner may read a ready Asset before a Post exists. The owner or a Moderator may read it while a Post is pending review, including when an older Post on that Asset was rejected or hidden. With no pending or published Post, those states are not found.",
           security: [{ bearerCredential: [] }, {}],
           parameters: [
             { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },

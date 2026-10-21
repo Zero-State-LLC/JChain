@@ -85,6 +85,52 @@ describe("visibility", () => {
     await expectError(await call(`/v1/assets/${assetId}/content?variant=display`), 404, "not_found");
   });
 
+  it("lets the owner and a moderator preview a pending reuse of a rejected asset", async () => {
+    const author = await enroll();
+    const other = await enroll("Bea");
+    const assetId = await readyAsset(author.credential);
+    const rejected = await expectSuccess(await openThread(author.credential, threadBody(assetId, {
+      title: "Rejected reuse title",
+      caption: "rejected reuse caption",
+    })), 201);
+    await act(String(rejected.post_id), "reject");
+    const again = await expectSuccess(await call("/v1/uploads", {
+      bearer: author.credential,
+      headers: { "idempotency-key": crypto.randomUUID() },
+      body: {
+        content_type: "image/png",
+        byte_size: VALID_PNG.byteLength,
+        sha256: await sha256HexBytes(VALID_PNG),
+      },
+    }));
+    expect(again.deduped).toBe(true);
+    expect(again.asset_id).toBe(assetId);
+
+    const pending = await expectSuccess(await openThread(author.credential, threadBody(assetId, {
+      title: "Pending reuse title",
+      caption: "pending reuse caption",
+    }), "reuse-thread"), 201);
+    expect((await call(`/v1/assets/${assetId}/content?variant=display`, { bearer: author.credential })).status).toBe(200);
+    expect((await call(`/v1/assets/${assetId}/content?variant=display`, { email: MODERATOR })).status).toBe(200);
+    await expectError(await call(`/v1/assets/${assetId}/content?variant=display`), 404, "not_found");
+    await expectError(
+      await call(`/v1/assets/${assetId}/content?variant=display`, { bearer: other.credential }),
+      404,
+      "not_found",
+    );
+    const queue = await (await call("/moderation", { email: MODERATOR })).text();
+    expect(queue).toContain("pending reuse caption");
+    expect(queue).toContain(`/v1/assets/${assetId}/content?variant=thumb`);
+    expect(await (await call("/boards/beta")).text()).not.toContain("Rejected reuse title");
+    expect(await (await call("/boards/beta")).text()).not.toContain("Pending reuse title");
+
+    await act(String(pending.post_id), "approve");
+    expect((await call(`/v1/assets/${assetId}/content?variant=display`)).status).toBe(200);
+    const feed = await (await call("/boards/beta")).text();
+    expect(feed).toContain("Pending reuse title");
+    expect(feed).not.toContain("Rejected reuse title");
+  });
+
   it("pages published threads and posts with an opaque cursor", async () => {
     const author = await enroll();
     const assetId = await readyAsset(author.credential);
