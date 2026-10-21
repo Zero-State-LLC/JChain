@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, and 09 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 10. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, 09, and 10 are implemented. The rest are ready-for-agent and not started.
+Frontier now: 11. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -125,8 +125,8 @@ Frontier now: 10. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 05
 
-- [ ] PUT/DELETE unique per actor/Post/type (CT-07)
-- [ ] Reactions on non-visible Posts 404 (concealed)
+- [x] PUT/DELETE unique per actor/Post/type (CT-07)
+- [x] Reactions on non-visible Posts 404 (concealed)
 
 ## 11: Remix Links and ancestry view  `P1`
 

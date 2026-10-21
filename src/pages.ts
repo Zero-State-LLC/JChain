@@ -18,6 +18,7 @@ type FeedRow = {
 };
 
 type ThreadRow = FeedRow & {
+  post_id: string;
   caption: string;
   provenance_source: string | null;
   provenance_model: string | null;
@@ -25,6 +26,8 @@ type ThreadRow = FeedRow & {
   license: string | null;
   remix_of_post_id: string | null;
 };
+
+const REACTION_TYPES = ["plus", "minus", "laugh", "interest"] as const;
 
 type QueueRow = {
   post_id: string;
@@ -83,8 +86,8 @@ async function threadPage(c: PageCtx): Promise<Response> {
     return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
   }
   const listed = await c.env.DB.prepare(
-    `SELECT threads.id AS thread_id, posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
-            posts.asset_id AS asset_id, posts.provenance_source AS provenance_source,
+    `SELECT threads.id AS thread_id, posts.id AS post_id, posts.title AS title, posts.caption AS caption,
+            posts.alt_text AS alt_text, posts.asset_id AS asset_id, posts.provenance_source AS provenance_source,
             posts.provenance_model AS provenance_model, posts.rights_attestation AS rights_attestation,
             posts.license AS license, posts.remix_of_post_id AS remix_of_post_id
        FROM posts
@@ -94,37 +97,62 @@ async function threadPage(c: PageCtx): Promise<Response> {
   ).bind(threadId).all<ThreadRow>();
   const rows = listed.results ?? [];
   if (rows.length === 0) return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
+  const counts = await reactionCounts(c.env.DB, threadId);
   const titled = rows.find((row) => row.title !== null);
   const title = titled?.title ?? "Thread";
   const body = [
     `<p><a href="/boards/beta">Board</a></p>`,
     `<p><a href="/reports?target_type=thread&amp;target_id=${escapeHtml(threadId)}">Report this thread</a></p>`,
     `<h1>${escapeHtml(title)}</h1>`,
-    ...rows.map((row) => row.title === null ? replyBlock(row) : openingBlock(row)),
+    ...rows.map((row) => row.title === null ? replyBlock(row, counts) : openingBlock(row, counts)),
   ].join("");
   return htmlResponse(requestId, document(title, body));
 }
 
-function openingBlock(row: ThreadRow): string {
+function openingBlock(row: ThreadRow, counts: Map<string, Map<string, number>>): string {
   return [
     imageTag(row.asset_id, row.alt_text, "display"),
     `<p>${escapeHtml(row.caption)}</p>`,
+    reactionList(counts.get(row.post_id)),
     declarationList(row),
     remixLine(row),
   ].join("");
 }
 
-function replyBlock(row: ThreadRow): string {
+function replyBlock(row: ThreadRow, counts: Map<string, Map<string, number>>): string {
   const image = row.asset_id === null ? "" : imageTag(row.asset_id, row.alt_text, "display");
   return [
     "<article>",
     "<h2>Reply</h2>",
     image,
     `<p>${escapeHtml(row.caption)}</p>`,
+    reactionList(counts.get(row.post_id)),
     declarationList(row),
     remixLine(row),
     "</article>",
   ].join("");
+}
+
+async function reactionCounts(db: D1Database, threadId: string): Promise<Map<string, Map<string, number>>> {
+  const listed = await db.prepare(
+    `SELECT reactions.post_id AS post_id, reactions.type AS type, COUNT(*) AS n
+       FROM reactions
+       JOIN posts ON posts.id = reactions.post_id
+      WHERE posts.thread_id = ? AND ${VISIBLE_POST}
+      GROUP BY reactions.post_id, reactions.type`,
+  ).bind(threadId).all<{ post_id: string; type: string; n: number }>();
+  const counts = new Map<string, Map<string, number>>();
+  for (const row of listed.results ?? []) {
+    const current = counts.get(row.post_id) ?? new Map<string, number>();
+    current.set(row.type, Number(row.n));
+    counts.set(row.post_id, current);
+  }
+  return counts;
+}
+
+function reactionList(counts: Map<string, number> | undefined): string {
+  const items = REACTION_TYPES.map((type) => `<dt>${type}</dt><dd>${counts?.get(type) ?? 0}</dd>`);
+  return `<dl>${items.join("")}</dl>`;
 }
 
 function declarationList(row: ThreadRow): string {
