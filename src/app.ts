@@ -5,6 +5,7 @@ import { utcSeconds, uuidv7 } from "./ids";
 import { openApiDocument } from "./openapi";
 import { parsePolicy, type Policy } from "./policy";
 import { requireAgent, requireOperator, requireReader } from "./principal";
+import { mountBrowse } from "./browse";
 import { mountModeration } from "./moderation";
 import { mountPages } from "./pages";
 import { mountThreads } from "./threads";
@@ -124,6 +125,7 @@ app.get("/v1/openapi.json", async (c) => {
 
 mountUploads(app);
 mountThreads(app);
+mountBrowse(app);
 mountModeration(app);
 mountPages(app);
 

@@ -11,7 +11,8 @@ import { ERRORS, type ErrorCode, bytesResponse, errorResponse, isValidRunId, jso
 import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency";
 import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import type { Policy } from "./policy";
-import { requireAgent } from "./principal";
+import { requireAgent, requireModerator } from "./principal";
+import { type AssetReader, projectAsset } from "./visibility";
 
 type UploadEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type UploadApp = Hono<UploadEnv>;
@@ -213,22 +214,27 @@ async function assetContent(c: Ctx): Promise<Response> {
   if (assetId === undefined || !isUuidV7(assetId)) return errorResponse(requestId, "not_found");
   const variant = c.req.query("variant");
   if (variant !== "display" && variant !== "thumb") return errorResponse(requestId, "malformed");
-  if (await hasPublishedPost(c.env.DB, assetId)) return derivativeResponse(c.env, requestId, assetId, variant);
-  const principal = await requireAgent(c.env, c.req.raw);
-  if (!principal.ok) return errorResponse(requestId, principal.code);
-  if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
-  const asset = await c.env.DB.prepare(
-    "SELECT state FROM assets WHERE id = ? AND agent_id = ?",
-  ).bind(assetId, principal.agentId).first<{ state: string }>();
-  if (!asset || asset.state !== "ready") return errorResponse(requestId, "not_found");
+  const reader = await assetReader(c);
+  if ("error" in reader) {
+    const published = await projectAsset(c.env.DB, assetId, { kind: "anonymous" });
+    if (published === "allow") return derivativeResponse(c.env, requestId, assetId, variant);
+    return errorResponse(requestId, reader.error);
+  }
+  const decision = await projectAsset(c.env.DB, assetId, reader);
+  if (decision !== "allow") return errorResponse(requestId, decision);
   return derivativeResponse(c.env, requestId, assetId, variant);
 }
 
-async function hasPublishedPost(db: D1Database, assetId: string): Promise<boolean> {
-  const row = await db.prepare(
-    "SELECT id FROM posts WHERE asset_id = ? AND state = 'published' LIMIT 1",
-  ).bind(assetId).first<{ id: string }>();
-  return row !== null;
+async function assetReader(c: Ctx): Promise<AssetReader | { error: ErrorCode }> {
+  if (c.req.raw.headers.get("authorization") !== null) {
+    const principal = await requireAgent(c.env, c.req.raw);
+    if (!principal.ok) return { error: principal.code };
+    if (principal.kind !== "agent") return { error: "credential_invalid" };
+    return { kind: "agent", agentId: principal.agentId };
+  }
+  const moderator = await requireModerator(c.env, c.req.raw, c.executionCtx);
+  if (moderator.ok && moderator.kind === "moderator") return { kind: "moderator" };
+  return { kind: "anonymous" };
 }
 
 async function derivativeResponse(

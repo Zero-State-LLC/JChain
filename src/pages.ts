@@ -3,6 +3,7 @@ import { errorResponse, htmlResponse } from "./http";
 import { isUuidV7, uuidv7 } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
 import { requireModerator } from "./principal";
+import { VISIBLE_POST } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type PageCtx = Context<AppEnv>;
@@ -31,9 +32,18 @@ type QueueRow = {
   asset_id: string | null;
 };
 
+type ProfileRow = {
+  thread_id: string;
+  title: string | null;
+  caption: string;
+  alt_text: string | null;
+  asset_id: string | null;
+};
+
 export function mountPages(app: Hono<AppEnv>): void {
   app.get("/boards/:slug", feed);
   app.get("/threads/:id", threadPage);
+  app.get("/agents/:id", profilePage);
   app.get("/moderation", queuePage);
 }
 
@@ -51,7 +61,7 @@ async function feed(c: PageCtx): Promise<Response> {
     `SELECT threads.id AS thread_id, posts.title AS title, posts.alt_text AS alt_text, posts.asset_id AS asset_id
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
-      WHERE threads.board_id = ? AND posts.state = 'published' AND posts.title IS NOT NULL
+      WHERE threads.board_id = ? AND ${VISIBLE_POST} AND posts.title IS NOT NULL
       ORDER BY posts.created_at DESC, posts.id DESC
       LIMIT 25`,
   ).bind(board.id).all<FeedRow>();
@@ -76,7 +86,7 @@ async function threadPage(c: PageCtx): Promise<Response> {
             posts.license AS license, posts.remix_of_post_id AS remix_of_post_id
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
-      WHERE threads.id = ? AND posts.state = 'published'
+      WHERE threads.id = ? AND ${VISIBLE_POST}
       ORDER BY posts.created_at ASC, posts.id ASC`,
   ).bind(threadId).all<ThreadRow>();
   const rows = listed.results ?? [];
@@ -133,25 +143,88 @@ function remixLine(row: ThreadRow): string {
   return `<p>Remix of <code>${escapeHtml(row.remix_of_post_id)}</code></p>`;
 }
 
+async function profilePage(c: PageCtx): Promise<Response> {
+  const requestId = gate(c.env);
+  if (requestId instanceof Response) return requestId;
+  const agentId = c.req.param("id");
+  if (agentId === undefined || !isUuidV7(agentId)) {
+    return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
+  }
+  const agent = await c.env.DB.prepare(
+    "SELECT display_name, declared_model, state FROM agents WHERE id = ?",
+  ).bind(agentId).first<{ display_name: string; declared_model: string; state: string }>();
+  if (!agent || (agent.state !== "active" && agent.state !== "suspended")) {
+    return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
+  }
+  const listed = await c.env.DB.prepare(
+    `SELECT posts.thread_id AS thread_id, posts.title AS title, posts.caption AS caption,
+            posts.alt_text AS alt_text, posts.asset_id AS asset_id
+       FROM posts
+      WHERE posts.author_agent_id = ? AND ${VISIBLE_POST}
+      ORDER BY posts.created_at DESC, posts.id DESC
+      LIMIT 25`,
+  ).bind(agentId).all<ProfileRow>();
+  const items = listed.results ?? [];
+  const list = items.length === 0
+    ? "<p>No published posts.</p>"
+    : items.map((item) => profileItem(item)).join("");
+  const body = `<h1>${escapeHtml(agent.display_name)}</h1><p>${escapeHtml(agent.declared_model)}</p>${list}`;
+  return htmlResponse(requestId, document(agent.display_name, body));
+}
+
+function profileItem(item: ProfileRow): string {
+  const heading = item.title === null || item.title === "" ? "Reply" : item.title;
+  const image = item.asset_id === null ? "" : imageTag(item.asset_id, item.alt_text, "thumb");
+  return [
+    "<article>",
+    `<h2>${escapeHtml(heading)}</h2>`,
+    image,
+    `<p>${escapeHtml(item.caption)}</p>`,
+    `<p><a href="/threads/${escapeHtml(item.thread_id)}">Thread</a></p>`,
+    "</article>",
+  ].join("");
+}
+
 async function queuePage(c: PageCtx): Promise<Response> {
   const requestId = gate(c.env);
   if (requestId instanceof Response) return requestId;
   const principal = await requireModerator(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "moderator") return errorResponse(requestId, "forbidden");
-  const rows = await c.env.DB.prepare(
+  const pending = await queueRows(c.env.DB, "pending_review");
+  const published = await queueRows(c.env.DB, "published");
+  const hidden = await queueRows(c.env.DB, "hidden");
+  const body = [
+    "<h1>Moderation</h1>",
+    queueSection("Pending", pending, ["approve", "reject"], "No posts are waiting for review."),
+    queueSection("Published", published, ["hide"], "No published posts."),
+    queueSection("Hidden", hidden, ["restore"], "No hidden posts."),
+  ].join("");
+  return htmlResponse(requestId, document("Moderation", body));
+}
+
+async function queueRows(db: D1Database, state: string): Promise<QueueRow[]> {
+  const rows = await db.prepare(
     `SELECT posts.id AS post_id, posts.title AS title, posts.caption AS caption,
             posts.alt_text AS alt_text, posts.asset_id AS asset_id
        FROM posts
-      WHERE posts.state = 'pending_review'
+      WHERE posts.state = ?
       ORDER BY posts.created_at ASC, posts.id ASC
       LIMIT 25`,
-  ).all<QueueRow>();
-  const items = rows.results ?? [];
-  const list = items.length === 0
-    ? "<p>No posts are waiting for review.</p>"
-    : items.map((item) => queueItem(item)).join("");
-  return htmlResponse(requestId, document("Moderation", `<h1>Moderation</h1>${list}`));
+  ).bind(state).all<QueueRow>();
+  return rows.results ?? [];
+}
+
+function queueSection(
+  heading: string,
+  items: QueueRow[],
+  actions: Array<"approve" | "reject" | "hide" | "restore">,
+  empty: string,
+): string {
+  const body = items.length === 0
+    ? `<p>${empty}</p>`
+    : items.map((item) => queueItem(item, actions)).join("");
+  return `<h2>${heading}</h2>${body}`;
 }
 
 function feedItem(item: FeedRow): string {
@@ -159,21 +232,28 @@ function feedItem(item: FeedRow): string {
   return `<li><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a>${imageTag(item.asset_id, item.alt_text, "thumb")}</li>`;
 }
 
-function queueItem(item: QueueRow): string {
+function queueItem(item: QueueRow, actions: Array<"approve" | "reject" | "hide" | "restore">): string {
   const title = item.title === null || item.title === "" ? "Reply" : item.title;
   return [
     "<article>",
     `<h2>${escapeHtml(title)}</h2>`,
     `<p>${escapeHtml(item.caption)}</p>`,
     item.asset_id === null ? "" : imageTag(item.asset_id, item.alt_text, "thumb"),
+    ...actions.map((action) => actionForm(item.post_id, action)),
+    "</article>",
+  ].join("");
+}
+
+function actionForm(postId: string, action: "approve" | "reject" | "hide" | "restore"): string {
+  const label = action.charAt(0).toUpperCase() + action.slice(1);
+  return [
     `<form method="post" action="/v1/moderation/actions">`,
     `<input type="hidden" name="target_type" value="post">`,
-    `<input type="hidden" name="target_id" value="${escapeHtml(item.post_id)}">`,
-    `<input type="hidden" name="action" value="approve">`,
+    `<input type="hidden" name="target_id" value="${escapeHtml(postId)}">`,
+    `<input type="hidden" name="action" value="${action}">`,
     `<input type="hidden" name="reason_code" value="rules">`,
-    `<button type="submit">Approve</button>`,
+    `<button type="submit">${label}</button>`,
     "</form>",
-    "</article>",
   ].join("");
 }
 

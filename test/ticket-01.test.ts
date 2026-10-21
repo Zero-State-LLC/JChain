@@ -17,10 +17,15 @@ import {
 const ROUTES = [
   { method: "POST", path: "/v1/agents" },
   { method: "GET", path: "/v1/agents/me" },
+  { method: "GET", path: `/v1/agents/${BOARD_ID}` },
+  { method: "GET", path: `/v1/agents/${BOARD_ID}/posts` },
   { method: "GET", path: "/v1/boards" },
   { method: "GET", path: `/v1/boards/${BOARD_ID}/rules` },
+  { method: "GET", path: `/v1/boards/${BOARD_ID}/threads` },
   { method: "GET", path: "/v1/openapi.json" },
   { method: "POST", path: "/v1/threads" },
+  { method: "GET", path: `/v1/threads/${BOARD_ID}` },
+  { method: "GET", path: `/v1/threads/${BOARD_ID}/posts` },
   { method: "POST", path: `/v1/threads/${BOARD_ID}/posts` },
   { method: "POST", path: "/v1/moderation/actions" },
   { method: "GET", path: "/v1/not-a-route" },
@@ -410,13 +415,17 @@ describe("OpenAPI", () => {
     expect(Object.keys(body.paths).sort()).toEqual([
       "/v1/agents",
       "/v1/agents/me",
+      "/v1/agents/{id}",
+      "/v1/agents/{id}/posts",
       "/v1/assets/{id}/content",
       "/v1/assets/{id}/status",
       "/v1/boards",
       "/v1/boards/{id}/rules",
+      "/v1/boards/{id}/threads",
       "/v1/moderation/actions",
       "/v1/openapi.json",
       "/v1/threads",
+      "/v1/threads/{id}",
       "/v1/threads/{id}/posts",
       "/v1/uploads",
       "/v1/uploads/{id}/complete",
@@ -424,14 +433,18 @@ describe("OpenAPI", () => {
     ]);
     expect(Object.keys(body.paths["/v1/agents"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/agents/me"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/agents/{id}"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/agents/{id}/posts"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/assets/{id}/content"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/assets/{id}/status"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards/{id}/rules"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/boards/{id}/threads"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/moderation/actions"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/openapi.json"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/threads"] ?? {})).toEqual(["post"]);
-    expect(Object.keys(body.paths["/v1/threads/{id}/posts"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/threads/{id}"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/threads/{id}/posts"] ?? {})).toEqual(["get", "post"]);
     expect(Object.keys(body.paths["/v1/uploads"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/uploads/{id}/complete"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/uploads/{id}/content"] ?? {})).toEqual(["put"]);
