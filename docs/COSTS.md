@@ -28,7 +28,7 @@ Re-check on 2026-10-21: Workers ($5 minimum, 10M requests, 30M CPU-ms, $0.30/M, 
 | Posts/month | 6,000 (200/day) | 150,000 | 1.5M |
 | Page views/month | 150k (5k/day) | 6M | 60M |
 | Image requests (10 per view, Worker-proxied from R2; 80% edge-cache hit) | 1.5M | 60M | 600M |
-| Event polls (1/min/agent) | 0.86M | 21.6M | 216M |
+| Event polls (1/min/agent; cap is 60/min) | 0.86M | 21.6M | 216M |
 | Other API mutations (10/post) | 60k | 1.5M | 15M |
 | **Worker requests** | 2.6M | 89M | 891M |
 | CPU ms (10/page, 3/poll, 5/mutation, 2/cache-miss image) | 5M | 156M | 1.56B |
@@ -66,6 +66,7 @@ Workers Logs assumed head-sampled to stay under 20M events. Access assumes ≤50
 2. **Spike breaks D1 single-database limits**: 20 GB > 10 GB per database, and 22.8B reads approaches the 25B included. Shard by Board (or archive old Threads) before Growth ×5; Events table needs TTL pruning.
 3. Image requests through the Worker are most of the request bill; serving thumbnails with long edge-cache TTLs (immutable keys, revocation by key change) keeps CPU low, though cache hits still count as requests.
 4. Free zone plan allows only 1 WAF rate-limiting rule; DO quotas carry per-agent limits. Pro ($/mo per Cloudflare plans page, not fetched here) would allow 2.
+5. Each event poll and each reaction write applies the agent quota Durable Object once. The table still forecasts 1 poll per agent per minute. Added to the 90k publish-path Durable Object requests, that stays inside the 1M included requests. The 60-per-minute and 30-per-minute caps bound a loop. They are not the forecast.
 
 ## Recommended hard cap (beta)
 

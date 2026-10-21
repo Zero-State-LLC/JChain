@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { encodeCursor } from "../src/browse";
 import worker from "../src/index";
+import betaDocument from "../policy/beta.json";
 import { runReferenceClient, type Transport } from "../src/reference-client";
 import { VALID_PNG } from "./fixtures/bytes";
 import { BOARD_ID, MODERATOR, OPERATOR, call, resetAndSeed } from "./harness";
@@ -99,6 +100,55 @@ describe("events", () => {
     expect(removed.find((item) => item.resource_id === replyId)?.type).toBe("post.withdrawn");
     expect(removed.find((item) => item.resource_id === replyId && item.type === "post.published")).toBeUndefined();
     expect(JSON.stringify(removed)).not.toContain("visible reply words");
+  });
+
+  it("rejects a second event poll inside the same minute", async () => {
+    const agent = await enroll();
+    const policy = agentPolicy({ events_per_minute: 1 });
+    const first = await call("/v1/events", { bearer: agent.credential, policy });
+    expect(first.status).toBe(200);
+    const second = await call("/v1/events", { bearer: agent.credential, policy });
+    expect(second.status).toBe(429);
+    expect(second.headers.get("retry-after")).toMatch(/^[1-9]\d*$/);
+    const body = await second.json() as {
+      error?: { code?: string };
+      limits?: { events?: { remaining?: number }; mutations?: { remaining?: number } };
+    };
+    expect(body.error?.code).toBe("rate_limited");
+    expect(body.limits?.events?.remaining).toBe(0);
+    expect(body.limits?.mutations?.remaining).toBe(20);
+  });
+
+  it("does not spend an event poll on a malformed query", async () => {
+    const agent = await enroll();
+    const policy = agentPolicy({ events_per_minute: 1 });
+    await expectError(await call("/v1/events?after=not-a-cursor", { bearer: agent.credential, policy }), 400, "malformed");
+    const first = await call("/v1/events", { bearer: agent.credential, policy });
+    expect(first.status).toBe(200);
+    const second = await call("/v1/events", { bearer: agent.credential, policy });
+    expect(second.status).toBe(429);
+  });
+
+  it("spends an event poll on an expired cursor", async () => {
+    const agent = await enroll();
+    const policy = agentPolicy({ events_per_minute: 1 });
+    const expired = await call(`/v1/events?after=${encodeCursor("2000-01-01T00:00:00Z", MISSING_ID)}`, {
+      bearer: agent.credential,
+      policy,
+    });
+    expect(expired.status).toBe(410);
+    const next = await call("/v1/events", { bearer: agent.credential, policy });
+    expect(next.status).toBe(429);
+  });
+
+  it("accepts sixty event polls per minute and rejects a higher ceiling", async () => {
+    const agent = await enroll();
+    const allowed = await call("/v1/events", { bearer: agent.credential, policy: agentPolicy({ events_per_minute: 60 }) });
+    expect(allowed.status).toBe(200);
+    const raised = await call("/v1/events", { bearer: agent.credential, policy: agentPolicy({ events_per_minute: 61 }) });
+    expect(raised.status).toBe(503);
+    const body = await raised.json() as { error?: { code?: string } };
+    expect(body.error?.code).toBe("policy_missing");
   });
 });
 
@@ -349,6 +399,14 @@ async function notedCount(): Promise<number> {
 async function sha256HexBytes(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function agentPolicy(agent: { events_per_minute?: number; reactions_per_minute?: number }): string {
+  const policy = JSON.parse(JSON.stringify(betaDocument)) as {
+    quotas: { agent: Record<string, number> };
+  };
+  Object.assign(policy.quotas.agent, agent);
+  return JSON.stringify(policy);
 }
 
 async function expectError(response: Response, status: number, code: string): Promise<void> {

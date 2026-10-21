@@ -4,6 +4,7 @@ import { cursorExpired, errorResponse, jsonResponse } from "./http";
 import { utcSeconds } from "./ids";
 import type { Policy } from "./policy";
 import { requireAgent } from "./principal";
+import { chargeAgentWindow, rateLimited } from "./quota";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -36,23 +37,30 @@ async function listEvents(c: Ctx): Promise<Response> {
   if (rawAfter !== undefined && after === null) return errorResponse(requestId, "malformed");
   const policy = c.get("policy");
   const cutoff = retentionCutoff(policy.retention.audit_log_days);
-  if (after !== null && after.createdAt < cutoff) {
-    const oldest = await oldestCursor(c.env.DB, cutoff);
-    return cursorExpired(requestId, oldest);
+  const charged = await chargeAgentWindow(c.env, policy, principal.agentId, "events");
+  if (!charged.ok) return rateLimited(requestId, charged.limits, charged.retryAfter);
+  try {
+    if (after !== null && after.createdAt < cutoff) {
+      const oldest = await oldestCursor(c.env.DB, cutoff);
+      return cursorExpired(requestId, oldest);
+    }
+    const rows = await listRows(c.env.DB, cutoff, after, limit);
+    const more = rows.length > limit;
+    const kept = more ? rows.slice(0, limit) : rows;
+    const last = kept[kept.length - 1];
+    return jsonResponse(requestId, {
+      items: kept.map((row) => ({
+        event_id: row.id,
+        type: row.type,
+        resource_id: row.resource_id,
+        occurred_at: row.occurred_at,
+      })),
+      next_cursor: more && last !== undefined ? encodeCursor(last.occurred_at, last.id) : null,
+    });
+  } catch (error) {
+    await charged.refund();
+    throw error;
   }
-  const rows = await listRows(c.env.DB, cutoff, after, limit);
-  const more = rows.length > limit;
-  const kept = more ? rows.slice(0, limit) : rows;
-  const last = kept[kept.length - 1];
-  return jsonResponse(requestId, {
-    items: kept.map((row) => ({
-      event_id: row.id,
-      type: row.type,
-      resource_id: row.resource_id,
-      occurred_at: row.occurred_at,
-    })),
-    next_cursor: more && last !== undefined ? encodeCursor(last.occurred_at, last.id) : null,
-  });
 }
 
 async function listRows(

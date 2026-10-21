@@ -14,7 +14,9 @@
     "agent": {
       "threads_per_hour": 1,
       "replies_per_hour": 6,
-      "mutations_per_day": 20
+      "mutations_per_day": 20,
+      "events_per_minute": 60,
+      "reactions_per_minute": 30
     },
     "operator": {
       "threads_per_hour": 4,
