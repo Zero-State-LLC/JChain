@@ -101,7 +101,7 @@ describe("publishing stop", () => {
     expect(before.headers.get("content-security-policy")).toContain("script-src 'none'");
     const html = await before.text();
     expect(html).toContain("<p>Disengaged</p>");
-    expect(html).toContain('action="/v1/admin/publishing-stop"');
+    expect(html).toContain('action="/moderation/publishing-stop"');
     expect(html).toContain('name="engaged" value="true"');
     expect(html).toContain('name="engaged" value="false"');
     expect(html).toContain(">Engage</button>");

@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import worker from "../src/index";
 import { decodeCursor, encodeCursor } from "../src/browse";
 import { VALID_PNG } from "./fixtures/bytes";
-import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, releaseThread, resetAndSeed } from "./harness";
+import { BOARD_ID, INSTRUCTIONS, MODERATOR, OPERATOR, UUID_V7, call, releaseThread, resetAndSeed } from "./harness";
 
 const HELD_CURSOR = encodeCursor("2026-01-01T00:00:00Z", "01900000-0000-7000-8000-000000000099");
 
@@ -50,14 +50,29 @@ describe("accessible pages", () => {
     expect(keyboardShell(feedHtml)).toBe(true);
     expect(feedHtml).toContain("Square");
     expect(feedHtml).toContain('alt="A square"');
+    expect(feedHtml).toContain("<table");
+    expect(feedHtml).toContain("Ada");
+    expect(feedHtml).toContain("<time");
+    expect(feedHtml).toContain("<td>1</td>");
+    expect(feedHtml).toContain("<h2>Rules</h2>");
+    expect(feedHtml).toContain(INSTRUCTIONS);
+    expect(feedHtml).toContain('<meta name="viewport" content="width=device-width">');
     expect(feedHtml).not.toContain("Held");
     expect(feedHtml).not.toContain("<script");
+    expect(feedHtml).not.toContain("<style");
+    expect(feedHtml).not.toContain(" style=");
 
     const threadHtml = await page(`/threads/${threadId}`);
     expect(keyboardShell(threadHtml)).toBe(true);
     expect(threadHtml).toContain('alt="A square"');
     expect(threadHtml).toContain("owner caption");
     expect(threadHtml).toContain("plain reply");
+    expect(threadHtml).toContain("<article>");
+    expect(threadHtml).toContain("<time");
+    expect(threadHtml).toContain(`<code>${postId}</code>`);
+    expect(threadHtml).toContain(`<code>${replyId}</code>`);
+    expect(threadHtml).toContain("<h2>Reactions</h2>");
+    expect(threadHtml).toContain("<h2>Provenance</h2>");
     expect(threadHtml).toContain(`<a href="/agents/${ada.agentId}">Ada</a>`);
     expect(threadHtml).toContain(`href="/reports?target_type=post&amp;target_id=${postId}"`);
     expect(threadHtml).toContain(`href="/reports?target_type=post&amp;target_id=${replyId}"`);
@@ -70,11 +85,21 @@ describe("accessible pages", () => {
     expect(missingHtml).toContain('alt=""');
     expect(missingHtml).toContain("Image description missing");
     expect(missingHtml).toContain("plain reply");
+    const replyArticle = articleContaining(missingHtml, "plain reply");
+    expect(replyArticle).not.toContain("Image description missing");
+    await env.DB.prepare("UPDATE posts SET asset_id = NULL WHERE id = ?").bind(replyId).run();
+    const nullAsset = await page(`/threads/${threadId}`);
+    const nullReply = articleContaining(nullAsset, "plain reply");
+    expect(nullReply).not.toContain("Image description missing");
+    expect(nullAsset).toContain("Image description missing");
 
     const profileHtml = await page(`/agents/${ada.agentId}`);
     expect(keyboardShell(profileHtml)).toBe(true);
     expect(profileHtml).toContain("Ada");
+    expect(profileHtml).toContain("Declared model");
     expect(profileHtml).toContain("fixture-model");
+    expect(profileHtml).toContain("<time");
+    expect(profileHtml).toContain(`<code>${postId}</code>`);
     expect(profileHtml).toContain("owner caption");
     expect(profileHtml).toContain("plain reply");
     expect(profileHtml).toContain(`href="/reports?target_type=post&amp;target_id=${postId}"`);
@@ -86,18 +111,34 @@ describe("accessible pages", () => {
     expect(keyboardShell(queueHtml)).toBe(true);
     expect(queueHtml).toContain("Held");
     expect(queueHtml).toContain(`<button type="submit">Approve</button>`);
-    expect(queueHtml).toContain(`action="/v1/moderation/actions"`);
+    expect(queueHtml).toContain(`action="/moderation/actions"`);
+    expect(queueHtml).toContain(`<select name="reason_code">`);
+    expect(queueHtml).toContain(`<option value="rules" selected>rules</option>`);
+    expect(queueHtml).toMatch(/Storage bytes: \d+ \(\d+\.\d{2} GiB\)/);
     expect(queueHtml).toContain("<p>Disengaged</p>");
     expect(queueHtml).toContain('href="/boards/beta"');
     expect(queueHtml).not.toContain("<script");
+    expect(queueHtml).not.toContain("<style");
+    expect(queueHtml).not.toContain(" style=");
     expect(queueHtml.match(/<button type="submit">Approve<\/button>/g)).toHaveLength(1);
     await expectError(await call("/moderation"), 401, "access_required");
     await expectError(await call("/moderation", { bearer: ada.credential }), 403, "forbidden");
 
-    const reportHtml = await page(`/reports?target_type=post&target_id=${postId}`);
-    expect(keyboardShell(reportHtml)).toBe(true);
+    const anonReport = await page(`/reports?target_type=post&target_id=${postId}`);
+    expect(keyboardShell(anonReport)).toBe(true);
+    expect(anonReport).toContain('href="/boards/beta"');
+    expect(anonReport).toContain("Browser reports are for an Operator.");
+    expect(anonReport).not.toContain(`action="/v1/reports"`);
+    expect(anonReport).not.toContain("turnstile");
+    expect(anonReport).not.toContain("<form");
+    expect(anonReport).not.toContain("<style");
+    expect(anonReport).not.toContain(" style=");
+    const reportHtml = await page(`/reports?target_type=post&target_id=${postId}`, OPERATOR);
     expect(reportHtml).toContain('href="/boards/beta"');
-    expect(reportHtml).toContain(`action="/v1/reports"`);
+    expect(reportHtml).toContain(`action="/reports"`);
+    expect(reportHtml).not.toContain("turnstile");
+    expect(reportHtml).not.toContain("<style");
+    expect(reportHtml).not.toContain(" style=");
     expect(reportHtml).toContain(`for="target_type"`);
     expect(reportHtml).toContain(`for="reason_code"`);
     expect(reportHtml).toContain(`for="detail"`);
@@ -110,6 +151,60 @@ describe("accessible pages", () => {
     expect(hidden.status).toBe(404);
     expect(await hidden.text()).not.toContain("Report this thread");
     expect((await call(`/threads/${heldId}?cursor=not-a-cursor`)).status).toBe(404);
+
+    const reportForm = new URLSearchParams({
+      target_type: "post",
+      target_id: postId,
+      reason_code: "rules",
+      detail: "catalog",
+    });
+    const htmlReport = await call("/reports", {
+      method: "POST",
+      email: OPERATOR,
+      raw: new TextEncoder().encode(reportForm.toString()),
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+    });
+    expect(htmlReport.status).toBe(201);
+    expect(htmlReport.headers.get("content-type")).toContain("text/html");
+    expect(await htmlReport.text()).toContain('href="/boards/beta"');
+    const jsonReport = await call("/v1/reports", {
+      email: OPERATOR,
+      body: { target_type: "post", target_id: postId, reason_code: "spam" },
+    });
+    expect(jsonReport.status).toBe(201);
+    expect(jsonReport.headers.get("content-type")).toContain("application/json");
+    const htmlReportError = await call("/reports", {
+      method: "POST",
+      raw: new TextEncoder().encode("target_type"),
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+    });
+    expect(htmlReportError.status).toBe(403);
+    expect(htmlReportError.headers.get("content-type")).toContain("text/html");
+    const htmlReportErrorBody = await htmlReportError.text();
+    expect(htmlReportErrorBody).toContain("Browser reports are for an Operator.");
+    expect(htmlReportErrorBody).not.toContain("\"error\"");
+
+    const actionFields = {
+      target_type: "post",
+      target_id: postId,
+      action: "hide",
+      reason_code: "rules",
+    };
+    const htmlAction = await call("/moderation/actions", {
+      method: "POST",
+      email: MODERATOR,
+      raw: new TextEncoder().encode(new URLSearchParams(actionFields).toString()),
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+    });
+    expect(htmlAction.status).toBe(200);
+    expect(htmlAction.headers.get("content-type")).toContain("text/html");
+    expect(await htmlAction.text()).toContain('href="/moderation"');
+    const jsonAction = await call("/v1/moderation/actions", {
+      email: MODERATOR,
+      body: { ...actionFields, target_id: replyId },
+    });
+    expect(jsonAction.status).toBe(200);
+    expect(jsonAction.headers.get("content-type")).toContain("application/json");
   });
 
   it("pages the feed, thread, and profile with the shared cursor", async () => {
@@ -235,6 +330,11 @@ describe("accessible pages", () => {
   });
 });
 
+function articleContaining(html: string, marker: string): string {
+  const found = html.split("<article>").slice(1).find((part) => part.includes(marker));
+  return found?.split("</article>")[0] ?? "";
+}
+
 function keyboardShell(html: string): boolean {
   const skip = html.indexOf('<a href="#content">Skip to content</a>');
   const main = html.indexOf('<main id="content">');
@@ -242,7 +342,7 @@ function keyboardShell(html: string): boolean {
 }
 
 function nextHref(html: string, label: string): string | null {
-  const found = html.match(new RegExp(`<nav aria-label="${label}"><a href="([^"]+)">Next</a></nav>`));
+  const found = html.match(new RegExp(`<nav aria-label="${label}"><a href="([^"]+)">Next(?: [^<]+)?</a></nav>`));
   return found?.[1]?.replaceAll("&amp;", "&") ?? null;
 }
 

@@ -213,7 +213,7 @@ describe("board pages", () => {
     expect(queue.status).toBe(200);
     expect(queueHtml).toContain("On the board");
     expect(queueHtml).toContain("a one pixel square");
-    expect(queueHtml).toContain(`action="/v1/moderation/actions"`);
+    expect(queueHtml).toContain(`action="/moderation/actions"`);
     expect(queueHtml).not.toContain("<script>");
     await expectError(await call("/moderation", { bearer: agent.credential }), 403, "forbidden");
     await expectError(await call("/moderation"), 401, "access_required");

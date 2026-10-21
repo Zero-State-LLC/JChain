@@ -90,10 +90,10 @@ describe("reactions", () => {
     const page = await call(`/threads/${threadId}`);
     expect(page.headers.get("content-security-policy")).toContain("script-src 'none'");
     const html = await page.text();
-    expect(html).toContain("<dt>plus</dt><dd>2</dd>");
-    expect(html).toContain("<dt>minus</dt><dd>0</dd>");
-    expect(html).toContain("<dt>laugh</dt><dd>1</dd>");
-    expect(html).toContain("<dt>interest</dt><dd>0</dd>");
+    expect(html).toContain("<dt>Plus <code>plus</code></dt><dd>2</dd>");
+    expect(html).toContain("<dt>Minus <code>minus</code></dt><dd>0</dd>");
+    expect(html).toContain("<dt>Laugh <code>laugh</code></dt><dd>1</dd>");
+    expect(html).toContain("<dt>Interest <code>interest</code></dt><dd>0</dd>");
     expect(html).not.toContain(ada.credential);
 
     const events = await expectSuccess(await call("/v1/events", { bearer: ada.credential }));
@@ -118,8 +118,8 @@ describe("reactions", () => {
     const removedAgain = await expectSuccess(await unreact(ada.credential, postId, "plus"));
     expect(removedAgain.count).toBe(1);
     const afterDelete = await (await call(`/threads/${threadId}`)).text();
-    expect(afterDelete).toContain("<dt>plus</dt><dd>1</dd>");
-    expect(afterDelete).toContain("<dt>laugh</dt><dd>1</dd>");
+    expect(afterDelete).toContain("<dt>Plus <code>plus</code></dt><dd>1</dd>");
+    expect(afterDelete).toContain("<dt>Laugh <code>laugh</code></dt><dd>1</dd>");
 
     const reactionLogs = logs.filter((line) => line.includes("reaction added") || line.includes("reaction removed"));
     expect(reactionLogs.length).toBeGreaterThan(0);
@@ -157,14 +157,14 @@ describe("reactions", () => {
     const hiddenHtml = await hiddenPage.text();
     expect(hiddenHtml).toContain("opening stays");
     expect(hiddenHtml).not.toContain("hidden reply words");
-    expect(hiddenHtml).toContain("<dt>plus</dt><dd>0</dd>");
-    expect(hiddenHtml).not.toContain("<dt>plus</dt><dd>1</dd>");
+    expect(hiddenHtml).toContain("<dt>Plus <code>plus</code></dt><dd>0</dd>");
+    expect(hiddenHtml).not.toContain("<dt>Plus <code>plus</code></dt><dd>1</dd>");
 
     await expectSuccess(await act(replyId, "restore"));
     const restored = await (await call(`/threads/${threadId}`)).text();
     expect(restored).toContain("hidden reply words");
-    expect(restored).toContain("<dt>plus</dt><dd>1</dd>");
-    expect(restored).toContain("<dt>plus</dt><dd>0</dd>");
+    expect(restored).toContain("<dt>Plus <code>plus</code></dt><dd>1</dd>");
+    expect(restored).toContain("<dt>Plus <code>plus</code></dt><dd>0</dd>");
 
     const rejectedId = await replyTo(ada.credential, threadId, "rejected reply words");
     await expectSuccess(await act(rejectedId, "reject"));
@@ -182,7 +182,7 @@ describe("reactions", () => {
     expect(await reactionRows(removedId, "interest")).toBe(1);
     const removedPage = await (await call(`/threads/${threadId}`)).text();
     expect(removedPage).not.toContain("removed reply words");
-    expect(removedPage).not.toContain("<dt>interest</dt><dd>1</dd>");
+    expect(removedPage).not.toContain("<dt>Interest <code>interest</code></dt><dd>1</dd>");
   });
 
   it("stores one reaction when two identical puts overlap", async () => {

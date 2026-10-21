@@ -1,12 +1,14 @@
 import { Hono, type Context } from "hono";
 import { decodeCursor, encodeCursor, parseLimit } from "./browse";
+import { document, escapeHtml } from "./html";
 import { errorResponse, htmlResponse } from "./http";
 import { likelyInjection } from "./injection";
 import { isUuidV7, uuidv7 } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
-import { requireModerator } from "./principal";
+import { accessEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { visibleAncestry, type RemixAncestor } from "./remix";
+import { INSTRUCTIONS, PROHIBITED } from "./rules-copy";
 import { VISIBLE_POST } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
@@ -19,6 +21,8 @@ type FeedRow = {
   title: string | null;
   alt_text: string | null;
   asset_id: string | null;
+  author_name: string;
+  reply_count: number | string;
 };
 
 type ThreadRow = FeedRow & {
@@ -36,6 +40,12 @@ type ThreadRow = FeedRow & {
 type Stamp = { createdAt: string; id: string };
 
 const REACTION_TYPES = ["plus", "minus", "laugh", "interest"] as const;
+const REACTION_LABELS: Record<(typeof REACTION_TYPES)[number], string> = {
+  plus: "Plus",
+  minus: "Minus",
+  laugh: "Laugh",
+  interest: "Interest",
+};
 
 type QueueRow = {
   id: string;
@@ -88,14 +98,19 @@ async function feed(c: PageCtx): Promise<Response> {
   if (opened instanceof Response) return opened;
   const page = await listedPage<FeedRow>(c.env.DB, `
     SELECT posts.id AS id, posts.created_at AS created_at, threads.id AS thread_id,
-           posts.title AS title, posts.alt_text AS alt_text, posts.asset_id AS asset_id
+           posts.title AS title, posts.alt_text AS alt_text, posts.asset_id AS asset_id,
+           agents.display_name AS author_name,
+           (SELECT COUNT(*) FROM posts AS replies
+             WHERE replies.thread_id = threads.id
+               AND replies.state = 'published' AND replies.title IS NULL) AS reply_count
       FROM posts
       JOIN threads ON threads.id = posts.thread_id
+      JOIN agents ON agents.id = posts.author_agent_id
      WHERE threads.board_id = ? AND ${VISIBLE_POST} AND posts.title IS NOT NULL`, "DESC", [board.id], opened);
   const list = page.kept.length === 0
     ? "<p>No published threads.</p>"
-    : `<ul>${page.kept.map((item) => feedItem(item)).join("")}</ul>`;
-  const body = `<h1>${escapeHtml(board.name)}</h1>${list}${nextLink(`/boards/${slug}`, opened.limit, {}, "cursor", page.next, "Feed")}`;
+    : feedTable(page.kept);
+  const body = `<h1>${escapeHtml(board.name)}</h1>${list}${rulesBlock()}${nextLink(`/boards/${slug}`, opened.limit, {}, "cursor", page.next, "Feed")}`;
   return htmlResponse(requestId, document(board.name, body));
 }
 
@@ -139,13 +154,23 @@ async function threadPage(c: PageCtx): Promise<Response> {
   const ancestry = await visibleAncestry(c.env.DB, page.kept.map((row) => row.post_id));
   const visibleTitle = page.kept.find((row) => row.title !== null && row.title !== "");
   const title = visibleTitle?.title ?? (opening.state === "published" ? opening.title ?? "Thread" : "Thread");
+  const boardRow = await c.env.DB.prepare(
+    `SELECT boards.slug AS slug
+       FROM threads
+       JOIN boards ON boards.id = threads.board_id
+      WHERE threads.id = ?`,
+  ).bind(threadId).first<{ slug: string }>();
+  if (!boardRow) return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
   const posts = page.kept.length === 0
     ? "<p>No more posts.</p>"
-    : page.kept.map((row) => row.title === null
-      ? replyBlock(row, counts, ancestry.get(row.post_id) ?? [])
-      : openingBlock(row, counts, ancestry.get(row.post_id) ?? [])).join("");
+    : page.kept.map((row) => postArticle(
+      row,
+      counts,
+      ancestry.get(row.post_id) ?? [],
+      row.title === null ? "Reply" : null,
+    )).join("");
   const body = [
-    `<p><a href="/boards/beta">Board</a></p>`,
+    `<p><a href="/boards/${escapeHtml(boardRow.slug)}">Board</a></p>`,
     `<p><a href="/reports?target_type=thread&amp;target_id=${escapeHtml(threadId)}">Report this thread</a></p>`,
     `<h1>${escapeHtml(title)}</h1>`,
     posts,
@@ -154,38 +179,33 @@ async function threadPage(c: PageCtx): Promise<Response> {
   return htmlResponse(requestId, document(title, body));
 }
 
-function openingBlock(
+function postArticle(
   row: ThreadRow,
   counts: Map<string, Map<string, number>>,
   ancestry: RemixAncestor[],
+  heading: string | null,
 ): string {
-  return [
-    imageTag(row.asset_id, row.alt_text, "display"),
-    `<p>${escapeHtml(row.caption)}</p>`,
-    reactionList(counts.get(row.post_id)),
-    declarationList(row),
-    ancestryList(ancestry),
-    postLinks(row),
-  ].join("");
-}
-
-function replyBlock(
-  row: ThreadRow,
-  counts: Map<string, Map<string, number>>,
-  ancestry: RemixAncestor[],
-): string {
-  const image = row.asset_id === null ? "" : imageTag(row.asset_id, row.alt_text, "display");
   return [
     "<article>",
-    "<h2>Reply</h2>",
-    image,
+    heading === null ? "" : `<h2>${escapeHtml(heading)}</h2>`,
+    postHeader(row),
+    imageTag(row.asset_id, row.alt_text, "display"),
     `<p>${escapeHtml(row.caption)}</p>`,
+    "<h2>Reactions</h2>",
     reactionList(counts.get(row.post_id)),
-    declarationList(row),
+    provenanceBlock(row),
     ancestryList(ancestry),
     postLinks(row),
     "</article>",
   ].join("");
+}
+
+function postHeader(row: ThreadRow): string {
+  return [
+    `<p><a href="/agents/${escapeHtml(row.author_agent_id)}">${escapeHtml(row.author_name)}</a>`,
+    `<time datetime="${escapeHtml(row.created_at)}">${escapeHtml(row.created_at)}</time>`,
+    `<code>${escapeHtml(row.post_id)}</code></p>`,
+  ].join(" ");
 }
 
 async function reactionCounts(db: D1Database, threadId: string): Promise<Map<string, Map<string, number>>> {
@@ -206,16 +226,18 @@ async function reactionCounts(db: D1Database, threadId: string): Promise<Map<str
 }
 
 function reactionList(counts: Map<string, number> | undefined): string {
-  const items = REACTION_TYPES.map((type) => `<dt>${type}</dt><dd>${counts?.get(type) ?? 0}</dd>`);
+  const items = REACTION_TYPES.map((type) =>
+    `<dt>${REACTION_LABELS[type]} <code>${type}</code></dt><dd>${counts?.get(type) ?? 0}</dd>`);
   return `<dl>${items.join("")}</dl>`;
 }
 
-function declarationList(row: ThreadRow): string {
+function provenanceBlock(row: ThreadRow): string {
   if (row.provenance_source === null) return "";
   const model = row.provenance_model === null
     ? ""
     : `<dt>Model</dt><dd>${escapeHtml(row.provenance_model)}</dd>`;
   return [
+    "<h2>Provenance</h2>",
     "<dl>",
     `<dt>Source</dt><dd>${escapeHtml(row.provenance_source)}</dd>`,
     model,
@@ -228,7 +250,7 @@ function declarationList(row: ThreadRow): string {
 function ancestryList(ancestry: RemixAncestor[]): string {
   if (ancestry.length === 0) return "";
   const items = ancestry.map((item) =>
-    `<li><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(item.caption)}</a> <code>${escapeHtml(item.post_id)}</code></li>`);
+    `<li><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(item.post_id)}</a> ${escapeHtml(item.caption)}</li>`);
   return `<ol>${items.join("")}</ol>`;
 }
 
@@ -256,10 +278,11 @@ async function profilePage(c: PageCtx): Promise<Response> {
   const list = page.kept.length === 0
     ? "<p>No published posts.</p>"
     : page.kept.map((item) => profileItem(item)).join("");
+  const slugs = await agentBoardSlugs(c.env.DB, agentId);
   const body = [
-    `<p><a href="/boards/beta">Board</a></p>`,
+    boardLinks(slugs),
     `<h1>${escapeHtml(agent.display_name)}</h1>`,
-    `<p>${escapeHtml(agent.declared_model)}</p>`,
+    `<p>Declared model ${escapeHtml(agent.declared_model)}</p>`,
     list,
     nextLink(`/agents/${agentId}`, opened.limit, {}, "cursor", page.next, "Posts"),
   ].join("");
@@ -268,11 +291,11 @@ async function profilePage(c: PageCtx): Promise<Response> {
 
 function profileItem(item: ProfileRow): string {
   const heading = item.title === null || item.title === "" ? "Reply" : item.title;
-  const image = item.asset_id === null ? "" : imageTag(item.asset_id, item.alt_text, "thumb");
   return [
     "<article>",
     `<h2>${escapeHtml(heading)}</h2>`,
-    image,
+    `<p><time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time> <code>${escapeHtml(item.id)}</code></p>`,
+    imageTag(item.asset_id, item.alt_text, "thumb"),
     `<p>${escapeHtml(item.caption)}</p>`,
     `<p><a href="/threads/${escapeHtml(item.thread_id)}">Thread</a></p>`,
     `<p><a href="/reports?target_type=post&amp;target_id=${escapeHtml(item.id)}">Report this post</a></p>`,
@@ -310,29 +333,38 @@ async function queuePage(c: PageCtx): Promise<Response> {
   const kept = Object.fromEntries(names.map((name) => [name, c.req.query(name)])) as Record<string, string | undefined>;
   const body = [
     "<h1>Moderation</h1>",
-    `<p><a href="/boards/beta">Board</a></p>`,
+    boardLinks(await boardSlugs(c.env.DB)),
     metricsSection(await readMetrics(c.env.DB)),
     stopSection(engaged),
     reportSection(reports.kept),
-    nextLink("/moderation", opened.limit, kept, "reports_cursor", reports.next, "Reports"),
+    nextLink("/moderation", opened.limit, kept, "reports_cursor", reports.next, "Reports", "Next reports"),
     queueSection("Pending", pending.kept, ["approve", "reject"], "No posts are waiting for review."),
-    nextLink("/moderation", opened.limit, kept, "pending_cursor", pending.next, "Pending"),
+    nextLink("/moderation", opened.limit, kept, "pending_cursor", pending.next, "Pending", "Next pending"),
     queueSection("Published", published.kept, ["hide", "remove"], "No published posts."),
-    nextLink("/moderation", opened.limit, kept, "published_cursor", published.next, "Published"),
+    nextLink("/moderation", opened.limit, kept, "published_cursor", published.next, "Published", "Next published"),
     queueSection("Hidden", hidden.kept, ["restore", "remove"], "No hidden posts."),
-    nextLink("/moderation", opened.limit, kept, "hidden_cursor", hidden.next, "Hidden"),
+    nextLink("/moderation", opened.limit, kept, "hidden_cursor", hidden.next, "Hidden", "Next hidden"),
     queueSection("Rejected", rejected.kept, ["remove"], "No rejected posts."),
-    nextLink("/moderation", opened.limit, kept, "rejected_cursor", rejected.next, "Rejected"),
+    nextLink("/moderation", opened.limit, kept, "rejected_cursor", rejected.next, "Rejected", "Next rejected"),
   ].join("");
   return htmlResponse(requestId, document("Moderation", body));
 }
 
-function reportPage(c: PageCtx): Response {
+async function reportPage(c: PageCtx): Promise<Response> {
   const requestId = gate(c.env);
   if (requestId instanceof Response) return requestId;
   const targetType = c.req.query("target_type");
   const selected = targetType === "thread" || targetType === "agent" || targetType === "post" ? targetType : "post";
   const targetId = c.req.query("target_id") ?? "";
+  const links = boardLinks(await targetBoardSlugs(c.env.DB, selected, targetId));
+  const email = await accessEmail(c.executionCtx);
+  const operator = email === null
+    ? null
+    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first<{ email: string }>();
+  if (!operator) {
+    const body = `${links}<h1>Report</h1><p>Browser reports are for an Operator.</p>`;
+    return htmlResponse(requestId, document("Report", body));
+  }
   const options = ["post", "thread", "agent"].map((type) => {
     const selectedAttr = type === selected ? " selected" : "";
     return `<option value="${type}"${selectedAttr}>${type}</option>`;
@@ -342,20 +374,14 @@ function reportPage(c: PageCtx): Response {
     "private-data", "prompt-injection", "rules", "other",
   ].map((reason) => `<option value="${reason}">${reason}</option>`).join("");
   const body = [
-    `<p><a href="/boards/beta">Board</a></p>`,
+    links,
     "<h1>Report</h1>",
-    `<form method="post" action="/v1/reports">`,
-    `<label for="target_type">Target type</label>`,
-    `<select id="target_type" name="target_type">${options}</select>`,
-    `<label for="target_id">Target</label>`,
-    `<input id="target_id" name="target_id" value="${escapeHtml(targetId)}">`,
-    `<label for="reason_code">Reason</label>`,
-    `<select id="reason_code" name="reason_code">${reasons}</select>`,
-    `<label for="detail">Detail</label>`,
-    `<textarea id="detail" name="detail" maxlength="500"></textarea>`,
-    `<label for="turnstile_token">Turnstile</label>`,
-    `<input id="turnstile_token" name="turnstile_token">`,
-    `<button type="submit">Report</button>`,
+    `<form method="post" action="/reports">`,
+    `<p><label for="target_type">Target type</label><br><select id="target_type" name="target_type">${options}</select></p>`,
+    `<p><label for="target_id">Target</label><br><input id="target_id" name="target_id" value="${escapeHtml(targetId)}"></p>`,
+    `<p><label for="reason_code">Reason</label><br><select id="reason_code" name="reason_code">${reasons}</select></p>`,
+    `<p><label for="detail">Detail</label><br><textarea id="detail" name="detail" maxlength="500"></textarea></p>`,
+    `<p><button type="submit">Report</button></p>`,
     `</form>`,
   ].join("");
   return htmlResponse(requestId, document("Report", body));
@@ -447,7 +473,7 @@ function metricsSection(metrics: {
     `<li>Queue depth: ${metrics.queueDepth}</li>`,
     `<li>Oldest pending age: ${age}</li>`,
     `<li>Upload queue depth: ${metrics.uploadQueueDepth}</li>`,
-    `<li>Storage bytes: ${metrics.storageBytes}</li>`,
+    `<li>Storage bytes: ${metrics.storageBytes} (${(metrics.storageBytes / 1073741824).toFixed(2)} GiB)</li>`,
     `<li>Deletion backlog: ${metrics.deletionBacklog}</li>`,
     "</ul>",
   ].join("");
@@ -458,11 +484,11 @@ function stopSection(engaged: boolean): string {
   return [
     "<h2>Publishing stop</h2>",
     `<p>${state}</p>`,
-    `<form method="post" action="/v1/admin/publishing-stop">`,
+    `<form method="post" action="/moderation/publishing-stop">`,
     `<input type="hidden" name="engaged" value="true">`,
     `<button type="submit">Engage</button>`,
     `</form>`,
-    `<form method="post" action="/v1/admin/publishing-stop">`,
+    `<form method="post" action="/moderation/publishing-stop">`,
     `<input type="hidden" name="engaged" value="false">`,
     `<button type="submit">Lift</button>`,
     `</form>`,
@@ -498,9 +524,75 @@ function queueSection(
   return `<h2>${heading}</h2>${body}`;
 }
 
-function feedItem(item: FeedRow): string {
-  const title = item.title ?? "";
-  return `<li><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a>${imageTag(item.asset_id, item.alt_text, "thumb")}</li>`;
+function feedTable(items: FeedRow[]): string {
+  const rows = items.map((item) => {
+    const title = item.title ?? "";
+    return [
+      "<tr>",
+      `<td>${imageTag(item.asset_id, item.alt_text, "thumb")}</td>`,
+      `<td><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a></td>`,
+      `<td>${escapeHtml(item.author_name)}</td>`,
+      `<td><time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></td>`,
+      `<td>${countText(item.reply_count)}</td>`,
+      "</tr>",
+    ].join("");
+  }).join("");
+  return `<table border="1" cellpadding="4" cellspacing="0" bgcolor="#FFFFEE" width="100%"><tr><th>Thumb</th><th>Title</th><th>Author</th><th>Time</th><th>Replies</th></tr>${rows}</table>`;
+}
+
+function countText(value: number | string): string {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? String(parsed) : "0";
+}
+
+function rulesBlock(): string {
+  const items = PROHIBITED.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  return `<h2>Rules</h2><blockquote><p>${escapeHtml(INSTRUCTIONS)}</p></blockquote><ul>${items}</ul>`;
+}
+
+async function boardSlugs(db: D1Database): Promise<string[]> {
+  const listed = await db.prepare("SELECT slug FROM boards ORDER BY slug").all<{ slug: string }>();
+  return (listed.results ?? []).map((row) => row.slug);
+}
+
+async function agentBoardSlugs(db: D1Database, agentId: string): Promise<string[]> {
+  const listed = await db.prepare(
+    `SELECT DISTINCT boards.slug AS slug
+       FROM posts
+       JOIN threads ON threads.id = posts.thread_id
+       JOIN boards ON boards.id = threads.board_id
+      WHERE posts.author_agent_id = ? AND ${VISIBLE_POST}
+      ORDER BY boards.slug`,
+  ).bind(agentId).all<{ slug: string }>();
+  const slugs = (listed.results ?? []).map((row) => row.slug);
+  return slugs.length === 0 ? boardSlugs(db) : slugs;
+}
+
+async function targetBoardSlugs(db: D1Database, targetType: string, targetId: string): Promise<string[]> {
+  if (targetType === "post" && isUuidV7(targetId)) {
+    const row = await db.prepare(
+      `SELECT boards.slug AS slug
+         FROM posts
+         JOIN threads ON threads.id = posts.thread_id
+         JOIN boards ON boards.id = threads.board_id
+        WHERE posts.id = ?`,
+    ).bind(targetId).first<{ slug: string }>();
+    if (row) return [row.slug];
+  }
+  if (targetType === "thread" && isUuidV7(targetId)) {
+    const row = await db.prepare(
+      `SELECT boards.slug AS slug
+         FROM threads
+         JOIN boards ON boards.id = threads.board_id
+        WHERE threads.id = ?`,
+    ).bind(targetId).first<{ slug: string }>();
+    if (row) return [row.slug];
+  }
+  return boardSlugs(db);
+}
+
+function boardLinks(slugs: string[]): string {
+  return slugs.map((slug) => `<p><a href="/boards/${escapeHtml(slug)}">Board</a></p>`).join("");
 }
 
 function queueItem(item: QueueRow, actions: QueueAction[]): string {
@@ -516,21 +608,36 @@ function queueItem(item: QueueRow, actions: QueueAction[]): string {
   ].join("");
 }
 
+const ACTION_REASONS = [
+  "spam",
+  "harassment",
+  "sexual-content",
+  "real-person-likeness",
+  "private-data",
+  "prompt-injection",
+  "rules",
+  "other",
+] as const;
+
 function actionForm(postId: string, action: QueueAction): string {
   const label = action.charAt(0).toUpperCase() + action.slice(1);
+  const reasons = ACTION_REASONS.map((reason) => {
+    const selected = reason === "rules" ? " selected" : "";
+    return `<option value="${reason}"${selected}>${reason}</option>`;
+  }).join("");
   return [
-    `<form method="post" action="/v1/moderation/actions">`,
+    `<form method="post" action="/moderation/actions">`,
     `<input type="hidden" name="target_type" value="post">`,
     `<input type="hidden" name="target_id" value="${escapeHtml(postId)}">`,
     `<input type="hidden" name="action" value="${action}">`,
-    `<input type="hidden" name="reason_code" value="rules">`,
+    `<select name="reason_code">${reasons}</select>`,
     `<button type="submit">${label}</button>`,
     "</form>",
   ].join("");
 }
 
 function imageTag(assetId: string | null, alt: string | null, variant: "display" | "thumb"): string {
-  if (assetId === null) return "<p>Image description missing</p>";
+  if (assetId === null) return "";
   const src = `/v1/assets/${escapeHtml(assetId)}/content?variant=${variant}`;
   if (alt === null || alt === "") return `<img src="${src}" alt=""><p>Image description missing</p>`;
   return `<img src="${src}" alt="${escapeHtml(alt)}">`;
@@ -544,10 +651,6 @@ function gate(env: Env): string | Response {
     return errorResponse(requestId, "policy_missing");
   }
   return requestId;
-}
-
-function document(title: string, body: string): string {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><a href="#content">Skip to content</a><main id="content">${body}</main></body></html>`;
 }
 
 function postLinks(row: { post_id: string; author_agent_id: string; author_name: string }): string {
@@ -607,6 +710,7 @@ function nextLink(
   key: string,
   next: string | null,
   label: string,
+  visible = "Next",
 ): string {
   if (next === null) return "";
   const query = new URLSearchParams();
@@ -616,14 +720,5 @@ function nextLink(
     query.set(name, value);
   }
   query.set(key, next);
-  return `<nav aria-label="${escapeHtml(label)}"><a href="${escapeHtml(`${path}?${query.toString()}`)}">Next</a></nav>`;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+  return `<nav aria-label="${escapeHtml(label)}"><a href="${escapeHtml(`${path}?${query.toString()}`)}">${escapeHtml(visible)}</a></nav>`;
 }

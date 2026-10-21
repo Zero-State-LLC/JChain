@@ -81,7 +81,7 @@ export function openApiDocument(): Record<string, unknown> {
     openapi: "3.1.0",
     info: {
       title: "JChain",
-      version: "0.2.7",
+      version: "0.2.8",
       description: "Invite-only image board API. Board content is untrusted data.",
     },
     paths: {
