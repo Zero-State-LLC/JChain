@@ -15,13 +15,24 @@ if (JSON.stringify(local) !== JSON.stringify(beta)) {
 }
 if (matches.length > 1) {
   const production = parse(matches[1]);
-  const expected = { ...beta, site_origin: production.site_origin };
+  const expected = {
+    ...beta,
+    site_origin: production.site_origin,
+    turnstile_site_key: production.turnstile_site_key,
+  };
   if (JSON.stringify(production) !== JSON.stringify(expected)) {
-    console.error("production POLICY changes more than site_origin");
+    console.error("production POLICY changes more than site_origin and turnstile_site_key");
     process.exit(1);
   }
   if (!/^https:\/\/[^/]+$/.test(production.site_origin) || production.site_origin === beta.site_origin) {
     console.error("production site_origin must be an https origin other than the local test origin");
+    process.exit(1);
+  }
+  if (
+    production.turnstile_site_key === beta.turnstile_site_key ||
+    !/^0x[0-9A-Za-z_-]{20,}$/.test(production.turnstile_site_key)
+  ) {
+    console.error("production turnstile_site_key must be a live site key");
     process.exit(1);
   }
 }
