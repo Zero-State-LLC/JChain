@@ -3,6 +3,7 @@ import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7 } from "./ids";
 import type { Policy } from "./policy";
 import { requireReader } from "./principal";
+import { visibleAncestry } from "./remix";
 import { VISIBLE_POST } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
@@ -77,7 +78,7 @@ async function agentPosts(c: Ctx): Promise<Response> {
     opened.cursor,
     opened.limit,
   );
-  return jsonResponse(opened.requestId, page(rows, opened.limit, "id"));
+  return jsonResponse(opened.requestId, await postPage(c.env.DB, rows, opened.limit));
 }
 
 async function boardThreads(c: Ctx): Promise<Response> {
@@ -146,7 +147,7 @@ async function threadPosts(c: Ctx): Promise<Response> {
     opened.cursor,
     opened.limit,
   );
-  return jsonResponse(opened.requestId, page(rows, opened.limit, "id"));
+  return jsonResponse(opened.requestId, await postPage(c.env.DB, rows, opened.limit));
 }
 
 async function listPosts(
@@ -203,17 +204,33 @@ function page<T extends { id: string; created_at: string }>(
   const kept = more ? rows.slice(0, limit) : rows;
   const last = kept[kept.length - 1];
   return {
-    items: kept.map((row) => "caption" in row ? postItem(row as unknown as PostRow) : row as unknown as Record<string, unknown>),
+    items: kept.map((row) => "caption" in row ? postItem(row as unknown as PostRow, []) : row as unknown as Record<string, unknown>),
     next_cursor: more && last !== undefined ? encodeCursor(last.created_at, last[idKey]) : null,
   };
 }
 
-function postItem(row: PostRow): Record<string, unknown> {
+async function postPage(
+  db: D1Database,
+  rows: PostRow[],
+  limit: number,
+): Promise<{ items: Record<string, unknown>[]; next_cursor: string | null }> {
+  const more = rows.length > limit;
+  const kept = more ? rows.slice(0, limit) : rows;
+  const ancestry = await visibleAncestry(db, kept.map((row) => row.id));
+  const last = kept[kept.length - 1];
+  return {
+    items: kept.map((row) => postItem(row, ancestry.get(row.id) ?? [])),
+    next_cursor: more && last !== undefined ? encodeCursor(last.created_at, last.id) : null,
+  };
+}
+
+function postItem(row: PostRow, ancestry: { post_id: string; thread_id: string }[]): Record<string, unknown> {
   const provenance = row.provenance_source === null
     ? null
     : row.provenance_model === null
       ? { source: row.provenance_source }
       : { source: row.provenance_source, model: row.provenance_model };
+  const visible = ancestry.map((item) => ({ post_id: item.post_id, thread_id: item.thread_id }));
   return {
     post_id: row.id,
     thread_id: row.thread_id,
@@ -226,7 +243,8 @@ function postItem(row: PostRow): Record<string, unknown> {
     provenance,
     rights_attestation: row.rights_attestation,
     license: row.license,
-    remix_of_post_id: row.remix_of_post_id,
+    remix_of_post_id: visible[0]?.post_id ?? null,
+    ancestry: visible,
   };
 }
 

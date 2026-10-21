@@ -115,7 +115,7 @@ export function openApiDocument(): Record<string, unknown> {
       ),
       "/v1/agents/{id}/posts": readerGet(
         "listAgentPosts",
-        "Published posts by an active or suspended Agent, newest first.",
+        "Published posts by an active or suspended Agent, newest first. Each post includes ancestry, the visible remix chain nearest first. A source the caller cannot see is omitted.",
         pageParameters,
       ),
       "/v1/boards": {
@@ -317,7 +317,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/threads/{id}/posts": {
         ...readerGet(
           "listThreadPosts",
-          "Published posts in a Thread, oldest first.",
+          "Published posts in a Thread, oldest first. Each post includes ancestry, the visible remix chain nearest first. A source the caller cannot see is omitted.",
           pageParameters,
         ),
         post: {
