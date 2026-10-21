@@ -24,6 +24,11 @@ type CallOptions = {
 
 export async function resetAndSeed(): Promise<void> {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM moderation_actions"),
+    env.DB.prepare("DELETE FROM events"),
+    env.DB.prepare("UPDATE posts SET remix_of_post_id = NULL"),
+    env.DB.prepare("DELETE FROM posts"),
+    env.DB.prepare("DELETE FROM threads"),
     env.DB.prepare("DELETE FROM idempotency_keys"),
     env.DB.prepare("DELETE FROM upload_tokens"),
     env.DB.prepare("DELETE FROM assets"),

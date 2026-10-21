@@ -213,6 +213,7 @@ async function assetContent(c: Ctx): Promise<Response> {
   if (assetId === undefined || !isUuidV7(assetId)) return errorResponse(requestId, "not_found");
   const variant = c.req.query("variant");
   if (variant !== "display" && variant !== "thumb") return errorResponse(requestId, "malformed");
+  if (await hasPublishedPost(c.env.DB, assetId)) return derivativeResponse(c.env, requestId, assetId, variant);
   const principal = await requireAgent(c.env, c.req.raw);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
@@ -220,7 +221,23 @@ async function assetContent(c: Ctx): Promise<Response> {
     "SELECT state FROM assets WHERE id = ? AND agent_id = ?",
   ).bind(assetId, principal.agentId).first<{ state: string }>();
   if (!asset || asset.state !== "ready") return errorResponse(requestId, "not_found");
-  const object = await c.env.MEDIA.get(derivativeKey(assetId, variant));
+  return derivativeResponse(c.env, requestId, assetId, variant);
+}
+
+async function hasPublishedPost(db: D1Database, assetId: string): Promise<boolean> {
+  const row = await db.prepare(
+    "SELECT id FROM posts WHERE asset_id = ? AND state = 'published' LIMIT 1",
+  ).bind(assetId).first<{ id: string }>();
+  return row !== null;
+}
+
+async function derivativeResponse(
+  env: Env,
+  requestId: string,
+  assetId: string,
+  variant: "display" | "thumb",
+): Promise<Response> {
+  const object = await env.MEDIA.get(derivativeKey(assetId, variant));
   if (!object) return errorResponse(requestId, "not_found");
   return bytesResponse(requestId, new Uint8Array(await object.arrayBuffer()), "image/webp");
 }

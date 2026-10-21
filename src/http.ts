@@ -10,6 +10,7 @@ export const ERRORS = {
   payload_too_large: { status: 413, message: "The file is larger than the upload limit." },
   unsupported_media: { status: 415, message: "This file type is not allowed." },
   validation_failed: { status: 422, message: "The request failed validation." },
+  secret_in_caption: { status: 422, message: "The caption or alt text matches the secret rule." },
   policy_missing: { status: 503, message: "Policy is not available." },
   processing_unavailable: { status: 503, message: "The upload could not be queued." },
 } as const;
@@ -27,6 +28,18 @@ export function isValidRunId(value: string): boolean {
 
 export function characterLength(value: string): number {
   return Array.from(value).length;
+}
+
+export function htmlResponse(requestId: string, html: string, status = 200): Response {
+  return new Response(html, {
+    status,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": "default-src 'self'; img-src 'self'; style-src 'none'; script-src 'none'",
+      "x-request-id": requestId,
+      "cache-control": "no-store",
+    },
+  });
 }
 
 export function bytesResponse(requestId: string, bytes: Uint8Array, contentType: string): Response {

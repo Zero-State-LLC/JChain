@@ -190,7 +190,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/assets/{id}/content": {
         get: {
           operationId: "getAssetContent",
-          summary: "Owner-only bytes of a ready Asset. No public derivative is served before publication.",
+          summary: "Bytes of a ready Asset. The owner may read one before publication. Other callers receive bytes only after a Post that uses the Asset is published.",
           security: [{ bearerCredential: [] }],
           parameters: [
             { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
@@ -201,6 +201,89 @@ export function openApiDocument(): Record<string, unknown> {
             "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
             "401": { description: "Credential invalid.", content: { "application/json": { schema: errorSchema } } },
             "404": { description: "Not found.", content: { "application/json": { schema: errorSchema } } },
+            "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
+      "/v1/threads": {
+        post: {
+          operationId: "openThread",
+          summary: "Open a Thread and its Opening Post. The Post waits for review. No quota counter is charged.",
+          security: [{ bearerCredential: [] }],
+          parameters: [{ $ref: "#/components/parameters/idempotencyKey" }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["board_id", "asset_id", "title", "caption", "alt_text", "provenance", "rights_attestation", "license"],
+                  properties: {
+                    board_id: { type: "string", format: "uuid" },
+                    asset_id: { type: "string", format: "uuid" },
+                    title: { type: "string", minLength: 1, maxLength: 140 },
+                    caption: { type: "string", maxLength: 5000 },
+                    alt_text: { type: "string", minLength: 1, maxLength: 1000 },
+                    provenance: {
+                      type: "object",
+                      required: ["source"],
+                      properties: {
+                        source: { type: "string", enum: ["human", "model", "mixed", "unknown"] },
+                        model: { type: "string", minLength: 1, maxLength: 80 },
+                      },
+                    },
+                    rights_attestation: { type: "string", minLength: 1, maxLength: 500 },
+                    license: { type: "string", enum: ["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"] },
+                    remix_of_post_id: { type: "string", format: "uuid" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": { description: "Thread and Opening Post created. Declarations are included.", content: { "application/json": { schema: { type: "object" } } } },
+            "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
+            "401": { description: "Credential invalid.", content: { "application/json": { schema: errorSchema } } },
+            "404": { description: "Not found.", content: { "application/json": { schema: errorSchema } } },
+            "409": { description: "Idempotency or state conflict.", content: { "application/json": { schema: errorSchema } } },
+            "422": { description: "Validation failed or the caption matches the secret rule.", content: { "application/json": { schema: errorSchema } } },
+            "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
+      "/v1/moderation/actions": {
+        post: {
+          operationId: "moderate",
+          summary: "Moderator action. This ticket accepts only approve on a Post.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["target_type", "target_id", "action", "reason_code"],
+                  properties: {
+                    target_type: { type: "string" },
+                    target_id: { type: "string", format: "uuid" },
+                    action: { type: "string", enum: ["approve"] },
+                    reason_code: {
+                      type: "string",
+                      enum: ["spam", "harassment", "sexual-content", "real-person-likeness", "private-data", "prompt-injection", "rules", "other"],
+                    },
+                    private_note: { type: "string", maxLength: 2000 },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "The Post is published and one event id is returned.", content: { "application/json": { schema: { type: "object" } } } },
+            "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
+            "401": { description: "Access required.", content: { "application/json": { schema: errorSchema } } },
+            "403": { description: "Not enrolled or forbidden.", content: { "application/json": { schema: errorSchema } } },
+            "404": { description: "Not found.", content: { "application/json": { schema: errorSchema } } },
+            "409": { description: "The action is illegal for the current state.", content: { "application/json": { schema: errorSchema } } },
+            "422": { description: "Validation failed.", content: { "application/json": { schema: errorSchema } } },
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
           },
         },

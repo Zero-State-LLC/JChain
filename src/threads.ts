@@ -1,0 +1,283 @@
+import { Hono, type Context } from "hono";
+import { sha256Hex } from "./credential";
+import { ERRORS, type ErrorCode, errorResponse, characterLength, isValidRunId, jsonResponse } from "./http";
+import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency";
+import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
+import type { Policy } from "./policy";
+import { requireAgent } from "./principal";
+
+type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
+type Ctx = Context<AppEnv>;
+
+const ROUTE = "POST /v1/threads";
+const SOURCES = ["human", "model", "mixed", "unknown"] as const;
+const LICENSES = ["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"] as const;
+const SECRET_TEXT = /jc_[A-Za-z0-9_-]{20,}|up_[A-Za-z0-9_-]{20,}|-----BEGIN/;
+
+type Source = (typeof SOURCES)[number];
+type License = (typeof LICENSES)[number];
+type Outcome = { status: number; body: Record<string, unknown> };
+
+type ThreadInput = {
+  boardId: string;
+  assetId: string;
+  title: string;
+  caption: string;
+  altText: string;
+  source: Source;
+  model: string | null;
+  rights: string;
+  license: License;
+  remixOf: string | null;
+};
+
+export function mountThreads(app: Hono<AppEnv>): void {
+  app.post("/v1/threads", openThread);
+}
+
+async function openThread(c: Ctx): Promise<Response> {
+  const requestId = c.get("requestId");
+  const policy = c.get("policy");
+  const principal = await requireAgent(c.env, c.req.raw);
+  if (!principal.ok) return errorResponse(requestId, principal.code);
+  if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
+  const key = headerKey(c.req.raw);
+  if (key === null) return errorResponse(requestId, "malformed");
+  const parsedBody = await readObject(c.req.raw);
+  if (!parsedBody.ok) return errorResponse(requestId, "malformed");
+  const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
+  const prior = await readIdempotency(c.env.DB, principal.agentId, ROUTE, key, bodyHash);
+  if (prior.action === "replay") {
+    return jsonResponse(requestId, await withPublication(c.env.DB, prior.body), prior.status);
+  }
+  if (prior.action === "conflict") return errorResponse(requestId, "idempotency_conflict");
+
+  const parsed = parseThread(parsedBody.value);
+  if (!parsed.ok) {
+    return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure(parsed.code), []);
+  }
+  if (SECRET_TEXT.test(parsed.value.caption) || SECRET_TEXT.test(parsed.value.altText)) {
+    return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure("secret_in_caption"), []);
+  }
+
+  const board = await c.env.DB.prepare("SELECT id FROM boards WHERE id = ?").bind(parsed.value.boardId).first();
+  if (!board) {
+    return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure("not_found"), []);
+  }
+  const asset = await c.env.DB.prepare(
+    "SELECT agent_id, state FROM assets WHERE id = ?",
+  ).bind(parsed.value.assetId).first<{ agent_id: string; state: string }>();
+  if (!asset || asset.agent_id !== principal.agentId) {
+    return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure("not_found"), []);
+  }
+  if (asset.state !== "ready") {
+    return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure("state_conflict"), []);
+  }
+  if (parsed.value.remixOf !== null) {
+    const remix = await remixAllowed(c.env.DB, parsed.value.remixOf);
+    if (remix === "missing") {
+      return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure("not_found"), []);
+    }
+    if (remix === "cycle") {
+      return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, failure("state_conflict"), []);
+    }
+  }
+
+  const threadId = uuidv7();
+  const postId = uuidv7();
+  const createdAt = utcSeconds();
+  const provenance: Record<string, unknown> = { source: parsed.value.source };
+  if (parsed.value.model !== null) provenance.model = parsed.value.model;
+  const body: Record<string, unknown> = {
+    thread_id: threadId,
+    post_id: postId,
+    state: "pending_review",
+    provenance,
+    rights_attestation: parsed.value.rights,
+    license: parsed.value.license,
+  };
+  if (parsed.value.remixOf !== null) body.remix_of_post_id = parsed.value.remixOf;
+  const input = parsed.value;
+  console.log(JSON.stringify({ message: "thread opened", thread_id: threadId, post_id: postId }));
+  return remember(c.env, requestId, policy, principal.agentId, key, bodyHash, { status: 201, body }, [
+    c.env.DB.prepare(
+      "INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)",
+    ).bind(threadId, input.boardId, createdAt),
+    c.env.DB.prepare(
+      `INSERT INTO posts (
+         id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
+         provenance_source, provenance_model, rights_attestation, license, remix_of_post_id, state, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_review', ?)`,
+    ).bind(
+      postId,
+      threadId,
+      principal.agentId,
+      input.assetId,
+      input.title,
+      input.caption,
+      input.altText,
+      input.source,
+      input.model,
+      input.rights,
+      input.license,
+      input.remixOf,
+      createdAt,
+    ),
+  ]);
+}
+
+async function withPublication(db: D1Database, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const postId = body.post_id;
+  if (typeof postId !== "string") return body;
+  const event = await db.prepare(
+    "SELECT id FROM events WHERE resource_id = ? AND type = 'post.published' ORDER BY occurred_at ASC LIMIT 1",
+  ).bind(postId).first<{ id: string }>();
+  if (!event) return body;
+  return { ...body, state: "published", event_id: event.id };
+}
+
+async function remixAllowed(db: D1Database, sourceId: string): Promise<"ok" | "missing" | "cycle"> {
+  const seen = new Set<string>();
+  let current: string | null = sourceId;
+  for (let hop = 0; hop < 32 && current !== null; hop += 1) {
+    if (seen.has(current)) return "cycle";
+    seen.add(current);
+    const row: { state: string; remix_of_post_id: string | null } | null = await db.prepare(
+      "SELECT state, remix_of_post_id FROM posts WHERE id = ?",
+    ).bind(current).first();
+    if (!row) return "missing";
+    if (row.state !== "published") return hop === 0 ? "missing" : "cycle";
+    current = row.remix_of_post_id;
+  }
+  return current === null ? "ok" : "cycle";
+}
+
+function parseThread(body: Record<string, unknown>): { ok: true; value: ThreadInput } | { ok: false; code: ErrorCode } {
+  const allowed = new Set([
+    "board_id",
+    "asset_id",
+    "title",
+    "caption",
+    "alt_text",
+    "provenance",
+    "rights_attestation",
+    "license",
+    "remix_of_post_id",
+  ]);
+  if (!Object.keys(body).every((key) => allowed.has(key))) return { ok: false, code: "malformed" };
+  const required = ["board_id", "asset_id", "title", "caption", "alt_text", "provenance", "rights_attestation", "license"];
+  if (!required.every((key) => Object.hasOwn(body, key))) return { ok: false, code: "malformed" };
+  if (
+    typeof body.board_id !== "string"
+    || typeof body.asset_id !== "string"
+    || typeof body.title !== "string"
+    || typeof body.caption !== "string"
+    || typeof body.alt_text !== "string"
+    || typeof body.rights_attestation !== "string"
+    || typeof body.license !== "string"
+  ) {
+    return { ok: false, code: "malformed" };
+  }
+  if (!isUuidV7(body.board_id) || !isUuidV7(body.asset_id)) return { ok: false, code: "malformed" };
+  if (characterLength(body.title) < 1 || characterLength(body.title) > 140) return { ok: false, code: "validation_failed" };
+  if (characterLength(body.caption) > 5000) return { ok: false, code: "validation_failed" };
+  if (characterLength(body.alt_text) < 1 || characterLength(body.alt_text) > 1000) return { ok: false, code: "validation_failed" };
+  if (characterLength(body.rights_attestation) < 1 || characterLength(body.rights_attestation) > 500) {
+    return { ok: false, code: "validation_failed" };
+  }
+  if (!isLicense(body.license)) return { ok: false, code: "validation_failed" };
+  const provenance = parseProvenance(body.provenance);
+  if (!provenance.ok) return provenance;
+  let remixOf: string | null = null;
+  if (Object.hasOwn(body, "remix_of_post_id")) {
+    if (typeof body.remix_of_post_id !== "string" || !isUuidV7(body.remix_of_post_id)) {
+      return { ok: false, code: "malformed" };
+    }
+    remixOf = body.remix_of_post_id;
+  }
+  return {
+    ok: true,
+    value: {
+      boardId: body.board_id,
+      assetId: body.asset_id,
+      title: body.title,
+      caption: body.caption,
+      altText: body.alt_text,
+      source: provenance.source,
+      model: provenance.model,
+      rights: body.rights_attestation,
+      license: body.license,
+      remixOf,
+    },
+  };
+}
+
+function parseProvenance(
+  value: unknown,
+): { ok: true; source: Source; model: string | null } | { ok: false; code: ErrorCode } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false, code: "malformed" };
+  const body = value as Record<string, unknown>;
+  if (!Object.keys(body).every((key) => key === "source" || key === "model")) return { ok: false, code: "malformed" };
+  if (typeof body.source !== "string") return { ok: false, code: "malformed" };
+  if (!isSource(body.source)) return { ok: false, code: "validation_failed" };
+  if (!Object.hasOwn(body, "model")) return { ok: true, source: body.source, model: null };
+  if (typeof body.model !== "string") return { ok: false, code: "malformed" };
+  if (characterLength(body.model) < 1 || characterLength(body.model) > 80) return { ok: false, code: "validation_failed" };
+  return { ok: true, source: body.source, model: body.model };
+}
+
+function isSource(value: string): value is Source {
+  return (SOURCES as readonly string[]).includes(value);
+}
+
+function isLicense(value: string): value is License {
+  return (LICENSES as readonly string[]).includes(value);
+}
+
+function headerKey(request: Request): string | null {
+  const key = request.headers.get("idempotency-key");
+  if (key === null || !isValidRunId(key)) return null;
+  return key;
+}
+
+function failure(code: ErrorCode): Outcome {
+  const error = ERRORS[code];
+  return { status: error.status, body: { error: { code, message: error.message } } };
+}
+
+async function remember(
+  env: Env,
+  requestId: string,
+  policy: Policy,
+  agentId: string,
+  key: string,
+  bodyHash: string,
+  outcome: Outcome,
+  statements: D1PreparedStatement[],
+): Promise<Response> {
+  statements.push(idempotencyInsert(
+    env.DB,
+    agentId,
+    ROUTE,
+    key,
+    bodyHash,
+    outcome.status,
+    outcome.body,
+    hoursAhead(policy.retention.idempotency_hours),
+  ));
+  await env.DB.batch(statements);
+  return jsonResponse(requestId, outcome.body, outcome.status);
+}
+
+async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
+  const type = request.headers.get("content-type");
+  if (type === null || !type.toLowerCase().startsWith("application/json")) return { ok: false };
+  let parsed: unknown;
+  try {
+    parsed = await request.json();
+  } catch {
+    return { ok: false };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
+  return { ok: true, value: parsed as Record<string, unknown> };
+}
