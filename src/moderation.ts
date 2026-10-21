@@ -36,14 +36,21 @@ async function moderate(c: Ctx): Promise<Response> {
   }
 
   const post = await c.env.DB.prepare(
-    `SELECT posts.state AS state, threads.state AS thread_state, assets.state AS asset_state
+    `SELECT posts.state AS state, threads.state AS thread_state,
+            posts.asset_id AS asset_id, assets.state AS asset_state
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
-       JOIN assets ON assets.id = posts.asset_id
+       LEFT JOIN assets ON assets.id = posts.asset_id
       WHERE posts.id = ?`,
-  ).bind(action.targetId).first<{ state: string; thread_state: string; asset_state: string }>();
+  ).bind(action.targetId).first<{
+    state: string;
+    thread_state: string;
+    asset_id: string | null;
+    asset_state: string | null;
+  }>();
   if (!post) return errorResponse(requestId, "not_found");
-  if (post.state !== "pending_review" || post.thread_state !== "open" || post.asset_state !== "ready") {
+  const assetReady = post.asset_id === null || post.asset_state === "ready";
+  if (post.state !== "pending_review" || post.thread_state !== "open" || !assetReady) {
     return errorResponse(requestId, "state_conflict");
   }
 
@@ -54,7 +61,9 @@ async function moderate(c: Ctx): Promise<Response> {
   // D1 batch() is the transaction that commits the Post and the Event together.
   const guard = `posts.id = ? AND posts.state = 'pending_review'
     AND EXISTS (SELECT 1 FROM threads WHERE threads.id = posts.thread_id AND threads.state = 'open')
-    AND EXISTS (SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready')`;
+    AND (posts.asset_id IS NULL OR EXISTS (
+      SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
+    ))`;
   const results = await c.env.DB.batch([
     c.env.DB.prepare(
       `INSERT INTO events (id, type, resource_id, occurred_at)
@@ -70,7 +79,9 @@ async function moderate(c: Ctx): Promise<Response> {
       `UPDATE posts SET state = 'published'
         WHERE id = ? AND state = 'pending_review'
           AND EXISTS (SELECT 1 FROM threads WHERE threads.id = posts.thread_id AND threads.state = 'open')
-          AND EXISTS (SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready')`,
+          AND (posts.asset_id IS NULL OR EXISTS (
+            SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
+          ))`,
     ).bind(action.targetId),
   ]);
   const published = Number(results[2]?.meta.changes ?? 0) === 1 && Number(results[0]?.meta.changes ?? 0) === 1;

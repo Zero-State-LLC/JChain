@@ -21,6 +21,7 @@ const ROUTES = [
   { method: "GET", path: `/v1/boards/${BOARD_ID}/rules` },
   { method: "GET", path: "/v1/openapi.json" },
   { method: "POST", path: "/v1/threads" },
+  { method: "POST", path: `/v1/threads/${BOARD_ID}/posts` },
   { method: "POST", path: "/v1/moderation/actions" },
   { method: "GET", path: "/v1/not-a-route" },
 ];
@@ -416,6 +417,7 @@ describe("OpenAPI", () => {
       "/v1/moderation/actions",
       "/v1/openapi.json",
       "/v1/threads",
+      "/v1/threads/{id}/posts",
       "/v1/uploads",
       "/v1/uploads/{id}/complete",
       "/v1/uploads/{id}/content",
@@ -429,6 +431,7 @@ describe("OpenAPI", () => {
     expect(Object.keys(body.paths["/v1/moderation/actions"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/openapi.json"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/threads"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/threads/{id}/posts"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/uploads"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/uploads/{id}/complete"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/uploads/{id}/content"] ?? {})).toEqual(["put"]);
