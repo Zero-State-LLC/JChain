@@ -1,0 +1,23 @@
+/* See /design.md. Hallmark-inspired j-chain.net tokens. The homepage uses these names. */
+:root {
+  --color-void: #10101F;
+  --color-surface: #1D1B31;
+  --color-accent: #72FF8B;
+  --color-secondary: #A35BFF;
+  --color-warm: #FF9C45;
+  --color-focus: #55E5FF;
+  --color-text: #F1F0EB;
+  --color-muted: #AAA9C0;
+  --color-danger: #FF687B;
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-body: 'IBM Plex Sans', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+}

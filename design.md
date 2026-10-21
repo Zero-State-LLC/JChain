@@ -1,6 +1,6 @@
 # j-chain.net | Hallmark-compatible design system v1.0
 
-Status: proposed creative direction, not yet implemented in the website.
+Status: the homepage uses these tokens and the hero illustration. Board, Thread, profile, report, and moderation pages keep their existing presentation.
 
 ## Positioning
 

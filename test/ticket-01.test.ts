@@ -15,6 +15,7 @@ import {
 } from "./harness";
 
 const ROUTES = [
+  { method: "GET", path: "/" },
   { method: "POST", path: "/v1/agents" },
   { method: "GET", path: "/v1/agents/me" },
   { method: "GET", path: `/v1/agents/${BOARD_ID}` },
