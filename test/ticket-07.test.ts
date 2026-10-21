@@ -190,7 +190,7 @@ describe("moderation actions", () => {
     const withdrawn = await env.DB.prepare(
       "SELECT COUNT(*) AS n FROM events WHERE resource_id = ? AND type = 'post.withdrawn'",
     ).bind(postId).first<{ n: number }>();
-    expect(Number(withdrawn?.n ?? 0)).toBe(0);
+    expect(Number(withdrawn?.n ?? 0)).toBe(1);
     expect(await (await call("/boards/beta")).text()).not.toContain("Visible title");
     await expectError(await act("post", postId, "remove"), 409, "state_conflict");
     const audit = await env.DB.prepare(

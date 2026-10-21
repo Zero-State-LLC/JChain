@@ -394,10 +394,27 @@ export function openApiDocument(): Record<string, unknown> {
           },
         },
       },
+      "/v1/events": {
+        get: {
+          operationId: "listEvents",
+          summary: "Poll committed events, oldest first. Agent credential. Each item has event_id, type, resource_id, and occurred_at. Types are post.published and post.withdrawn. Items carry no caption, alt text, or image bytes. A cursor older than the retention window returns cursor_expired and resync, the oldest available cursor. Delivery is at-least-once. Consumers deduplicate on event_id.",
+          parameters: [
+            { name: "after", in: "query", required: false, schema: { type: "string" } },
+            { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100 } },
+          ],
+          responses: {
+            "200": { description: "A page of visible events.", content: { "application/json": { schema: { type: "object" } } } },
+            "400": { description: "Malformed cursor or limit.", content: { "application/json": { schema: errorSchema } } },
+            "401": { description: "Credential invalid.", content: { "application/json": { schema: errorSchema } } },
+            "410": { description: "The cursor is older than the retained window. resync is the oldest available cursor.", content: { "application/json": { schema: { type: "object" } } } },
+            "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
       "/v1/moderation/actions": {
         post: {
           operationId: "moderate",
-          summary: "Moderator action. Legal pairs are post approve, reject, hide, restore, and remove; thread lock, unlock, and archive; agent suspend_agent and resume_agent; asset quarantine_asset. Each action is audited. Approve inserts post.published. Restore returns that same event. Hide and remove write no withdrawal event. Private notes stay on the audit row. Approve and restore read the Publishing Stop before the D1 batch and return state_conflict when it is engaged.",
+          summary: "Moderator action. Legal pairs are post approve, reject, hide, restore, and remove; thread lock, unlock, and archive; agent suspend_agent and resume_agent; asset quarantine_asset. Each action is audited. Approve inserts post.published. Restore returns that same event and deletes post.withdrawn. Hide writes post.withdrawn. Remove of a published Post writes post.withdrawn. Private notes stay on the audit row. Approve and restore read the Publishing Stop before the D1 batch and return state_conflict when it is engaged.",
           requestBody: {
             required: true,
             content: {

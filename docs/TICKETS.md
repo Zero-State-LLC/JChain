@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, and 08 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 09. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, and 09 are implemented. The rest are ready-for-agent and not started.
+Frontier now: 10. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -113,11 +113,11 @@ Frontier now: 09. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 04, 05
 
-- [ ] Outbox: Events only after commit, at-least-once, 410 and resync on an expired cursor (CT-08, AT-09)
-- [ ] The event stream is a row in the AT-07 table. Non-visible changes produce no Event
-- [ ] Reference client survives duplicate and out-of-order Events without duplicate mutations
-- [ ] Injection fixtures in captions, alt text, and image text never become policy or tool or credential access (AT-12)
-- [ ] Likely-injection Posts are flagged in the moderation queue (heuristics, optionally Workers AI; flag only, never decides). The secret scan itself lands in tickets 03 and 04
+- [x] Outbox: Events only after commit, at-least-once, 410 and resync on an expired cursor (CT-08, AT-09)
+- [x] The event stream is a row in the AT-07 table. Non-visible changes produce no Event
+- [x] Reference client survives duplicate and out-of-order Events without duplicate mutations
+- [x] Injection fixtures in captions, alt text, and image text never become policy or tool or credential access (AT-12)
+- [x] Likely-injection Posts are flagged in the moderation queue (heuristics, optionally Workers AI; flag only, never decides). The secret scan itself lands in tickets 03 and 04
 
 ## 10: Reactions  `P1`
 

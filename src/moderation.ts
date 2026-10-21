@@ -74,25 +74,45 @@ async function movePost(c: Ctx, requestId: string, actorEmail: string, action: A
 
   const occurredAt = utcSeconds();
   const actionId = uuidv7();
-  // events_one_per_resource allows one post.published per Post. Restore keeps that
-  // row. Hide does not write post.withdrawn; that event arrives in a later ticket.
-  let eventId: string | null = null;
-  if (name === "approve") eventId = uuidv7();
+  // One post.published and one post.withdrawn per Post. Restore keeps the publication
+  // row and deletes the withdrawal so a later hide can insert it again.
+  let publishedEventId: string | null = null;
+  if (name === "approve") publishedEventId = uuidv7();
   if (name === "restore") {
     const existing = await c.env.DB.prepare(
       "SELECT id FROM events WHERE type = 'post.published' AND resource_id = ?",
     ).bind(action.targetId).first<{ id: string }>();
-    eventId = existing?.id ?? null;
+    publishedEventId = existing?.id ?? null;
   }
+  const writeWithdrawn = name === "hide" || (name === "remove" && post.state === "published");
+  const withdrawnEventId = writeWithdrawn ? uuidv7() : null;
+  const auditEventId = publishedEventId ?? withdrawnEventId;
 
   const where = guard(name);
   const statements: D1PreparedStatement[] = [];
-  if (name === "approve" && eventId !== null) {
+  let writtenIndex: number | null = null;
+  if (name === "approve" && publishedEventId !== null) {
+    writtenIndex = statements.length;
     statements.push(c.env.DB.prepare(
       `INSERT INTO events (id, type, resource_id, occurred_at)
        SELECT ?, 'post.published', posts.id, ? FROM posts WHERE ${where}`,
-    ).bind(eventId, occurredAt, action.targetId));
+    ).bind(publishedEventId, occurredAt, action.targetId));
   }
+  if (withdrawnEventId !== null) {
+    writtenIndex = statements.length;
+    statements.push(c.env.DB.prepare(
+      `INSERT INTO events (id, type, resource_id, occurred_at)
+       SELECT ?, 'post.withdrawn', posts.id, ? FROM posts WHERE ${where}`,
+    ).bind(withdrawnEventId, occurredAt, action.targetId));
+  }
+  if (name === "restore") {
+    statements.push(c.env.DB.prepare(
+      `DELETE FROM events
+        WHERE type = 'post.withdrawn' AND resource_id = ?
+          AND EXISTS (SELECT 1 FROM posts WHERE ${where})`,
+    ).bind(action.targetId, action.targetId));
+  }
+  const auditIndex = statements.length;
   statements.push(c.env.DB.prepare(
     `INSERT INTO moderation_actions (
        id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
@@ -104,23 +124,24 @@ async function movePost(c: Ctx, requestId: string, actorEmail: string, action: A
     name,
     action.reasonCode,
     action.privateNote,
-    eventId,
+    auditEventId,
     occurredAt,
     action.targetId,
   ));
+  const updateIndex = statements.length;
   statements.push(c.env.DB.prepare(
     `UPDATE posts SET state = ? WHERE ${where}`,
   ).bind(destination(name), action.targetId));
   const results = await c.env.DB.batch(statements);
-  const updated = Number(results[results.length - 1]?.meta.changes ?? 0) === 1;
-  const audited = Number(results[results.length - 2]?.meta.changes ?? 0) === 1;
-  const recorded = name !== "approve" || Number(results[0]?.meta.changes ?? 0) === 1;
+  const updated = Number(results[updateIndex]?.meta.changes ?? 0) === 1;
+  const audited = Number(results[auditIndex]?.meta.changes ?? 0) === 1;
+  const recorded = writtenIndex === null || Number(results[writtenIndex]?.meta.changes ?? 0) === 1;
   if (!updated || !audited || !recorded) return errorResponse(requestId, "state_conflict");
   const entry: Record<string, string> = { message: logMessage(name), post_id: action.targetId };
-  if (eventId !== null) entry.event_id = eventId;
+  if (publishedEventId !== null) entry.event_id = publishedEventId;
   console.log(JSON.stringify(entry));
   const body: Record<string, unknown> = { post_id: action.targetId, state: destination(name) };
-  if (eventId !== null) body.event_id = eventId;
+  if (publishedEventId !== null) body.event_id = publishedEventId;
   return jsonResponse(requestId, body);
 }
 
