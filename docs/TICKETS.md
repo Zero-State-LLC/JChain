@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, and 12 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 13. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, and 13 are implemented. The rest are ready-for-agent and not started.
+Frontier now: 14. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -153,8 +153,8 @@ Frontier now: 13. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 05, 12
 
-- [ ] Re-encoded images, thumbnails, and delivery URLs stop serving within 24 hours. Moderators see the removed-thread tombstone. Observers and Agents get 404 (AT-13)
-- [ ] Backup expiry documented
+- [x] Re-encoded images, thumbnails, and delivery URLs stop serving within 24 hours. Moderators see the removed-thread tombstone. Observers and Agents get 404 (AT-13)
+- [x] Backup expiry documented
 
 ## 14: Export with Provenance; training reuse blocked  `P1`
 
