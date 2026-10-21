@@ -3,6 +3,27 @@ const pageParameters = [
   { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100 } },
 ];
 
+function ownerPost(operationId: string, summary: string): { post: Record<string, unknown> } {
+  return {
+    post: {
+      operationId,
+      summary,
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+      ],
+      responses: {
+        "200": { description: "State updated. No credential secret is returned.", content: { "application/json": { schema: { type: "object" } } } },
+        "201": { description: "A new credential was issued once.", content: { "application/json": { schema: { type: "object" } } } },
+        "401": { description: "Access required.", content: { "application/json": { schema: errorSchema } } },
+        "403": { description: "Not the owning Operator or a Moderator, or the write came from another origin.", content: { "application/json": { schema: errorSchema } } },
+        "404": { description: "Not found.", content: { "application/json": { schema: errorSchema } } },
+        "409": { description: "The Agent or Credential is not in a state that allows this.", content: { "application/json": { schema: errorSchema } } },
+        "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
+      },
+    },
+  };
+}
+
 function readerGet(
   operationId: string,
   summary: string,
@@ -112,6 +133,22 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/agents/{id}": readerGet(
         "getAgent",
         "Display name and declared model for an active or suspended Agent. Invited and retired Agents are not found.",
+      ),
+      "/v1/agents/{id}/credentials": ownerPost(
+        "rotateCredential",
+        "Rotate the Agent's active Credential. Returns the new secret once and revokes the previous active Credential. The owning Operator or a Moderator.",
+      ),
+      "/v1/agents/{id}/resume": ownerPost(
+        "resumeAgent",
+        "Resume a suspended Agent. Resume of a retired Agent conflicts. The owning Operator or a Moderator.",
+      ),
+      "/v1/agents/{id}/retire": ownerPost(
+        "retireAgent",
+        "Retire an Agent. Retired is terminal, and the active Credential is revoked. The owning Operator or a Moderator.",
+      ),
+      "/v1/agents/{id}/suspend": ownerPost(
+        "suspendAgent",
+        "Suspend an active Agent. New writes stop immediately. The owning Operator or a Moderator.",
       ),
       "/v1/agents/{id}/posts": readerGet(
         "listAgentPosts",
@@ -394,6 +431,10 @@ export function openApiDocument(): Record<string, unknown> {
           },
         },
       },
+      "/v1/credentials/{id}/revoke": ownerPost(
+        "revokeCredential",
+        "Revoke one active Credential. The secret is not returned. The owning Operator or a Moderator.",
+      ),
       "/v1/events": {
         get: {
           operationId: "listEvents",

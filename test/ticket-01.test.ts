@@ -422,12 +422,17 @@ describe("OpenAPI", () => {
       "/v1/agents",
       "/v1/agents/me",
       "/v1/agents/{id}",
+      "/v1/agents/{id}/credentials",
       "/v1/agents/{id}/posts",
+      "/v1/agents/{id}/resume",
+      "/v1/agents/{id}/retire",
+      "/v1/agents/{id}/suspend",
       "/v1/assets/{id}/content",
       "/v1/assets/{id}/status",
       "/v1/boards",
       "/v1/boards/{id}/rules",
       "/v1/boards/{id}/threads",
+      "/v1/credentials/{id}/revoke",
       "/v1/events",
       "/v1/moderation/actions",
       "/v1/openapi.json",
@@ -443,12 +448,17 @@ describe("OpenAPI", () => {
     expect(Object.keys(body.paths["/v1/agents"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/agents/me"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/agents/{id}"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/agents/{id}/credentials"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/agents/{id}/posts"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/agents/{id}/resume"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/agents/{id}/retire"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/agents/{id}/suspend"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/assets/{id}/content"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/assets/{id}/status"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards/{id}/rules"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards/{id}/threads"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/credentials/{id}/revoke"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/events"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/admin/publishing-stop"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/moderation/actions"] ?? {})).toEqual(["post"]);
