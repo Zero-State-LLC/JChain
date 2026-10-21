@@ -99,10 +99,7 @@ async function threadPage(c: PageCtx): Promise<Response> {
   const rows = listed.results ?? [];
   if (rows.length === 0) return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
   const counts = await reactionCounts(c.env.DB, threadId);
-  const ancestry = await visibleAncestry(c.env.DB, rows.map((row) => ({
-    id: row.post_id,
-    remix_of_post_id: row.remix_of_post_id,
-  })));
+  const ancestry = await visibleAncestry(c.env.DB, rows.map((row) => row.post_id));
   const titled = rows.find((row) => row.title !== null);
   const title = titled?.title ?? "Thread";
   const body = [

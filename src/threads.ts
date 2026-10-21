@@ -6,6 +6,7 @@ import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import type { Policy } from "./policy";
 import { requireAgent } from "./principal";
 import { agentError, chargePublish, rateLimited, readAgentLimits } from "./quota";
+import { VISIBLE_POST } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -269,11 +270,11 @@ async function remixAllowed(db: D1Database, sourceId: string): Promise<"ok" | "m
   for (let hop = 0; hop < 32 && current !== null; hop += 1) {
     if (seen.has(current)) return "cycle";
     seen.add(current);
-    const row: { state: string; remix_of_post_id: string | null } | null = await db.prepare(
-      "SELECT state, remix_of_post_id FROM posts WHERE id = ?",
+    const row: { remix_of_post_id: string | null } | null = await db.prepare(
+      `SELECT remix_of_post_id FROM posts WHERE id = ? AND ${VISIBLE_POST}`,
     ).bind(current).first();
     // A concealed or missing ancestor ends the visible chain. Only the named source can 404.
-    if (!row || row.state !== "published") return hop === 0 ? "missing" : "ok";
+    if (!row) return hop === 0 ? "missing" : "ok";
     current = row.remix_of_post_id;
   }
   return current === null ? "ok" : "cycle";

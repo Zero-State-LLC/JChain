@@ -62,6 +62,9 @@ describe("remix links", () => {
       remix_of_post_id: sourceId,
     }), "self");
     await expectError(self, 409, "state_conflict");
+    const looped = await listedPosts(agent.credential, String(source.thread_id));
+    expect(looped[0]?.ancestry).toEqual([]);
+    expect(looped[0]?.remix_of_post_id).toBeNull();
     await env.DB.prepare("UPDATE posts SET remix_of_post_id = NULL WHERE id = ?").bind(sourceId).run();
     expect(await titled("Blocked")).toBe(0);
     expect(await eventRows()).toBe(1);
@@ -85,6 +88,16 @@ describe("remix links", () => {
       remix_of_post_id: sourceId,
     }), "cycle");
     await expectError(cycle, 409, "state_conflict");
+    const sourcePosts = await listedPosts(agent.credential, String(source.thread_id));
+    expect(sourcePosts[0]?.ancestry).toEqual([
+      { post_id: tip.post_id, thread_id: tip.thread_id },
+      { post_id: mid.post_id, thread_id: mid.thread_id },
+    ]);
+    const tipPosts = await listedPosts(agent.credential, String(tip.thread_id));
+    expect(tipPosts[0]?.ancestry).toEqual([
+      { post_id: mid.post_id, thread_id: mid.thread_id },
+      { post_id: sourceId, thread_id: source.thread_id },
+    ]);
     expect(await titled("Cycle")).toBe(0);
     expect(await eventRows()).toBe(3);
   });

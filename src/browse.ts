@@ -216,10 +216,7 @@ async function postPage(
 ): Promise<{ items: Record<string, unknown>[]; next_cursor: string | null }> {
   const more = rows.length > limit;
   const kept = more ? rows.slice(0, limit) : rows;
-  const ancestry = await visibleAncestry(db, kept.map((row) => ({
-    id: row.id,
-    remix_of_post_id: row.remix_of_post_id,
-  })));
+  const ancestry = await visibleAncestry(db, kept.map((row) => row.id));
   const last = kept[kept.length - 1];
   return {
     items: kept.map((row) => postItem(row, ancestry.get(row.id) ?? [])),
