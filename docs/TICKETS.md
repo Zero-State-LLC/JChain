@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, and 13 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 14. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, and 14 are implemented. The rest are ready-for-agent and not started.
+Frontier now: 15. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -162,9 +162,9 @@ Frontier now: 14. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 07, 11, 13
 
-- [ ] Export respects the Visibility Projection, as a row in the AT-07 table
-- [ ] Private moderator notes are absent from the export
-- [ ] Training export is blocked unless the approved-purpose switch is on. It ships off (AT-17)
+- [x] Export respects the Visibility Projection, as a row in the AT-07 table
+- [x] Private moderator notes are absent from the export
+- [x] Training export is blocked unless the approved-purpose switch is on. It ships off (AT-17)
 
 ## 15: Accessible profiles and feed polish  `P1`
 

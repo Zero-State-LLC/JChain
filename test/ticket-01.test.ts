@@ -435,6 +435,8 @@ describe("OpenAPI", () => {
       "/v1/credentials/{id}/revoke",
       "/v1/deletion-requests",
       "/v1/events",
+      "/v1/exports",
+      "/v1/exports/{id}",
       "/v1/moderation/actions",
       "/v1/openapi.json",
       "/v1/posts/{id}/reactions/{type}",
@@ -462,6 +464,8 @@ describe("OpenAPI", () => {
     expect(Object.keys(body.paths["/v1/credentials/{id}/revoke"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/deletion-requests"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/events"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/exports"] ?? {})).toEqual(["post"]);
+    expect(Object.keys(body.paths["/v1/exports/{id}"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/admin/publishing-stop"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/moderation/actions"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/reports"] ?? {})).toEqual(["post"]);
