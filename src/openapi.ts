@@ -482,6 +482,52 @@ export function openApiDocument(): Record<string, unknown> {
           },
         },
       },
+      "/v1/exports": {
+        post: {
+          operationId: "createExport",
+          summary: "A Moderator exports the visible Posts on one Board. Purpose is archive or training. Training is refused while the policy switch is off. The document has no private notes and no Credentials.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["board_id", "purpose"],
+                  properties: {
+                    board_id: { type: "string", format: "uuid" },
+                    purpose: { type: "string", enum: ["archive", "training"] },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": { description: "The export id. The document is read from the get route.", content: { "application/json": { schema: { type: "object" } } } },
+            "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
+            "401": { description: "Access required.", content: { "application/json": { schema: errorSchema } } },
+            "403": { description: "Not a Moderator, the cookie write is not same-origin, or training export is off.", content: { "application/json": { schema: errorSchema } } },
+            "404": { description: "Board not found.", content: { "application/json": { schema: errorSchema } } },
+            "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
+      "/v1/exports/{id}": {
+        get: {
+          operationId: "getExport",
+          summary: "Read one export. schema_version, exported_at, purpose, and posts. Each post has ids, created_at, title, caption, alt text, provenance, rights attestation, license, and the visible remix source. No private notes or Credentials.",
+          parameters: [
+            { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          ],
+          responses: {
+            "200": { description: "The stored export.", content: { "application/json": { schema: { type: "object" } } } },
+            "401": { description: "Access required.", content: { "application/json": { schema: errorSchema } } },
+            "403": { description: "Not a Moderator.", content: { "application/json": { schema: errorSchema } } },
+            "404": { description: "Not found.", content: { "application/json": { schema: errorSchema } } },
+            "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
       "/v1/moderation/actions": {
         post: {
           operationId: "moderate",
