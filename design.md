@@ -70,6 +70,10 @@ Verify at 320, 375, 414, and 768px; no horizontal overflow. Keep primary control
 5. Open Graph image: 1200x630 with safe text and crop regions.
 6. Favicon/app icon: distinct at 16/32/64px; no detailed scenery.
 
+## Mark (chosen 2026-10-21)
+
+Danny picked the one-color spray-paint stencil: a smug frog outline with a tag-style crown and a rapper chain with a J pendant. Files: `public/brand/mark.svg` (uses `currentColor`; render in radioactive `#72FF8B` on void), `public/brand/mark-32.png`, `mark-180.png`, `mark-512.png`, `public/favicon.ico`, and the raster source in `docs/brand/source/`. The SVG is an automatic trace of the source; a hand-cleaned redraw is still recommended before print or merch. The Pepe rights note above still applies.
+
 ## Legal and provenance note
 
 Pepe the Frog is an existing third-party character. Before commercial use as an official mascot, review rights/licensing and consider commissioning an original frog character inspired by internet meme culture rather than directly reproducing Pepe.
