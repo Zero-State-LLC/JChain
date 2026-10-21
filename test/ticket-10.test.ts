@@ -1,6 +1,7 @@
 import { applyD1Migrations, createExecutionContext, createMessageBatch, getQueueResult } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import betaDocument from "../policy/beta.json";
 import worker from "../src/index";
 import { VALID_PNG } from "./fixtures/bytes";
 import { BOARD_ID, MODERATOR, OPERATOR, call, resetAndSeed } from "./harness";
@@ -247,6 +248,64 @@ describe("reactions", () => {
     await env.DB.prepare("UPDATE agents SET state = 'suspended' WHERE id = ?").bind(ada.agentId).run();
     await expectError(await react(ada.credential, MISSING_ID, "plus", "suspended"), 401, "credential_invalid");
   });
+
+  it("rejects a second new reaction inside the same minute", async () => {
+    const ada = await enroll("Ada");
+    const { postId } = await publishedThread(ada.credential, "capped reaction", true);
+    const policy = agentPolicy({ reactions_per_minute: 1 });
+    const created = await expectSuccess(await react(ada.credential, postId, "plus", "cap-plus", undefined, policy), 201);
+    expect(limitsOf(created.limits).reactions.remaining).toBe(0);
+    expect(limitsOf(created.limits).events.remaining).toBe(60);
+    expect(limitsOf(created.limits).mutations.remaining).toBe(19);
+
+    const replayed = await expectSuccess(await react(ada.credential, postId, "plus", "cap-plus", undefined, policy), 201);
+    expect(replayed.limits).toEqual(created.limits);
+    expect(await reactionRows(postId, "plus")).toBe(1);
+
+    const probe = await expectError(await call(`/v1/posts/${postId}/reactions/nope`, {
+      method: "PUT",
+      bearer: ada.credential,
+      headers: { "idempotency-key": "bad-type" },
+      policy,
+    }), 400, "malformed");
+    expect(limitsOf(probe.limits).reactions.remaining).toBe(0);
+
+    const second = await react(ada.credential, postId, "minus", "cap-minus", undefined, policy);
+    expect(second.status).toBe(429);
+    expect(second.headers.get("retry-after")).toMatch(/^[1-9]\d*$/);
+    const limited = await expectError(second, 429, "rate_limited");
+    expect(limitsOf(limited.limits).reactions.remaining).toBe(0);
+    expect(limitsOf(limited.limits).mutations.remaining).toBe(19);
+    expect(await reactionRows(postId, "minus")).toBe(0);
+  });
+
+  it("charges a new key for a reaction the agent already holds", async () => {
+    const ada = await enroll("Ada");
+    const { postId } = await publishedThread(ada.credential, "owned reaction", true);
+    const policy = agentPolicy({ reactions_per_minute: 2 });
+    const created = await expectSuccess(await react(ada.credential, postId, "plus", "own-a", undefined, policy), 201);
+    expect(limitsOf(created.limits).reactions.remaining).toBe(1);
+    const again = await expectSuccess(await react(ada.credential, postId, "plus", "own-b", undefined, policy), 200);
+    expect(again.count).toBe(1);
+    expect(limitsOf(again.limits).reactions.remaining).toBe(0);
+    const third = await react(ada.credential, postId, "laugh", "own-c", undefined, policy);
+    expect(third.status).toBe(429);
+    expect(await reactionRows(postId, "plus")).toBe(1);
+    expect(await reactionRows(postId, "laugh")).toBe(0);
+  });
+
+  it("rejects a second reaction delete inside the same minute", async () => {
+    const ada = await enroll("Ada");
+    const { postId } = await publishedThread(ada.credential, "delete cap", true);
+    const policy = agentPolicy({ reactions_per_minute: 1 });
+    const removed = await expectSuccess(await unreact(ada.credential, postId, "plus", policy));
+    expect(removed.count).toBe(0);
+    expect(limitsOf(removed.limits).reactions.remaining).toBe(0);
+    expect(limitsOf(removed.limits).mutations.remaining).toBe(19);
+    const again = await unreact(ada.credential, postId, "plus", policy);
+    expect(again.status).toBe(429);
+    expect(await reactionRows(postId, "plus")).toBe(0);
+  });
 });
 
 function react(
@@ -255,20 +314,43 @@ function react(
   type: string,
   key: string,
   body?: Record<string, unknown>,
+  policy?: string,
 ): Promise<Response> {
   return call(`/v1/posts/${postId}/reactions/${type}`, {
     method: "PUT",
     bearer: credential,
     headers: { "idempotency-key": key },
     body,
+    policy,
   });
 }
 
-function unreact(credential: string, postId: string, type: string): Promise<Response> {
+function unreact(credential: string, postId: string, type: string, policy?: string): Promise<Response> {
   return call(`/v1/posts/${postId}/reactions/${type}`, {
     method: "DELETE",
     bearer: credential,
+    policy,
   });
+}
+
+function agentPolicy(agent: { events_per_minute?: number; reactions_per_minute?: number }): string {
+  const policy = JSON.parse(JSON.stringify(betaDocument)) as {
+    quotas: { agent: Record<string, number> };
+  };
+  Object.assign(policy.quotas.agent, agent);
+  return JSON.stringify(policy);
+}
+
+function limitsOf(value: unknown): {
+  events: { remaining: number };
+  reactions: { remaining: number };
+  mutations: { remaining: number };
+} {
+  return value as {
+    events: { remaining: number };
+    reactions: { remaining: number };
+    mutations: { remaining: number };
+  };
 }
 
 function act(targetId: string, action: string): Promise<Response> {

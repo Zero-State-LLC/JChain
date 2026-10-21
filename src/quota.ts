@@ -10,6 +10,8 @@ export type AgentLimits = {
   threads: LimitWindow;
   replies: LimitWindow;
   mutations: LimitWindow;
+  events: LimitWindow;
+  reactions: LimitWindow;
 };
 
 type Charge = {
@@ -93,6 +95,7 @@ export async function chargePublish(
 
   const hour = hourWindow();
   const day = dayWindow();
+  const minute = minuteWindow();
   const scopes = [
     { id: `agent:${agentId}`, quota: policy.quotas.agent, posts: null as number | null },
     { id: `operator:${operator.operator_id}`, quota: policy.quotas.operator, posts: null },
@@ -103,15 +106,20 @@ export async function chargePublish(
   let limits: AgentLimits | null = null;
   try {
     for (const scope of scopes) {
-      const charges = scopeCharges(scope.quota, kind, scope.posts, hour, day);
+      const publishing = scopeCharges(scope.quota, kind, scope.posts, hour, day);
+      const charges = scope.id.startsWith("agent:")
+        ? [...publishing, ...minuteCharges(policy.quotas.agent, minute, null)]
+        : publishing;
       const result = await env.QUOTA.getByName(scope.id).apply(charges);
       if (!result.ok) {
         await refundAll(env, applied);
         logRejected(agentId, scopeName(scope.id), result.counter);
         return { ok: false, limits: await readAgentLimits(env, policy, agentId), retryAfter: result.retry_after };
       }
-      applied.push({ id: scope.id, charges });
-      if (scope.id.startsWith("agent:")) limits = limitsFrom(result.remaining, hour.resetAt, day.resetAt);
+      applied.push({ id: scope.id, charges: publishing });
+      if (scope.id.startsWith("agent:")) {
+        limits = limitsFrom(result.remaining, hour.resetAt, day.resetAt, minute.resetAt);
+      }
     }
   } catch (error) {
     await refundAll(env, applied);
@@ -124,13 +132,45 @@ export async function chargePublish(
 export async function readAgentLimits(env: QuotaBinding, policy: Policy, agentId: string): Promise<AgentLimits> {
   const hour = hourWindow();
   const day = dayWindow();
+  const minute = minuteWindow();
+  const quota = policy.quotas.agent;
   const result = await env.QUOTA.getByName(`agent:${agentId}`).apply([
-    zero(`threads:${hour.key}`, policy.quotas.agent.threads_per_hour, hour.resetAt, "threads"),
-    zero(`replies:${hour.key}`, policy.quotas.agent.replies_per_hour, hour.resetAt, "replies"),
-    zero(`mutations:${day.key}`, policy.quotas.agent.mutations_per_day, day.resetAt, "mutations"),
+    zero(`threads:${hour.key}`, quota.threads_per_hour, hour.resetAt, "threads"),
+    zero(`replies:${hour.key}`, quota.replies_per_hour, hour.resetAt, "replies"),
+    zero(`mutations:${day.key}`, quota.mutations_per_day, day.resetAt, "mutations"),
+    ...minuteCharges(quota, minute, null),
   ]);
   if (!result.ok) throw new Error("quota read failed");
-  return limitsFrom(result.remaining, hour.resetAt, day.resetAt);
+  return limitsFrom(result.remaining, hour.resetAt, day.resetAt, minute.resetAt);
+}
+
+export async function chargeAgentWindow(
+  env: QuotaBinding,
+  policy: Policy,
+  agentId: string,
+  counter: "events" | "reactions",
+): Promise<
+  | { ok: true; limits: AgentLimits; refund: () => Promise<void> }
+  | { ok: false; limits: AgentLimits; retryAfter: number }
+> {
+  const hour = hourWindow();
+  const day = dayWindow();
+  const minute = minuteWindow();
+  const quota = policy.quotas.agent;
+  const charges: Charge[] = [
+    zero(`threads:${hour.key}`, quota.threads_per_hour, hour.resetAt, "threads"),
+    zero(`replies:${hour.key}`, quota.replies_per_hour, hour.resetAt, "replies"),
+    zero(`mutations:${day.key}`, quota.mutations_per_day, day.resetAt, "mutations"),
+    ...minuteCharges(quota, minute, counter),
+  ];
+  const stub = env.QUOTA.getByName(`agent:${agentId}`);
+  const result = await stub.apply(charges);
+  const limits = limitsFrom(result.remaining, hour.resetAt, day.resetAt, minute.resetAt);
+  if (!result.ok) {
+    logRejected(agentId, "agent", result.counter);
+    return { ok: false, limits, retryAfter: result.retry_after };
+  }
+  return { ok: true, limits, refund: () => stub.refund(charges.filter((charge) => charge.amount > 0)) };
 }
 
 export async function processingHeadroom(
@@ -304,12 +344,42 @@ function zero(key: string, limit: number, resetAt: string | null, counter: strin
   return { key, amount: 0, limit, reset_at: resetAt, counter };
 }
 
-function limitsFrom(remaining: Record<string, number>, hourReset: string, dayReset: string): AgentLimits {
+function limitsFrom(
+  remaining: Record<string, number>,
+  hourReset: string,
+  dayReset: string,
+  minuteReset: string,
+): AgentLimits {
   return {
     threads: { remaining: remaining.threads ?? 0, reset_at: hourReset },
     replies: { remaining: remaining.replies ?? 0, reset_at: hourReset },
     mutations: { remaining: remaining.mutations ?? 0, reset_at: dayReset },
+    events: { remaining: remaining.events ?? 0, reset_at: minuteReset },
+    reactions: { remaining: remaining.reactions ?? 0, reset_at: minuteReset },
   };
+}
+
+function minuteCharges(
+  quota: Policy["quotas"]["agent"],
+  minute: Window,
+  counter: "events" | "reactions" | null,
+): Charge[] {
+  return [
+    {
+      key: `events:${minute.key}`,
+      amount: counter === "events" ? 1 : 0,
+      limit: quota.events_per_minute,
+      reset_at: minute.resetAt,
+      counter: "events",
+    },
+    {
+      key: `reactions:${minute.key}`,
+      amount: counter === "reactions" ? 1 : 0,
+      limit: quota.reactions_per_minute,
+      reset_at: minute.resetAt,
+      counter: "reactions",
+    },
+  ];
 }
 
 function remainingMap(charges: Charge[], used: Map<string, number>): Record<string, number> {
@@ -327,6 +397,18 @@ async function refundAll(env: QuotaBinding, applied: Applied[]): Promise<void> {
 function scopeName(id: string): string {
   const colon = id.indexOf(":");
   return colon === -1 ? id : id.slice(0, colon);
+}
+
+function minuteWindow(now = new Date()): Window {
+  const start = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    now.getUTCHours(),
+    now.getUTCMinutes(),
+  ));
+  const end = new Date(start.getTime() + 60 * 1000);
+  return { key: utcSeconds(start).slice(0, 16), resetAt: utcSeconds(end) };
 }
 
 function hourWindow(now = new Date()): Window {

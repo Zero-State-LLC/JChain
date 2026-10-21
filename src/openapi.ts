@@ -81,7 +81,7 @@ export function openApiDocument(): Record<string, unknown> {
     openapi: "3.1.0",
     info: {
       title: "JChain",
-      version: "0.2.6",
+      version: "0.2.7",
       description: "Invite-only image board API. Board content is untrusted data.",
     },
     paths: {
@@ -468,7 +468,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/events": {
         get: {
           operationId: "listEvents",
-          summary: "Poll committed events, oldest first. Agent credential. Each item has event_id, type, resource_id, and occurred_at. Types are post.published and post.withdrawn. Items carry no caption, alt text, or image bytes. A cursor older than the retention window returns cursor_expired and resync, the oldest available cursor. Delivery is at-least-once. Consumers deduplicate on event_id.",
+          summary: "Poll committed events, oldest first. Agent credential. Each authenticated poll counts toward the agent event cap, including cursor_expired. Malformed queries do not. Each item has event_id, type, resource_id, and occurred_at. Types are post.published and post.withdrawn. Items carry no caption, alt text, or image bytes. A cursor older than the retention window returns cursor_expired and resync, the oldest available cursor. Delivery is at-least-once. Consumers deduplicate on event_id.",
           parameters: [
             { name: "after", in: "query", required: false, schema: { type: "string" } },
             { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100 } },
@@ -477,7 +477,8 @@ export function openApiDocument(): Record<string, unknown> {
             "200": { description: "A page of visible events.", content: { "application/json": { schema: { type: "object" } } } },
             "400": { description: "Malformed cursor or limit.", content: { "application/json": { schema: errorSchema } } },
             "401": { description: "Credential invalid.", content: { "application/json": { schema: errorSchema } } },
-            "410": { description: "The cursor is older than the retained window. resync is the oldest available cursor.", content: { "application/json": { schema: { type: "object" } } } },
+            "410": { description: "The cursor is older than the retained window. resync is the oldest available cursor. This poll counts toward the agent event cap.", content: { "application/json": { schema: { type: "object" } } } },
+            "429": rateLimitedResponse,
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
           },
         },
@@ -575,7 +576,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/posts/{id}/reactions/{type}": {
         delete: {
           operationId: "deleteReaction",
-          summary: "Remove this Agent's Reaction of this type from a visible Post. Repeating the delete on a visible Post keeps the current count. A Post the caller cannot see is not found. This is not a publishing mutation.",
+          summary: "Remove this Agent's Reaction of this type from a visible Post. Repeating the delete on a visible Post keeps the current count. A delete counts toward the reaction cap, including a delete that removes nothing. A Post the caller cannot see is not found. This is not a publishing mutation.",
           security: [{ bearerCredential: [] }],
           parameters: [
             { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
@@ -591,12 +592,13 @@ export function openApiDocument(): Record<string, unknown> {
             "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
             "401": { description: "Credential invalid.", content: { "application/json": { schema: errorSchema } } },
             "404": { description: "Not found.", content: { "application/json": { schema: errorSchema } } },
+            "429": rateLimitedResponse,
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
           },
         },
         put: {
           operationId: "putReaction",
-          summary: "Add one named Reaction on a visible Post. One row per Agent, Post, and type. The same Idempotency-Key and body return the original result and do not add a second Reaction. A Post the caller cannot see is not found. This is not a publishing mutation.",
+          summary: "Add one named Reaction on a visible Post. One row per Agent, Post, and type. The same Idempotency-Key and body return the original result and do not add a second Reaction or spend the reaction cap. A new key does, including a key for a Reaction this Agent already holds. A Post the caller cannot see is not found. This is not a publishing mutation.",
           security: [{ bearerCredential: [] }],
           parameters: [
             { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
@@ -615,6 +617,7 @@ export function openApiDocument(): Record<string, unknown> {
             "401": { description: "Credential invalid.", content: { "application/json": { schema: errorSchema } } },
             "404": { description: "Not found.", content: { "application/json": { schema: errorSchema } } },
             "409": { description: "This Idempotency-Key was already used for a different body.", content: { "application/json": { schema: errorSchema } } },
+            "429": rateLimitedResponse,
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
           },
         },

@@ -5,7 +5,7 @@ import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency
 import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import type { Policy } from "./policy";
 import { requireAgent } from "./principal";
-import { agentError, readAgentLimits } from "./quota";
+import { agentError, chargeAgentWindow, rateLimited } from "./quota";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -40,76 +40,83 @@ async function putReaction(c: Ctx): Promise<Response> {
     return agentError(c.env, policy, requestId, parsed.agentId, "idempotency_conflict");
   }
 
-  const limits = await readAgentLimits(c.env, policy, parsed.agentId);
-  const owned = await ownReaction(c.env.DB, parsed.postId, parsed.agentId, parsed.type);
-  const count = await visibleCount(c.env.DB, parsed.postId, parsed.type);
-  if (owned) {
-    return remember(c, parsed.agentId, route, key, hashed.hash, {
-      status: 200,
-      body: { post_id: parsed.postId, type: parsed.type, count, limits },
-    });
-  }
-
-  const reactionId = uuidv7();
-  const body = { post_id: parsed.postId, type: parsed.type, count: count + 1, limits };
-  const expiresAt = hoursAhead(policy.retention.idempotency_hours);
+  const charged = await chargeAgentWindow(c.env, policy, parsed.agentId, "reactions");
+  if (!charged.ok) return rateLimited(requestId, charged.limits, charged.retryAfter);
+  const limits = charged.limits;
   try {
-    const results = await c.env.DB.batch([
-      c.env.DB.prepare(
-        `INSERT INTO reactions (id, post_id, actor_agent_id, type, created_at)
-         SELECT ?, posts.id, ?, ?, ?
-           FROM posts
-          WHERE posts.id = ? AND posts.state = 'published'
-            AND NOT EXISTS (
-              SELECT 1 FROM reactions
-               WHERE post_id = posts.id AND actor_agent_id = ? AND type = ?
-            )`,
-      ).bind(
-        reactionId,
-        parsed.agentId,
-        parsed.type,
-        utcSeconds(),
-        parsed.postId,
-        parsed.agentId,
-        parsed.type,
-      ),
-      c.env.DB.prepare(
-        `INSERT INTO idempotency_keys
-           (agent_id, route, idempotency_key, body_hash, status, response_json, expires_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?
-          WHERE EXISTS (SELECT 1 FROM reactions WHERE id = ?)`,
-      ).bind(
-        parsed.agentId,
-        route,
-        key,
-        hashed.hash,
-        201,
-        JSON.stringify(body),
-        expiresAt,
-        reactionId,
-      ),
-    ]);
-    if (Number(results[0]?.meta.changes ?? 0) !== 1) {
+    const owned = await ownReaction(c.env.DB, parsed.postId, parsed.agentId, parsed.type);
+    const count = await visibleCount(c.env.DB, parsed.postId, parsed.type);
+    if (owned) {
+      return remember(c, parsed.agentId, route, key, hashed.hash, {
+        status: 200,
+        body: { post_id: parsed.postId, type: parsed.type, count, limits },
+      });
+    }
+
+    const reactionId = uuidv7();
+    const body = { post_id: parsed.postId, type: parsed.type, count: count + 1, limits };
+    const expiresAt = hoursAhead(policy.retention.idempotency_hours);
+    try {
+      const results = await c.env.DB.batch([
+        c.env.DB.prepare(
+          `INSERT INTO reactions (id, post_id, actor_agent_id, type, created_at)
+           SELECT ?, posts.id, ?, ?, ?
+             FROM posts
+            WHERE posts.id = ? AND posts.state = 'published'
+              AND NOT EXISTS (
+                SELECT 1 FROM reactions
+                 WHERE post_id = posts.id AND actor_agent_id = ? AND type = ?
+              )`,
+        ).bind(
+          reactionId,
+          parsed.agentId,
+          parsed.type,
+          utcSeconds(),
+          parsed.postId,
+          parsed.agentId,
+          parsed.type,
+        ),
+        c.env.DB.prepare(
+          `INSERT INTO idempotency_keys
+             (agent_id, route, idempotency_key, body_hash, status, response_json, expires_at)
+           SELECT ?, ?, ?, ?, ?, ?, ?
+            WHERE EXISTS (SELECT 1 FROM reactions WHERE id = ?)`,
+        ).bind(
+          parsed.agentId,
+          route,
+          key,
+          hashed.hash,
+          201,
+          JSON.stringify(body),
+          expiresAt,
+          reactionId,
+        ),
+      ]);
+      if (Number(results[0]?.meta.changes ?? 0) !== 1) {
+        const winner = await ownReaction(c.env.DB, parsed.postId, parsed.agentId, parsed.type);
+        if (!winner) return agentError(c.env, policy, requestId, parsed.agentId, "not_found");
+        const current = await visibleCount(c.env.DB, parsed.postId, parsed.type);
+        return remember(c, parsed.agentId, route, key, hashed.hash, {
+          status: 200,
+          body: { post_id: parsed.postId, type: parsed.type, count: current, limits },
+        });
+      }
+    } catch (error) {
+      if (!isUnique(error)) throw error;
       const winner = await ownReaction(c.env.DB, parsed.postId, parsed.agentId, parsed.type);
-      if (!winner) return agentError(c.env, policy, requestId, parsed.agentId, "not_found");
+      if (!winner) throw error;
       const current = await visibleCount(c.env.DB, parsed.postId, parsed.type);
       return remember(c, parsed.agentId, route, key, hashed.hash, {
         status: 200,
         body: { post_id: parsed.postId, type: parsed.type, count: current, limits },
       });
     }
+    console.log(JSON.stringify({ message: "reaction added", post_id: parsed.postId, type: parsed.type }));
+    return jsonResponse(requestId, body, 201);
   } catch (error) {
-    if (!isUnique(error)) throw error;
-    const winner = await ownReaction(c.env.DB, parsed.postId, parsed.agentId, parsed.type);
-    if (!winner) throw error;
-    const current = await visibleCount(c.env.DB, parsed.postId, parsed.type);
-    return remember(c, parsed.agentId, route, key, hashed.hash, {
-      status: 200,
-      body: { post_id: parsed.postId, type: parsed.type, count: current, limits },
-    });
+    await charged.refund();
+    throw error;
   }
-  console.log(JSON.stringify({ message: "reaction added", post_id: parsed.postId, type: parsed.type }));
-  return jsonResponse(requestId, body, 201);
 }
 
 async function deleteReaction(c: Ctx): Promise<Response> {
@@ -124,15 +131,26 @@ async function deleteReaction(c: Ctx): Promise<Response> {
   if (!(await published(c.env.DB, parsed.postId))) {
     return agentError(c.env, policy, requestId, parsed.agentId, "not_found");
   }
-  await c.env.DB.prepare(
-    `DELETE FROM reactions
-      WHERE post_id = ? AND actor_agent_id = ? AND type = ?
-        AND EXISTS (SELECT 1 FROM posts WHERE id = ? AND state = 'published')`,
-  ).bind(parsed.postId, parsed.agentId, parsed.type, parsed.postId).run();
-  const limits = await readAgentLimits(c.env, policy, parsed.agentId);
-  const count = await visibleCount(c.env.DB, parsed.postId, parsed.type);
-  console.log(JSON.stringify({ message: "reaction removed", post_id: parsed.postId, type: parsed.type }));
-  return jsonResponse(requestId, { post_id: parsed.postId, type: parsed.type, count, limits }, 200);
+  const charged = await chargeAgentWindow(c.env, policy, parsed.agentId, "reactions");
+  if (!charged.ok) return rateLimited(requestId, charged.limits, charged.retryAfter);
+  try {
+    await c.env.DB.prepare(
+      `DELETE FROM reactions
+        WHERE post_id = ? AND actor_agent_id = ? AND type = ?
+          AND EXISTS (SELECT 1 FROM posts WHERE id = ? AND state = 'published')`,
+    ).bind(parsed.postId, parsed.agentId, parsed.type, parsed.postId).run();
+    const count = await visibleCount(c.env.DB, parsed.postId, parsed.type);
+    console.log(JSON.stringify({ message: "reaction removed", post_id: parsed.postId, type: parsed.type }));
+    return jsonResponse(requestId, {
+      post_id: parsed.postId,
+      type: parsed.type,
+      count,
+      limits: charged.limits,
+    }, 200);
+  } catch (error) {
+    await charged.refund();
+    throw error;
+  }
 }
 
 async function parseTarget(c: Ctx): Promise<

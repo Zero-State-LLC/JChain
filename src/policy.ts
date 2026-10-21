@@ -15,6 +15,13 @@ const TOP_LEVEL = [
 const UPLOAD_KEYS = ["max_bytes", "max_megapixels", "max_edge_px", "allowed_types"] as const;
 const QUOTA_ROLES = ["agent", "operator", "board", "global"] as const;
 const QUOTA_KEYS = ["threads_per_hour", "replies_per_hour", "mutations_per_day"] as const;
+const AGENT_QUOTA_KEYS = [
+  "threads_per_hour",
+  "replies_per_hour",
+  "mutations_per_day",
+  "events_per_minute",
+  "reactions_per_minute",
+] as const;
 const HARD_CAP_KEYS = ["posts_per_day", "transformations_per_month", "r2_bytes"] as const;
 const RETENTION_KEYS = [
   "rejected_upload_days",
@@ -28,7 +35,13 @@ const RETENTION_KEYS = [
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 
 const QUOTA_CEILING = {
-  agent: { threads_per_hour: 1, replies_per_hour: 6, mutations_per_day: 20 },
+  agent: {
+    threads_per_hour: 1,
+    replies_per_hour: 6,
+    mutations_per_day: 20,
+    events_per_minute: 60,
+    reactions_per_minute: 30,
+  },
   operator: { threads_per_hour: 4, replies_per_hour: 24, mutations_per_day: 80 },
   board: { threads_per_hour: 20, replies_per_hour: 120, mutations_per_day: 400 },
   global: { threads_per_hour: 20, replies_per_hour: 120, mutations_per_day: 400 },
@@ -49,6 +62,11 @@ export type Quota = {
   mutations_per_day: number;
 };
 
+export type AgentQuota = Quota & {
+  events_per_minute: number;
+  reactions_per_minute: number;
+};
+
 export type Policy = {
   schema_version: 1;
   moderation_mode: "prepublish";
@@ -62,7 +80,7 @@ export type Policy = {
     allowed_types: string[];
   };
   quotas: {
-    agent: Quota;
+    agent: AgentQuota;
     operator: Quota;
     board: Quota;
     global: Quota;
@@ -137,13 +155,29 @@ function parseUpload(value: unknown): Policy["upload"] | null {
 
 function parseQuotas(value: unknown): Policy["quotas"] | null {
   if (!isRecord(value) || !exactKeys(value, QUOTA_ROLES)) return null;
-  const quotas = {} as Policy["quotas"];
-  for (const role of QUOTA_ROLES) {
-    const quota = parseQuota(value[role], QUOTA_CEILING[role]);
-    if (!quota) return null;
-    quotas[role] = quota;
-  }
-  return quotas;
+  const agent = parseAgentQuota(value.agent);
+  const operator = parseQuota(value.operator, QUOTA_CEILING.operator);
+  const board = parseQuota(value.board, QUOTA_CEILING.board);
+  const global = parseQuota(value.global, QUOTA_CEILING.global);
+  if (!agent || !operator || !board || !global) return null;
+  return { agent, operator, board, global };
+}
+
+function parseAgentQuota(value: unknown): AgentQuota | null {
+  const ceiling = QUOTA_CEILING.agent;
+  if (!isRecord(value) || !exactKeys(value, AGENT_QUOTA_KEYS)) return null;
+  if (!intInRange(value.threads_per_hour, 1, ceiling.threads_per_hour)) return null;
+  if (!intInRange(value.replies_per_hour, 1, ceiling.replies_per_hour)) return null;
+  if (!intInRange(value.mutations_per_day, 1, ceiling.mutations_per_day)) return null;
+  if (!intInRange(value.events_per_minute, 1, ceiling.events_per_minute)) return null;
+  if (!intInRange(value.reactions_per_minute, 1, ceiling.reactions_per_minute)) return null;
+  return {
+    threads_per_hour: value.threads_per_hour,
+    replies_per_hour: value.replies_per_hour,
+    mutations_per_day: value.mutations_per_day,
+    events_per_minute: value.events_per_minute,
+    reactions_per_minute: value.reactions_per_minute,
+  };
 }
 
 function parseQuota(value: unknown, ceiling: Quota): Quota | null {
