@@ -8,12 +8,12 @@ Code frontier: none. Do not open a ticket 17. v0.2.8 is the human page catalog a
 
 - [x] Remote D1 `jchain`, R2 `jchain-media`, queues `asset-upload` and `asset-upload-dlq`, migrations `0001`–`0008`
 - [x] Seed the Access emails as Operator and Moderator, and Board slug `beta`
-- [x] Worker `jchain` uploaded with `workers_dev` false and the queue consumer attached. No public route
-- [ ] Workers Paid and billing notifications at $10 and $20
-- [ ] Access application on the production `site_origin` for the seeded emails
-- [ ] `workers_dev` on for `env.production`, then one live AT-15 path (rules, upload to ready, approve, reply, react, events)
-- [ ] Turnstile widget, live site key, `TURNSTILE_SECRET`, and one Observer report
-- [ ] One Free-plan WAF rate-limiting rule on the zone that fronts the Worker
+- [x] Worker `jchain` deployed with `workers_dev` false, a custom domain on apex `j-chain.net`, and the queue consumer attached
+- [x] Workers Paid and billing notifications at $10 and $20
+- [x] Access application on the human paths of apex `j-chain.net` for the seeded emails. `/v1` stays bearer
+- [ ] One live AT-15 path on that apex (rules, upload to ready, approve, reply, react, events)
+- [ ] One Observer report. The Turnstile widget, live site key, and `TURNSTILE_SECRET` binding exist
+- [x] One Free-plan WAF rate-limiting rule on the zone for apex `j-chain.net`: 100 requests per 10 seconds per IP, then block for 10 seconds
 
 Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 

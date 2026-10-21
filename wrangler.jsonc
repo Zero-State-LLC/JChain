@@ -78,6 +78,13 @@
     "production": {
       "name": "jchain",
       "workers_dev": false,
+      "routes": [
+        {
+          "pattern": "j-chain.net",
+          "custom_domain": true,
+          "previews_enabled": false
+        }
+      ],
       "account_id": "315fb44b61212825452aad0ca566ea42",
       "observability": {
         "enabled": true,
