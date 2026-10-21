@@ -248,6 +248,41 @@ describe("hard caps", () => {
     expect(logs.some((line) => line.includes("\"counter\":\"r2_bytes\""))).toBe(true);
   });
 
+  it("keeps the transformation that already ran when the thumbnail output throws", async () => {
+    const agent = await enroll();
+    const tight = policyJson((document) => {
+      document.hard_caps.transformations_per_month = 2;
+    });
+    const assetId = await upload(agent.credential, VALID_PNG, "image/png", "partial-output", tight, { failOutput: 2 });
+    const status = await expectSuccess(await call(`/v1/assets/${assetId}/status`, {
+      bearer: agent.credential,
+    }));
+    expect(status).toMatchObject({ state: "rejected", reason_code: "processing_failed" });
+    const blocked = await reserve(agent.credential, VALID_JPG, "image/jpeg", "partial-output-again", tight);
+    await expectError(blocked, 429, "rate_limited");
+
+    const room = policyJson((document) => {
+      document.hard_caps.transformations_per_month = 3;
+    });
+    const admitted = await reserve(agent.credential, VALID_JPG, "image/jpeg", "partial-output-room", room);
+    await expectSuccess(admitted, 201);
+  });
+
+  it("deletes a partial derivative write and keeps both transformation charges", async () => {
+    const agent = await enroll();
+    const policy = policyJson((document) => {
+      document.hard_caps.transformations_per_month = 2;
+    });
+    const assetId = await upload(agent.credential, VALID_PNG, "image/png", "partial-put", policy, { failPut: true });
+    const status = await expectSuccess(await call(`/v1/assets/${assetId}/status`, {
+      bearer: agent.credential,
+    }));
+    expect(status).toMatchObject({ state: "rejected", reason_code: "processing_failed" });
+    expect(await derivativeCount()).toBe(0);
+    const again = await reserve(agent.credential, VALID_JPG, "image/jpeg", "partial-put-again", policy);
+    await expectError(again, 429, "rate_limited");
+  });
+
   it("does not charge transformations for a deduped upload", async () => {
     const agent = await enroll();
     const policy = policyJson((document) => {
@@ -385,7 +420,37 @@ async function readyAsset(credential: string, policy?: string): Promise<string> 
   return String(reserved.asset_id);
 }
 
-async function settle(assetId: string, policy?: string): Promise<void> {
+type ScriptedFailure = { failOutput?: number; failPut?: boolean };
+
+async function upload(
+  credential: string,
+  bytes: Uint8Array,
+  contentType: string,
+  key: string,
+  policy: string,
+  script?: ScriptedFailure,
+): Promise<string> {
+  const reserved = await expectSuccess(await reserve(credential, bytes, contentType, key, policy), 201);
+  await expectSuccess(await call(`/v1/uploads/${String(reserved.asset_id)}/content`, {
+    method: "PUT",
+    raw: bytes,
+    policy,
+    headers: {
+      "idempotency-key": `${key}-put`,
+      "upload-token": String(reserved.upload_token),
+    },
+  }));
+  await expectSuccess(await call(`/v1/uploads/${String(reserved.asset_id)}/complete`, {
+    method: "POST",
+    bearer: credential,
+    policy,
+    headers: { "idempotency-key": `${key}-complete` },
+  }), 202);
+  await settle(String(reserved.asset_id), policy, script);
+  return String(reserved.asset_id);
+}
+
+async function settle(assetId: string, policy?: string, script?: ScriptedFailure): Promise<void> {
   const ctx = createExecutionContext();
   const batch = createMessageBatch("asset-upload", [{
     id: `msg-${assetId}`,
@@ -394,12 +459,13 @@ async function settle(assetId: string, policy?: string): Promise<void> {
     body: { asset_id: assetId },
   }]);
   if (!worker.queue) throw new Error("queue handler missing");
-  await worker.queue(batch, scriptedEnv(policy), ctx);
+  await worker.queue(batch, scriptedEnv(policy, script), ctx);
   await getQueueResult(batch, ctx);
 }
 
-function scriptedEnv(policy?: string): Env {
+function scriptedEnv(policy?: string, script: ScriptedFailure = {}): Env {
   const payload = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 1]);
+  let outputs = 0;
   const handle = {
     transform() {
       return handle;
@@ -408,6 +474,10 @@ function scriptedEnv(policy?: string): Env {
       return handle;
     },
     async output() {
+      outputs += 1;
+      if (script.failOutput !== undefined && outputs >= script.failOutput) {
+        throw new Error("output failed");
+      }
       return {
         contentType: () => "image/webp",
         response: () => new Response(payload),
@@ -420,6 +490,23 @@ function scriptedEnv(policy?: string): Env {
       };
     },
   };
+  let puts = 0;
+  const media = script.failPut
+    ? new Proxy(env.MEDIA, {
+      get(target, property) {
+        if (property === "put") {
+          const put = target.put.bind(target);
+          return (...args: Parameters<typeof put>) => {
+            puts += 1;
+            if (puts >= 2) throw new Error("put failed");
+            return put(...args);
+          };
+        }
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    })
+    : env.MEDIA;
   const images = new Proxy(env.IMAGES, {
     get(target, property, receiver) {
       if (property === "info") {
@@ -437,6 +524,7 @@ function scriptedEnv(policy?: string): Env {
   return new Proxy(env, {
     get(target, property, receiver) {
       if (property === "IMAGES") return images;
+      if (property === "MEDIA" && script.failPut) return media;
       if (property === "POLICY" && policy !== undefined) return policy;
       return Reflect.get(target, property, receiver);
     },

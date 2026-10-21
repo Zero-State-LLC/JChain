@@ -158,18 +158,18 @@ export async function processingHeadroom(
 export async function chargeTransformations(
   env: QuotaBinding,
   policy: Policy,
-): Promise<{ ok: true; refund: () => Promise<void> } | { ok: false; retryAfter: number }> {
+): Promise<{ ok: true; refund: (amount: number) => Promise<void> } | { ok: false; retryAfter: number }> {
   const month = monthWindow();
-  const charges = [{
-    key: `transformations:${month.key}`,
+  const key = `transformations:${month.key}`;
+  const result = await env.QUOTA.getByName("global").apply([{
+    key,
     amount: 2,
     limit: policy.hard_caps.transformations_per_month,
     reset_at: month.resetAt,
     counter: "transformations",
-  }];
-  const result = await env.QUOTA.getByName("global").apply(charges);
+  }]);
   if (!result.ok) return { ok: false, retryAfter: result.retry_after };
-  return { ok: true, refund: () => env.QUOTA.getByName("global").refund(charges) };
+  return { ok: true, refund: (amount: number) => env.QUOTA.getByName("global").refund([{ key, amount }]) };
 }
 
 export async function chargeDerivativeBytes(
