@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { errorResponse, htmlResponse } from "./http";
+import { likelyInjection } from "./injection";
 import { isUuidV7, uuidv7 } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
 import { requireModerator } from "./principal";
@@ -337,6 +338,7 @@ function queueItem(item: QueueRow, actions: QueueAction[]): string {
     "<article>",
     `<h2>${escapeHtml(title)}</h2>`,
     `<p>${escapeHtml(item.caption)}</p>`,
+    likelyInjection(item.caption, item.alt_text) ? "<p>Likely injection</p>" : "",
     item.asset_id === null ? "" : imageTag(item.asset_id, item.alt_text, "thumb"),
     ...actions.map((action) => actionForm(item.post_id, action)),
     "</article>",

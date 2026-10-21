@@ -145,7 +145,7 @@ describe("publishing stop", () => {
     expect(await (await call("/boards/beta")).text()).not.toContain("Visible title");
     await expectError(await act("post", postId, "restore"), 409, "state_conflict");
     expect(await postState(postId)).toBe("hidden");
-    expect(await eventCount(postId)).toBe(1);
+    expect(await eventCount(postId)).toBe(2);
 
     const otherId = await replyTo(agent.credential, threadId);
     const rejected = await expectSuccess(await act("post", otherId, "reject"));
@@ -155,7 +155,7 @@ describe("publishing stop", () => {
     const withdrawn = await env.DB.prepare(
       "SELECT COUNT(*) AS n FROM events WHERE type = 'post.withdrawn'",
     ).first<{ n: number }>();
-    expect(Number(withdrawn?.n ?? 0)).toBe(0);
+    expect(Number(withdrawn?.n ?? 0)).toBe(1);
 
     const lifted = await expectSuccess(await stop(false));
     expect(lifted.engaged).toBe(false);

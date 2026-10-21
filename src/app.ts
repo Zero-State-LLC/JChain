@@ -8,6 +8,7 @@ import { parsePolicy, type Policy } from "./policy";
 import { requireAgent, requireOperator, requireReader } from "./principal";
 import { mountReports } from "./reports";
 import { mountBrowse } from "./browse";
+import { mountEvents } from "./events";
 import { mountModeration } from "./moderation";
 import { mountPages } from "./pages";
 import { mountPublishingStop } from "./publishing-stop";
@@ -135,6 +136,7 @@ app.get("/v1/openapi.json", async (c) => {
 mountUploads(app);
 mountThreads(app);
 mountBrowse(app);
+mountEvents(app);
 mountModeration(app);
 mountPublishingStop(app);
 mountReports(app);

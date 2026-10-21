@@ -314,11 +314,11 @@ describe("moderation actions", () => {
     const hiddenQueue = await (await call("/moderation", { email: MODERATOR })).text();
     expect(hiddenQueue).toContain(`value="restore"`);
     expect(hiddenQueue).toContain("hide-caption-05");
-    expect(await eventCount(hideId)).toBe(1);
+    expect(await eventCount(hideId)).toBe(2);
     const withdrawn = await env.DB.prepare(
       "SELECT COUNT(*) AS n FROM events WHERE resource_id = ? AND type = 'post.withdrawn'",
     ).bind(hideId).first<{ n: number }>();
-    expect(Number(withdrawn?.n ?? 0)).toBe(0);
+    expect(Number(withdrawn?.n ?? 0)).toBe(1);
 
     const restored = await expectSuccess(await act(hideId, "restore"));
     expect(restored.state).toBe("published");
@@ -417,6 +417,8 @@ async function expectAbsent(caption: string, threadId: string, agentId: string, 
   await expectError(await call(`/v1/threads/${threadId}/posts`, { bearer }), 404, "not_found");
   const posts = await expectSuccess(await call(`/v1/agents/${agentId}/posts`, { bearer }));
   expect(JSON.stringify(posts.items)).not.toContain(caption);
+  const events = await expectSuccess(await call("/v1/events", { bearer }));
+  expect(JSON.stringify(events.items)).not.toContain(caption);
 }
 
 function actionBody(postId: string, action: string, extra: Record<string, unknown> = {}): Record<string, unknown> {

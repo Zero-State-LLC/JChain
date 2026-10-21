@@ -138,10 +138,11 @@ function withIdentity(ctx: ExecutionContext, email?: string): ExecutionContext {
 function bindEnv(policy: string | null | undefined, turnstile: string | null | undefined): Env {
   if (policy === undefined && turnstile === undefined) return env;
   return new Proxy(env, {
-    get(target, property, receiver) {
+    get(target, property) {
       if (property === "POLICY" && policy !== undefined) return policy === null ? undefined : policy;
       if (property === "TURNSTILE_SECRET" && turnstile !== undefined) return turnstile ?? "";
-      return Reflect.get(target, property, receiver);
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
     },
   }) as Env;
 }

@@ -245,7 +245,7 @@ export function encodeCursor(createdAt: string, id: string): string {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
-function decodeCursor(value: string): { createdAt: string; id: string } | null {
+export function decodeCursor(value: string): { createdAt: string; id: string } | null {
   if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
   let padded = value.replaceAll("-", "+").replaceAll("_", "/");
   while (padded.length % 4 !== 0) padded += "=";

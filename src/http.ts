@@ -14,6 +14,7 @@ export const ERRORS = {
   policy_missing: { status: 503, message: "Policy is not available." },
   processing_unavailable: { status: 503, message: "The upload could not be queued." },
   rate_limited: { status: 429, message: "A quota or hard cap refused the work." },
+  cursor_expired: { status: 410, message: "The cursor is older than the retained window." },
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;
@@ -59,6 +60,13 @@ export function jsonResponse(requestId: string, body: Record<string, unknown>, s
   response.headers.set("x-request-id", requestId);
   response.headers.set("cache-control", "no-store");
   return response;
+}
+
+export function cursorExpired(requestId: string, resync: string | null): Response {
+  return jsonResponse(requestId, {
+    error: { code: "cursor_expired", message: ERRORS.cursor_expired.message },
+    resync,
+  }, ERRORS.cursor_expired.status);
 }
 
 export function errorResponse(requestId: string, code: ErrorCode, message?: string): Response {
