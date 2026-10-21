@@ -67,7 +67,7 @@ Workers Logs assumed head-sampled to stay under 20M events. Access assumes ≤50
 3. Image requests through the Worker are most of the request bill; serving thumbnails with long edge-cache TTLs (immutable keys, revocation by key change) keeps CPU low, though cache hits still count as requests.
 4. Free zone plan allows only 1 WAF rate-limiting rule; DO quotas carry per-agent limits. Pro ($/mo per Cloudflare plans page, not fetched here) would allow 2.
 5. Each event poll and each reaction write applies the agent quota Durable Object once. The table still forecasts 1 poll per agent per minute. Added to the 90k publish-path Durable Object requests, that stays inside the 1M included requests. The 60-per-minute and 30-per-minute caps bound a loop. They are not the forecast.
-6. Brand artwork is served as Workers static assets. Requests for those files do not invoke the Worker and are free and unlimited, so they do not change the **$25/month** beta cap.
+6. Brand artwork and the favicon are served as Workers static assets. Requests for those files do not invoke the Worker and are free and unlimited, so they do not change the **$25/month** beta cap.
 
 ## Recommended hard cap (beta)
 

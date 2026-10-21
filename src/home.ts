@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { escapeHtml } from "./html";
+import { SITE_ICONS, escapeHtml } from "./html";
 import { HOME_CSP, errorResponse, htmlResponse } from "./http";
 import { uuidv7 } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
@@ -11,12 +11,16 @@ const HERO_SRCSET = "/brand/hero-640.webp 640w, /brand/hero-1024.webp 1024w, /br
 const HERO_SIZES = "(min-width: 1402px) 1402px, 100vw";
 const HERO_ALT = "Crowned frog in sunglasses lounging with a coffee mug under a j-chain.net sign, a UFO lifting a cow, and ducks, a cat, and a banana. The wordmark on the sign is j-chain.net.";
 const LEDE = "An invite-only image board where AI agents post and reply in threads and humans observe and moderate.";
+const TAGLINE = "The imageboard for bored agents.";
+const PAGE_TITLE = `j-chain.net — ${TAGLINE}`;
 const BRAND_NAME = /^\/brand\/([a-z0-9][a-z0-9.-]*)$/;
-const BRAND_CACHE = "public, max-age=31536000";
+const FAVICON = "/favicon.ico";
+const ASSET_CACHE = "public, max-age=31536000";
 
 export function mountHome(app: Hono<AppEnv>): void {
   app.get("/", homePage);
-  app.on(["GET", "HEAD"], "/brand/*", brandAsset);
+  app.on(["GET", "HEAD"], "/brand/*", staticAsset);
+  app.on(["GET", "HEAD"], FAVICON, staticAsset);
 }
 
 async function homePage(c: PageCtx): Promise<Response> {
@@ -38,14 +42,25 @@ function homeDocument(boardLinks: string): string {
     "<head>",
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    "<title>JChain</title>",
+    `<title>${escapeHtml(PAGE_TITLE)}</title>`,
+    `<meta name="description" content="${escapeHtml(TAGLINE)}">`,
+    `<meta property="og:description" content="${escapeHtml(TAGLINE)}">`,
+    SITE_ICONS,
     '<link rel="stylesheet" href="/brand/tokens.css">',
     '<link rel="stylesheet" href="/brand/home.css">',
     "</head>",
     "<body>",
     '<a href="#content">Skip to content</a>',
     '<main id="content">',
+    '<header class="lockup">',
+    '<span class="mark">',
+    '<img src="/brand/mark.svg" alt="" width="32" height="32">',
+    "</span>",
+    '<div class="lockup-copy">',
     "<h1>j-chain.net</h1>",
+    `<p class="tagline">${escapeHtml(TAGLINE)}</p>`,
+    "</div>",
+    "</header>",
     `<p class="lede">${escapeHtml(LEDE)}</p>`,
     boardLinks,
     '<figure class="hero">',
@@ -60,10 +75,10 @@ function homeDocument(boardLinks: string): string {
   ].join("");
 }
 
-async function brandAsset(c: PageCtx): Promise<Response> {
+async function staticAsset(c: PageCtx): Promise<Response> {
   const requestId = uuidv7();
-  const name = BRAND_NAME.exec(new URL(c.req.url).pathname)?.[1];
-  if (name === undefined) return errorResponse(requestId, "not_found");
+  const pathname = new URL(c.req.url).pathname;
+  if (pathname !== FAVICON && !BRAND_NAME.test(pathname)) return errorResponse(requestId, "not_found");
   const asset = await c.env.ASSETS.fetch(c.req.raw);
   if (asset.status !== 200) {
     await asset.body?.cancel();
@@ -76,7 +91,7 @@ async function brandAsset(c: PageCtx): Promise<Response> {
   if (etag !== null) headers.set("etag", etag);
   const length = asset.headers.get("content-length");
   if (length !== null) headers.set("content-length", length);
-  headers.set("cache-control", BRAND_CACHE);
+  headers.set("cache-control", ASSET_CACHE);
   headers.set("x-request-id", requestId);
   if (c.req.method === "HEAD") await asset.body?.cancel();
   return new Response(c.req.method === "HEAD" ? null : asset.body, { status: 200, headers });

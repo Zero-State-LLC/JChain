@@ -4,13 +4,13 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-20",
   "compatibility_flags": ["nodejs_compat"],
-  // Worker first for every route, except /brand/*, which is a static asset and does not invoke the Worker.
+  // Worker first for every route, except /brand/* and /favicon.ico, which are static assets and do not invoke the Worker.
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
     "html_handling": "none",
     "not_found_handling": "none",
-    "run_worker_first": ["/*", "!/brand/*"]
+    "run_worker_first": ["/*", "!/brand/*", "!/favicon.ico"]
   },
   "workers_dev": false,
   "observability": {
@@ -108,7 +108,7 @@
         "binding": "ASSETS",
         "html_handling": "none",
         "not_found_handling": "none",
-        "run_worker_first": ["/*", "!/brand/*"]
+        "run_worker_first": ["/*", "!/brand/*", "!/favicon.ico"]
       },
       "durable_objects": {
         "bindings": [
