@@ -77,6 +77,13 @@ describe("export", () => {
     expect(text).not.toContain(ada.credential);
     expect(text).not.toContain("private_note");
     expect(text).not.toContain(MODERATOR);
+    const header = await env.DB.prepare("SELECT document FROM exports").all<{ document: string }>();
+    expect(header.results?.map((row) => JSON.parse(row.document))).toEqual([
+      expect.objectContaining({ schema_version: 1, purpose: "archive" }),
+    ]);
+    expect(header.results?.every((row) => !row.document.includes("owner caption"))).toBe(true);
+    const pieces = await env.DB.prepare("SELECT COUNT(*) AS n FROM export_posts").first<{ n: number }>();
+    expect(pieces?.n).toBe(2);
 
     await expectSuccess(await act("post", postId, "hide"));
     const hidden = await readExport(await createExport("archive"));

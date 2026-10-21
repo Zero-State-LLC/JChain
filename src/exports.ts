@@ -13,6 +13,7 @@ type Ctx = Context<AppEnv>;
 
 const SCHEMA_VERSION = 1;
 const PAGE = 100;
+const INSERT_BATCH = 30;
 
 type Purpose = "archive" | "training";
 
@@ -55,16 +56,13 @@ async function createExport(c: Ctx): Promise<Response> {
   const ancestry = await visibleAncestry(c.env.DB, rows.map((row) => row.id));
   const exportedAt = utcSeconds();
   const exportId = uuidv7();
-  const document = {
+  const header = {
     schema_version: SCHEMA_VERSION,
     exported_at: exportedAt,
     purpose: request.purpose,
-    posts: rows.map((row) => postDocument(row, ancestry.get(row.id) ?? [])),
   };
-  await c.env.DB.prepare(
-    `INSERT INTO exports (id, board_id, purpose, schema_version, exported_at, document)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).bind(exportId, request.boardId, request.purpose, SCHEMA_VERSION, exportedAt, JSON.stringify(document)).run();
+  const posts = rows.map((row) => postDocument(row, ancestry.get(row.id) ?? []));
+  await storeExport(c.env.DB, exportId, request.boardId, request.purpose, exportedAt, header, posts);
   console.log(JSON.stringify({
     message: "export created",
     export_id: exportId,
@@ -84,8 +82,57 @@ async function readExport(c: Ctx): Promise<Response> {
     "SELECT document FROM exports WHERE id = ?",
   ).bind(exportId).first<{ document: string }>();
   if (!row) return errorResponse(requestId, "not_found");
-  const document = JSON.parse(row.document) as Record<string, unknown>;
-  return jsonResponse(requestId, document);
+  const header = JSON.parse(row.document) as Record<string, unknown>;
+  const posts = await storedPosts(c.env.DB, exportId);
+  return jsonResponse(requestId, { ...header, posts });
+}
+
+async function storeExport(
+  db: D1Database,
+  exportId: string,
+  boardId: string,
+  purpose: Purpose,
+  exportedAt: string,
+  header: { schema_version: number; exported_at: string; purpose: Purpose },
+  posts: Record<string, unknown>[],
+): Promise<void> {
+  const statements = [
+    db.prepare(
+      `INSERT INTO exports (id, board_id, purpose, schema_version, exported_at, document)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).bind(exportId, boardId, purpose, SCHEMA_VERSION, exportedAt, JSON.stringify(header)),
+  ];
+  for (let start = 0; start < posts.length; start += INSERT_BATCH) {
+    const slice = posts.slice(start, start + INSERT_BATCH);
+    const values = slice.map(() => "(?, ?, ?)").join(", ");
+    const binds: (string | number)[] = [];
+    slice.forEach((post, index) => {
+      binds.push(exportId, start + index, JSON.stringify(post));
+    });
+    statements.push(db.prepare(
+      `INSERT INTO export_posts (export_id, ordinal, document) VALUES ${values}`,
+    ).bind(...binds));
+  }
+  await db.batch(statements);
+}
+
+async function storedPosts(db: D1Database, exportId: string): Promise<Record<string, unknown>[]> {
+  const posts: Record<string, unknown>[] = [];
+  let after = -1;
+  for (;;) {
+    const listed = await db.prepare(
+      `SELECT ordinal, document
+         FROM export_posts
+        WHERE export_id = ? AND ordinal > ?
+        ORDER BY ordinal ASC
+        LIMIT ?`,
+    ).bind(exportId, after, PAGE).all<{ ordinal: number; document: string }>();
+    const page = listed.results ?? [];
+    for (const row of page) posts.push(JSON.parse(row.document) as Record<string, unknown>);
+    const last = page[page.length - 1];
+    if (page.length < PAGE || last === undefined) return posts;
+    after = last.ordinal;
+  }
 }
 
 async function visiblePosts(db: D1Database, boardId: string): Promise<PostRow[]> {
