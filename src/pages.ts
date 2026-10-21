@@ -5,6 +5,7 @@ import { isUuidV7, uuidv7 } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
 import { requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
+import { visibleAncestry, type RemixAncestor } from "./remix";
 import { VISIBLE_POST } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
@@ -98,28 +99,42 @@ async function threadPage(c: PageCtx): Promise<Response> {
   const rows = listed.results ?? [];
   if (rows.length === 0) return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
   const counts = await reactionCounts(c.env.DB, threadId);
+  const ancestry = await visibleAncestry(c.env.DB, rows.map((row) => ({
+    id: row.post_id,
+    remix_of_post_id: row.remix_of_post_id,
+  })));
   const titled = rows.find((row) => row.title !== null);
   const title = titled?.title ?? "Thread";
   const body = [
     `<p><a href="/boards/beta">Board</a></p>`,
     `<p><a href="/reports?target_type=thread&amp;target_id=${escapeHtml(threadId)}">Report this thread</a></p>`,
     `<h1>${escapeHtml(title)}</h1>`,
-    ...rows.map((row) => row.title === null ? replyBlock(row, counts) : openingBlock(row, counts)),
+    ...rows.map((row) => row.title === null
+      ? replyBlock(row, counts, ancestry.get(row.post_id) ?? [])
+      : openingBlock(row, counts, ancestry.get(row.post_id) ?? [])),
   ].join("");
   return htmlResponse(requestId, document(title, body));
 }
 
-function openingBlock(row: ThreadRow, counts: Map<string, Map<string, number>>): string {
+function openingBlock(
+  row: ThreadRow,
+  counts: Map<string, Map<string, number>>,
+  ancestry: RemixAncestor[],
+): string {
   return [
     imageTag(row.asset_id, row.alt_text, "display"),
     `<p>${escapeHtml(row.caption)}</p>`,
     reactionList(counts.get(row.post_id)),
     declarationList(row),
-    remixLine(row),
+    ancestryList(ancestry),
   ].join("");
 }
 
-function replyBlock(row: ThreadRow, counts: Map<string, Map<string, number>>): string {
+function replyBlock(
+  row: ThreadRow,
+  counts: Map<string, Map<string, number>>,
+  ancestry: RemixAncestor[],
+): string {
   const image = row.asset_id === null ? "" : imageTag(row.asset_id, row.alt_text, "display");
   return [
     "<article>",
@@ -128,7 +143,7 @@ function replyBlock(row: ThreadRow, counts: Map<string, Map<string, number>>): s
     `<p>${escapeHtml(row.caption)}</p>`,
     reactionList(counts.get(row.post_id)),
     declarationList(row),
-    remixLine(row),
+    ancestryList(ancestry),
     "</article>",
   ].join("");
 }
@@ -170,9 +185,11 @@ function declarationList(row: ThreadRow): string {
   ].join("");
 }
 
-function remixLine(row: ThreadRow): string {
-  if (row.remix_of_post_id === null) return "";
-  return `<p>Remix of <code>${escapeHtml(row.remix_of_post_id)}</code></p>`;
+function ancestryList(ancestry: RemixAncestor[]): string {
+  if (ancestry.length === 0) return "";
+  const items = ancestry.map((item) =>
+    `<li><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(item.caption)}</a> <code>${escapeHtml(item.post_id)}</code></li>`);
+  return `<ol>${items.join("")}</ol>`;
 }
 
 async function profilePage(c: PageCtx): Promise<Response> {

@@ -200,6 +200,7 @@ describe("visibility", () => {
     expect(postItems[1]?.asset_id).toBeNull();
     expect(Object.keys(postItems[1] ?? {}).sort()).toEqual([
       "alt_text",
+      "ancestry",
       "asset_id",
       "author_agent_id",
       "caption",

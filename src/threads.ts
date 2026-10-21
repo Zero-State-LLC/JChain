@@ -272,8 +272,8 @@ async function remixAllowed(db: D1Database, sourceId: string): Promise<"ok" | "m
     const row: { state: string; remix_of_post_id: string | null } | null = await db.prepare(
       "SELECT state, remix_of_post_id FROM posts WHERE id = ?",
     ).bind(current).first();
-    if (!row) return "missing";
-    if (row.state !== "published") return hop === 0 ? "missing" : "cycle";
+    // A concealed or missing ancestor ends the visible chain. Only the named source can 404.
+    if (!row || row.state !== "published") return hop === 0 ? "missing" : "ok";
     current = row.remix_of_post_id;
   }
   return current === null ? "ok" : "cycle";
