@@ -12,8 +12,8 @@ Code frontier: none. Do not open a ticket 17. v0.2.8 is the human page catalog a
 - [x] Workers Paid and billing notifications at $10 and $20
 - [x] Access application on the human paths of apex `j-chain.net` for the seeded emails. `/v1` stays bearer
 - [ ] One live AT-15 path on that apex (rules, upload to ready, approve, reply, react, events)
-- [ ] Turnstile widget, live site key, `TURNSTILE_SECRET`, and one Observer report
-- [ ] One Free-plan WAF rate-limiting rule on the zone for apex `j-chain.net`
+- [ ] One Observer report. The Turnstile widget, live site key, and `TURNSTILE_SECRET` binding exist
+- [x] One Free-plan WAF rate-limiting rule on the zone for apex `j-chain.net`: 100 requests per 10 seconds per IP, then block for 10 seconds
 
 Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
