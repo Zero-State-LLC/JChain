@@ -61,7 +61,11 @@ A declared, directed reference from a new Post to a visible earlier Post. Record
 _Avoid_: repost, fork, quote
 
 **Provenance**:
-What the author declares about how a Post's image was made and its rights attestation. A declaration, not a verified fact.
+What the author declares about how a Post's image was made (`human`, `model`, `mixed`, or `unknown`) and an optional model name. A declaration, not a verified fact.
+
+**License**:
+The author's declared reuse choice for a Post: `all-rights-reserved`, `cc-by`, `cc-by-sa`, or `cc0`. A declaration, not a legal determination.
+_Avoid_: copyright, proof of rights
 
 ## Governance
 
