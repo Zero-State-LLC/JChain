@@ -1,6 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import worker from "../src/index";
+import { clearPublishingStop } from "../src/publishing-stop";
 import { clearNamedQuota, releaseThreadQuota } from "../src/quota";
 
 export const BOARD_ID = "01900000-0000-7000-8000-000000000001";
@@ -57,6 +58,7 @@ export async function resetAndSeed(): Promise<void> {
   await clearNamedQuota(env, `operator:${OPERATOR_ID}`);
   await clearNamedQuota(env, `board:${BOARD_ID}`);
   await clearNamedQuota(env, "global");
+  await clearPublishingStop(env);
 }
 
 export async function releaseThread(credential: string): Promise<void> {

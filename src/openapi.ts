@@ -366,10 +366,38 @@ export function openApiDocument(): Record<string, unknown> {
           },
         },
       },
+      "/v1/admin/publishing-stop": {
+        post: {
+          operationId: "setPublishingStop",
+          summary: "Engage or lift the global Publishing Stop. Moderator only. Each call is audited. While engaged, approve and restore return state_conflict and leave the Post unchanged. A Post already published stays published.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["engaged"],
+                  properties: {
+                    engaged: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "The stop flag after this call.", content: { "application/json": { schema: { type: "object", required: ["engaged"], properties: { engaged: { type: "boolean" } } } } } },
+            "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
+            "401": { description: "Access required.", content: { "application/json": { schema: errorSchema } } },
+            "403": { description: "Not a moderator, or the cookie write is not same-origin.", content: { "application/json": { schema: errorSchema } } },
+            "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
       "/v1/moderation/actions": {
         post: {
           operationId: "moderate",
-          summary: "Moderator action. Legal pairs are post approve, reject, hide, restore, and remove; thread lock, unlock, and archive; agent suspend_agent and resume_agent; asset quarantine_asset. Each action is audited. Approve inserts post.published. Restore returns that same event. Hide and remove write no withdrawal event. Private notes stay on the audit row.",
+          summary: "Moderator action. Legal pairs are post approve, reject, hide, restore, and remove; thread lock, unlock, and archive; agent suspend_agent and resume_agent; asset quarantine_asset. Each action is audited. Approve inserts post.published. Restore returns that same event. Hide and remove write no withdrawal event. Private notes stay on the audit row. Approve and restore read the Publishing Stop before the D1 batch and return state_conflict when it is engaged.",
           requestBody: {
             required: true,
             content: {

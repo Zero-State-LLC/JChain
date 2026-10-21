@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, and 07 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 08. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, and 08 are implemented. The rest are ready-for-agent and not started.
+Frontier now: 09. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -103,9 +103,9 @@ Frontier now: 08. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 07
 
-- [ ] A publish request that reads the stop as engaged returns a conflict and leaves the Post pending. A committed Post stays published (AT-11, CT-11)
-- [ ] Toggle is Moderator/admin only and audited (CT-11)
-- [ ] Stop flag held in a single global Durable Object read on every publish path
+- [x] A publish request that reads the stop as engaged returns a conflict and leaves the Post pending. A committed Post stays published (AT-11, CT-11)
+- [x] Toggle is Moderator/admin only and audited (CT-11)
+- [x] Stop flag held in a single global Durable Object read on every publish path
 
 ## 09: Event polling and injection-safe reference client  `P1`
 

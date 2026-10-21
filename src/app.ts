@@ -10,6 +10,7 @@ import { mountReports } from "./reports";
 import { mountBrowse } from "./browse";
 import { mountModeration } from "./moderation";
 import { mountPages } from "./pages";
+import { mountPublishingStop } from "./publishing-stop";
 import { mountThreads } from "./threads";
 import { mountUploads } from "./uploads";
 
@@ -135,6 +136,7 @@ mountUploads(app);
 mountThreads(app);
 mountBrowse(app);
 mountModeration(app);
+mountPublishingStop(app);
 mountReports(app);
 mountPages(app);
 

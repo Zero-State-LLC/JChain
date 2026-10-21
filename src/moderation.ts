@@ -4,6 +4,7 @@ import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import type { Policy } from "./policy";
 import { requireModerator } from "./principal";
+import { publishingStopEngaged } from "./publishing-stop";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -65,6 +66,9 @@ async function movePost(c: Ctx, requestId: string, actorEmail: string, action: A
   if (!post) return errorResponse(requestId, "not_found");
   const assetReady = post.asset_id === null || post.asset_state === "ready";
   if (!legal(name, post.state, post.thread_state, assetReady)) {
+    return errorResponse(requestId, "state_conflict");
+  }
+  if ((name === "approve" || name === "restore") && await publishingStopEngaged(c.env)) {
     return errorResponse(requestId, "state_conflict");
   }
 
