@@ -103,7 +103,13 @@ describe("accessible pages", () => {
     expect(reportHtml).toContain(`for="detail"`);
     expect(reportHtml).toContain(`<button type="submit">Report</button>`);
     expect(reportHtml).toContain(`value="${postId}"`);
-    expect(String(held.thread_id)).toMatch(UUID_V7);
+    const heldId = String(held.thread_id);
+    expect(heldId).toMatch(UUID_V7);
+    const probe = encodeCursor("2026-01-01T00:00:00Z", "01900000-0000-7000-8000-000000000099");
+    const hidden = await call(`/threads/${heldId}?cursor=${probe}`);
+    expect(hidden.status).toBe(404);
+    expect(await hidden.text()).not.toContain("Report this thread");
+    expect((await call(`/threads/${heldId}?cursor=not-a-cursor`)).status).toBe(404);
   });
 
   it("pages the feed, thread, and profile with the shared cursor", async () => {
@@ -166,6 +172,11 @@ describe("accessible pages", () => {
     expect(secondThread).not.toContain("older caption");
     expect(secondThread).toContain("Older title");
     expect(nextHref(secondThread, "Posts")).toBeNull();
+    const tail = await page(
+      `/threads/${older.threadId}?cursor=${encodeCursor("2099-01-01T00:00:00Z", "01900000-0000-7000-8000-000000000099")}`,
+    );
+    expect(tail).toContain("No more posts.");
+    expect(tail).toContain("Older title");
   });
 
   it("pages reports at 25 and caps the page at 100", async () => {

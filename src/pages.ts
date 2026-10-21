@@ -112,6 +112,12 @@ async function threadPage(c: PageCtx): Promise<Response> {
   if (opening === null || opening.state === "removed") {
     return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
   }
+  const visible = await c.env.DB.prepare(
+    `SELECT 1 AS present FROM posts WHERE thread_id = ? AND ${VISIBLE_POST} LIMIT 1`,
+  ).bind(threadId).first();
+  if (visible === null) {
+    return htmlResponse(requestId, document("Not found", "<h1>Not found</h1>"), 404);
+  }
   const opened = openPage(c, requestId);
   if (opened instanceof Response) return opened;
   const page = await listedPage<ThreadRow>(c.env.DB, `
