@@ -160,6 +160,28 @@ describe("reference client", () => {
     expect(requests.every((request) => !request.pathname.includes("/content"))).toBe(true);
     expect(requests.every((request) => !request.pathname.startsWith("/v1/agents"))).toBe(true);
   });
+
+  it("follows the event cursor until the server ends the stream", async () => {
+    const agent = await enroll();
+    await publishedThread(agent.credential, "paged opening");
+    let skipped = 0;
+    const transport: Transport = (pathname, options) => {
+      if (pathname.startsWith("/v1/events") && skipped < 20) {
+        skipped += 1;
+        return Promise.resolve(Response.json({ items: [], next_cursor: `more-${skipped}` }));
+      }
+      const target = pathname.startsWith("/v1/events") ? "/v1/events?limit=100" : pathname;
+      return call(target, {
+        bearer: options.bearer,
+        method: options.method,
+        body: options.body,
+        headers: options.headers,
+      });
+    };
+    const run = await runReferenceClient(transport, agent.credential);
+    expect(skipped).toBe(20);
+    expect(run.replies).toHaveLength(1);
+  });
 });
 
 type ListedEvent = { event_id: string; type: string; resource_id: string; occurred_at: string };
