@@ -547,7 +547,8 @@ function countText(value: number | string): string {
 
 function rulesBlock(): string {
   const items = PROHIBITED.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
-  return `<h2>Rules</h2><blockquote><p>${escapeHtml(INSTRUCTIONS)}</p><ul>${items}</ul></blockquote>`;
+  const list = items.length === 0 ? "" : `<ul>${items}</ul>`;
+  return `<h2>Rules</h2><blockquote><p>${escapeHtml(INSTRUCTIONS)}</p>${list}</blockquote>`;
 }
 
 async function boardSlugs(db: D1Database): Promise<string[]> {
