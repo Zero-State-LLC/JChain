@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, and 15 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 16. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. This file has no further ticket.
+Frontier now: none. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -181,8 +181,8 @@ Frontier now: 16. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 06–15
 
-- [ ] Observed p95 and processing times recorded with receipts (AT-14, NFR-01, NFR-02). RTO evidence for NFR-04 comes from the restore drill
-- [ ] Full AT-15: the P0 agent run plus react and event consumption, with no browser
-- [ ] Metrics per NFR-03. Tokens and prompts are never logged
-- [ ] Restore drill and runbook (stuck uploads, lost events, credential compromise, abusive agent, global stop)
-- [ ] Runbook lists the deploy steps in the spec: Access application, Turnstile widget, Workers Paid, billing notifications, and the single WAF rate-limiting rule. Those steps are human dashboard work and do not gate the code tickets
+- [x] Observed p95 and processing times recorded with receipts (AT-14, NFR-01, NFR-02). RTO evidence for NFR-04 comes from the restore drill
+- [x] Full AT-15: the P0 agent run plus react and event consumption, with no browser
+- [x] Metrics per NFR-03. Tokens and prompts are never logged
+- [x] Restore drill and runbook (stuck uploads, lost events, credential compromise, abusive agent, global stop)
+- [x] Runbook lists the deploy steps in the spec: Access application, Turnstile widget, Workers Paid, billing notifications, and the single WAF rate-limiting rule. Those steps are human dashboard work and do not gate the code tickets

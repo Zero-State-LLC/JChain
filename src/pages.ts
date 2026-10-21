@@ -311,6 +311,7 @@ async function queuePage(c: PageCtx): Promise<Response> {
   const body = [
     "<h1>Moderation</h1>",
     `<p><a href="/boards/beta">Board</a></p>`,
+    metricsSection(await readMetrics(c.env.DB)),
     stopSection(engaged),
     reportSection(reports.kept),
     nextLink("/moderation", opened.limit, kept, "reports_cursor", reports.next, "Reports"),
@@ -385,6 +386,71 @@ async function reportRows(
     SELECT id, created_at, target_type, target_id, reason_code, detail
       FROM reports
      WHERE 1 = 1`, "ASC", [], { cursor, limit });
+}
+
+type GaugeRow = { n?: number | string; oldest?: string | null };
+
+async function readMetrics(db: D1Database): Promise<{
+  queueDepth: number;
+  oldestPendingSeconds: number | null;
+  uploadQueueDepth: number;
+  storageBytes: number;
+  deletionBacklog: number;
+}> {
+  const [pending, uploads, storage, posts, assets] = await db.batch([
+    db.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM posts WHERE state = 'pending_review'"),
+    db.prepare("SELECT COUNT(*) AS n FROM assets WHERE state IN ('reserved', 'uploaded', 'validating')"),
+    db.prepare("SELECT COALESCE(SUM(byte_size), 0) AS n FROM assets WHERE state != 'deleted'"),
+    db.prepare("SELECT COUNT(*) AS n FROM posts WHERE state = 'removal_pending'"),
+    db.prepare("SELECT COUNT(*) AS n FROM assets WHERE state = 'deletion_pending'"),
+  ]);
+  const pendingRow = gaugeRow(pending);
+  const oldest = typeof pendingRow.oldest === "string" ? ageSeconds(pendingRow.oldest) : null;
+  return {
+    queueDepth: gaugeNumber(pendingRow.n),
+    oldestPendingSeconds: oldest,
+    uploadQueueDepth: gaugeNumber(gaugeRow(uploads).n),
+    storageBytes: gaugeNumber(gaugeRow(storage).n),
+    deletionBacklog: gaugeNumber(gaugeRow(posts).n) + gaugeNumber(gaugeRow(assets).n),
+  };
+}
+
+function gaugeRow(result: D1Result): GaugeRow {
+  const first = result.results?.[0];
+  return typeof first === "object" && first !== null ? first as GaugeRow : {};
+}
+
+function gaugeNumber(value: number | string | undefined): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function ageSeconds(stamp: string): number | null {
+  const parsed = Date.parse(stamp);
+  if (Number.isNaN(parsed)) return null;
+  return Math.max(0, Math.floor((Date.now() - parsed) / 1000));
+}
+
+function metricsSection(metrics: {
+  queueDepth: number;
+  oldestPendingSeconds: number | null;
+  uploadQueueDepth: number;
+  storageBytes: number;
+  deletionBacklog: number;
+}): string {
+  const age = metrics.oldestPendingSeconds === null
+    ? "none"
+    : `${metrics.oldestPendingSeconds} seconds`;
+  return [
+    "<h2>Metrics</h2>",
+    "<ul>",
+    `<li>Queue depth: ${metrics.queueDepth}</li>`,
+    `<li>Oldest pending age: ${age}</li>`,
+    `<li>Upload queue depth: ${metrics.uploadQueueDepth}</li>`,
+    `<li>Storage bytes: ${metrics.storageBytes}</li>`,
+    `<li>Deletion backlog: ${metrics.deletionBacklog}</li>`,
+    "</ul>",
+  ].join("");
 }
 
 function stopSection(engaged: boolean): string {
