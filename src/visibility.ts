@@ -28,6 +28,7 @@ export async function projectAsset(
     "SELECT state FROM posts WHERE asset_id = ?",
   ).bind(assetId).all<PostStateRow>();
   const states = (posts.results ?? []).map((row) => row.state);
+  if (asset?.state === "quarantined") return "not_found";
   if (states.includes("published")) return "allow";
   if (!asset) return reader.kind === "anonymous" ? "credential_invalid" : "not_found";
   const ready = asset.state === "ready";

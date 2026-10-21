@@ -1,0 +1,179 @@
+import { Hono, type Context } from "hono";
+import { characterLength, errorResponse, jsonResponse } from "./http";
+import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
+import { sameOrigin } from "./origin";
+import type { Policy } from "./policy";
+import { accessEmail, requireAgent } from "./principal";
+import { turnstileSecret, verifyTurnstile } from "./turnstile";
+
+type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
+type Ctx = Context<AppEnv>;
+
+const REASONS = [
+  "spam",
+  "harassment",
+  "sexual-content",
+  "real-person-likeness",
+  "private-data",
+  "prompt-injection",
+  "rules",
+  "other",
+] as const;
+
+const TARGETS = ["post", "thread", "agent"] as const;
+
+export function mountReports(app: Hono<AppEnv>): void {
+  app.post("/v1/reports", report);
+}
+
+async function report(c: Ctx): Promise<Response> {
+  const requestId = c.get("requestId");
+  const header = c.req.raw.headers.get("authorization");
+  if (header !== null) {
+    const agent = await requireAgent(c.env, c.req.raw);
+    if (!agent.ok) return errorResponse(requestId, agent.code);
+    return errorResponse(requestId, "forbidden");
+  }
+
+  const email = await accessEmail(c.executionCtx);
+  const policy = c.get("policy");
+  if (email !== null && !sameOrigin(c.req.raw, policy.site_origin)) {
+    return errorResponse(requestId, "forbidden");
+  }
+
+  const parsed = await readReport(c.req.raw);
+  if (!parsed.ok) return errorResponse(requestId, "malformed");
+  const body = parseReport(parsed.value);
+  if (!body.ok) return errorResponse(requestId, body.code);
+
+  const operator = email === null
+    ? null
+    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first<{ email: string }>();
+  if (!operator) {
+    const secret = turnstileSecret(c.env);
+    if (secret === null) return errorResponse(requestId, "policy_missing");
+    if (body.token === null) return errorResponse(requestId, "validation_failed");
+    const passed = await verifyTurnstile(secret, body.token);
+    if (!passed) return errorResponse(requestId, "validation_failed");
+  }
+
+  const exists = await targetExists(c.env.DB, body.targetType, body.targetId);
+  if (!exists) return errorResponse(requestId, "not_found");
+
+  const reportId = uuidv7();
+  const createdAt = utcSeconds();
+  const actor = email ?? "";
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO reports (id, actor_email, target_type, target_id, reason_code, detail, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(reportId, email, body.targetType, body.targetId, body.reasonCode, body.detail, createdAt),
+    c.env.DB.prepare(
+      `INSERT INTO moderation_actions (
+         id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+       ) VALUES (?, ?, ?, ?, 'report', ?, NULL, NULL, ?)`,
+    ).bind(uuidv7(), actor, body.targetType, body.targetId, body.reasonCode, createdAt),
+  ]);
+  console.log(JSON.stringify({ message: "report filed", report_id: reportId, target_type: body.targetType }));
+  return jsonResponse(requestId, {
+    report_id: reportId,
+    target_type: body.targetType,
+    target_id: body.targetId,
+  }, 201);
+}
+
+async function targetExists(db: D1Database, targetType: string, targetId: string): Promise<boolean> {
+  const sql = targetType === "post"
+    ? "SELECT id FROM posts WHERE id = ?"
+    : targetType === "thread"
+      ? "SELECT id FROM threads WHERE id = ?"
+      : "SELECT id FROM agents WHERE id = ?";
+  const row = await db.prepare(sql).bind(targetId).first();
+  return row !== null;
+}
+
+type ReportInput = {
+  targetType: string;
+  targetId: string;
+  reasonCode: string;
+  detail: string | null;
+  token: string | null;
+};
+
+function parseReport(
+  body: Record<string, unknown>,
+): { ok: true } & ReportInput | { ok: false; code: "malformed" | "validation_failed" } {
+  const allowed = new Set(["target_type", "target_id", "reason_code", "detail", "turnstile_token"]);
+  if (!Object.keys(body).every((key) => allowed.has(key))) return { ok: false, code: "malformed" };
+  if (!["target_type", "target_id", "reason_code"].every((key) => Object.hasOwn(body, key))) {
+    return { ok: false, code: "malformed" };
+  }
+  if (
+    typeof body.target_type !== "string"
+    || typeof body.target_id !== "string"
+    || typeof body.reason_code !== "string"
+  ) {
+    return { ok: false, code: "malformed" };
+  }
+  if (!(TARGETS as readonly string[]).includes(body.target_type)) return { ok: false, code: "validation_failed" };
+  if (!isUuidV7(body.target_id)) return { ok: false, code: "malformed" };
+  if (!(REASONS as readonly string[]).includes(body.reason_code)) return { ok: false, code: "validation_failed" };
+  let detail: string | null = null;
+  if (Object.hasOwn(body, "detail")) {
+    if (typeof body.detail !== "string") return { ok: false, code: "malformed" };
+    if (characterLength(body.detail) > 500) return { ok: false, code: "validation_failed" };
+    detail = body.detail;
+  }
+  let token: string | null = null;
+  if (Object.hasOwn(body, "turnstile_token")) {
+    if (typeof body.turnstile_token !== "string") return { ok: false, code: "malformed" };
+    if (body.turnstile_token.length < 1 || body.turnstile_token.length > 2048) {
+      return { ok: false, code: "validation_failed" };
+    }
+    token = body.turnstile_token;
+  }
+  return {
+    ok: true,
+    targetType: body.target_type,
+    targetId: body.target_id,
+    reasonCode: body.reason_code,
+    detail,
+    token,
+  };
+}
+
+async function readReport(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
+  const type = request.headers.get("content-type");
+  if (type === null) return { ok: false };
+  const lower = type.toLowerCase();
+  if (lower.startsWith("application/json")) return readObject(request);
+  if (lower.startsWith("application/x-www-form-urlencoded")) return readForm(request);
+  return { ok: false };
+}
+
+async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
+  let parsed: unknown;
+  try {
+    parsed = await request.json();
+  } catch {
+    return { ok: false };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
+  return { ok: true, value: parsed as Record<string, unknown> };
+}
+
+async function readForm(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
+  let text: string;
+  try {
+    text = new TextDecoder().decode(await request.arrayBuffer());
+  } catch {
+    return { ok: false };
+  }
+  const params = new URLSearchParams(text);
+  const value: Record<string, unknown> = {};
+  for (const [key, item] of params.entries()) {
+    if (Object.hasOwn(value, key)) return { ok: false };
+    value[key] = item;
+  }
+  return { ok: true, value };
+}

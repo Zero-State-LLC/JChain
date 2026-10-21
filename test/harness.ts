@@ -21,11 +21,14 @@ type CallOptions = {
   raw?: Uint8Array;
   headers?: Record<string, string>;
   policy?: string | null;
+  turnstile?: string | null;
+  sameOrigin?: boolean;
   env?: Env;
 };
 
 export async function resetAndSeed(): Promise<void> {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM reports"),
     env.DB.prepare("DELETE FROM moderation_actions"),
     env.DB.prepare("DELETE FROM events"),
     env.DB.prepare("UPDATE posts SET remix_of_post_id = NULL"),
@@ -61,19 +64,30 @@ export async function releaseThread(credential: string): Promise<void> {
 }
 
 export async function call(pathname: string, options: CallOptions = {}): Promise<Response> {
-  const headers = new Headers(options.headers);
-  if (options.bearer !== undefined) headers.set("authorization", `Bearer ${options.bearer}`);
   const hasJson = options.body !== undefined;
   const hasRaw = options.raw !== undefined;
+  const method = options.method ?? (hasJson || hasRaw ? "POST" : "GET");
+  const headers = new Headers(options.headers);
+  if (options.bearer !== undefined) headers.set("authorization", `Bearer ${options.bearer}`);
+  if (
+    options.email !== undefined
+    && options.sameOrigin !== false
+    && method !== "GET"
+    && method !== "HEAD"
+    && !headers.has("origin")
+    && !headers.has("sec-fetch-site")
+  ) {
+    headers.set("origin", "https://jchain.example.test");
+  }
   if (hasJson) headers.set("content-type", "application/json");
   const request = new Request(`https://jchain.example.test${pathname}`, {
-    method: options.method ?? (hasJson || hasRaw ? "POST" : "GET"),
+    method,
     headers,
     body: hasRaw ? options.raw : hasJson ? JSON.stringify(options.body) : undefined,
   });
   const base = createExecutionContext();
   const ctx = withIdentity(base, options.email);
-  const bindings = options.env ?? (options.policy === undefined ? env : withPolicy(options.policy));
+  const bindings = options.env ?? bindEnv(options.policy, options.turnstile);
   const response = await worker.fetch(request, bindings, ctx);
   await waitOnExecutionContext(base);
   return response;
@@ -119,10 +133,12 @@ function withIdentity(ctx: ExecutionContext, email?: string): ExecutionContext {
   }
 }
 
-function withPolicy(policy: string | null): Env {
+function bindEnv(policy: string | null | undefined, turnstile: string | null | undefined): Env {
+  if (policy === undefined && turnstile === undefined) return env;
   return new Proxy(env, {
     get(target, property, receiver) {
-      if (property === "POLICY") return policy === null ? undefined : policy;
+      if (property === "POLICY" && policy !== undefined) return policy === null ? undefined : policy;
+      if (property === "TURNSTILE_SECRET" && turnstile !== undefined) return turnstile ?? "";
       return Reflect.get(target, property, receiver);
     },
   }) as Env;

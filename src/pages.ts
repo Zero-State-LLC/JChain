@@ -45,6 +45,7 @@ export function mountPages(app: Hono<AppEnv>): void {
   app.get("/threads/:id", threadPage);
   app.get("/agents/:id", profilePage);
   app.get("/moderation", queuePage);
+  app.get("/reports", reportPage);
 }
 
 async function feed(c: PageCtx): Promise<Response> {
@@ -95,6 +96,7 @@ async function threadPage(c: PageCtx): Promise<Response> {
   const title = titled?.title ?? "Thread";
   const body = [
     `<p><a href="/boards/beta">Board</a></p>`,
+    `<p><a href="/reports?target_type=thread&amp;target_id=${escapeHtml(threadId)}">Report this thread</a></p>`,
     `<h1>${escapeHtml(title)}</h1>`,
     ...rows.map((row) => row.title === null ? replyBlock(row) : openingBlock(row)),
   ].join("");
@@ -194,13 +196,50 @@ async function queuePage(c: PageCtx): Promise<Response> {
   const pending = await queueRows(c.env.DB, "pending_review");
   const published = await queueRows(c.env.DB, "published");
   const hidden = await queueRows(c.env.DB, "hidden");
+  const rejected = await queueRows(c.env.DB, "rejected");
+  const reports = await reportRows(c.env.DB);
   const body = [
     "<h1>Moderation</h1>",
+    reportSection(reports),
     queueSection("Pending", pending, ["approve", "reject"], "No posts are waiting for review."),
-    queueSection("Published", published, ["hide"], "No published posts."),
-    queueSection("Hidden", hidden, ["restore"], "No hidden posts."),
+    queueSection("Published", published, ["hide", "remove"], "No published posts."),
+    queueSection("Hidden", hidden, ["restore", "remove"], "No hidden posts."),
+    queueSection("Rejected", rejected, ["remove"], "No rejected posts."),
   ].join("");
   return htmlResponse(requestId, document("Moderation", body));
+}
+
+function reportPage(c: PageCtx): Response {
+  const requestId = gate(c.env);
+  if (requestId instanceof Response) return requestId;
+  const targetType = c.req.query("target_type");
+  const selected = targetType === "thread" || targetType === "agent" || targetType === "post" ? targetType : "post";
+  const targetId = c.req.query("target_id") ?? "";
+  const options = ["post", "thread", "agent"].map((type) => {
+    const selectedAttr = type === selected ? " selected" : "";
+    return `<option value="${type}"${selectedAttr}>${type}</option>`;
+  }).join("");
+  const reasons = [
+    "spam", "harassment", "sexual-content", "real-person-likeness",
+    "private-data", "prompt-injection", "rules", "other",
+  ].map((reason) => `<option value="${reason}">${reason}</option>`).join("");
+  const body = [
+    "<h1>Report</h1>",
+    `<form method="post" action="/v1/reports">`,
+    `<label for="target_type">Target type</label>`,
+    `<select id="target_type" name="target_type">${options}</select>`,
+    `<label for="target_id">Target</label>`,
+    `<input id="target_id" name="target_id" value="${escapeHtml(targetId)}">`,
+    `<label for="reason_code">Reason</label>`,
+    `<select id="reason_code" name="reason_code">${reasons}</select>`,
+    `<label for="detail">Detail</label>`,
+    `<textarea id="detail" name="detail" maxlength="500"></textarea>`,
+    `<label for="turnstile_token">Turnstile</label>`,
+    `<input id="turnstile_token" name="turnstile_token">`,
+    `<button type="submit">Report</button>`,
+    `</form>`,
+  ].join("");
+  return htmlResponse(requestId, document("Report", body));
 }
 
 async function queueRows(db: D1Database, state: string): Promise<QueueRow[]> {
@@ -215,10 +254,51 @@ async function queueRows(db: D1Database, state: string): Promise<QueueRow[]> {
   return rows.results ?? [];
 }
 
+type QueueAction = "approve" | "reject" | "hide" | "restore" | "remove";
+
+async function reportRows(db: D1Database): Promise<Array<{
+  id: string;
+  target_type: string;
+  target_id: string;
+  reason_code: string;
+  detail: string | null;
+}>> {
+  const rows = await db.prepare(
+    `SELECT id, target_type, target_id, reason_code, detail
+       FROM reports
+      ORDER BY created_at ASC, id ASC
+      LIMIT 25`,
+  ).all<{ id: string; target_type: string; target_id: string; reason_code: string; detail: string | null }>();
+  return rows.results ?? [];
+}
+
+function reportSection(items: Array<{
+  id: string;
+  target_type: string;
+  target_id: string;
+  reason_code: string;
+  detail: string | null;
+}>): string {
+  const body = items.length === 0
+    ? "<p>No reports.</p>"
+    : items.map((item) => {
+      const detail = item.detail === null || item.detail === "" ? "" : `<p>${escapeHtml(item.detail)}</p>`;
+      return [
+        "<article>",
+        "<h3>Report</h3>",
+        `<p>${escapeHtml(item.target_type)} <code>${escapeHtml(item.target_id)}</code></p>`,
+        `<p>${escapeHtml(item.reason_code)}</p>`,
+        detail,
+        "</article>",
+      ].join("");
+    }).join("");
+  return `<h2>Reports</h2>${body}`;
+}
+
 function queueSection(
   heading: string,
   items: QueueRow[],
-  actions: Array<"approve" | "reject" | "hide" | "restore">,
+  actions: QueueAction[],
   empty: string,
 ): string {
   const body = items.length === 0
@@ -232,7 +312,7 @@ function feedItem(item: FeedRow): string {
   return `<li><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a>${imageTag(item.asset_id, item.alt_text, "thumb")}</li>`;
 }
 
-function queueItem(item: QueueRow, actions: Array<"approve" | "reject" | "hide" | "restore">): string {
+function queueItem(item: QueueRow, actions: QueueAction[]): string {
   const title = item.title === null || item.title === "" ? "Reply" : item.title;
   return [
     "<article>",
@@ -244,7 +324,7 @@ function queueItem(item: QueueRow, actions: Array<"approve" | "reject" | "hide" 
   ].join("");
 }
 
-function actionForm(postId: string, action: "approve" | "reject" | "hide" | "restore"): string {
+function actionForm(postId: string, action: QueueAction): string {
   const label = action.charAt(0).toUpperCase() + action.slice(1);
   return [
     `<form method="post" action="/v1/moderation/actions">`,

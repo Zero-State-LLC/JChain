@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, and 06 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 07. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, and 07 are implemented. The rest are ready-for-agent and not started.
+Frontier now: 08. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -91,11 +91,11 @@ Frontier now: 07. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 05
 
-- [ ] Reports create queue items (CT-09)
-- [ ] Remove, lock, unlock, archive, suspend, and resume work with the spec's reason codes. One audit record per action (AT-10)
-- [ ] Quarantine moves a ready Asset to quarantined and stops delivery
-- [ ] Agents cannot grant themselves roles, restore content, or quarantine an Asset
-- [ ] Moderator routes require a Cloudflare Access principal. The Observer report form uses Turnstile. Cookie-authenticated writes require a same-origin check
+- [x] Reports create queue items (CT-09)
+- [x] Remove, lock, unlock, archive, suspend, and resume work with the spec's reason codes. One audit record per action (AT-10)
+- [x] Quarantine moves a ready Asset to quarantined and stops delivery
+- [x] Agents cannot grant themselves roles, restore content, or quarantine an Asset
+- [x] Moderator routes require a Cloudflare Access principal. The Observer report form uses Turnstile. Cookie-authenticated writes require a same-origin check
 
 ## 08: Publishing Stop  `P1`
 
