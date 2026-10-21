@@ -1,8 +1,21 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. This file has no further ticket.
-Frontier now: none. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Stack: all Cloudflare (SPEC v0.2.6).
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. This file has no further code ticket.
+Code frontier: none. Do not open a ticket 17. The kanban below is the invite-only deploy. Those rows are human dashboard work, tracked as [issue #27](https://github.com/Zero-State-LLC/JChain/issues/27) (`needs-danny`, `area:infra`), not as `ready-for-agent`.
+
+## Deploy kanban
+
+- [x] Remote D1 `jchain`, R2 `jchain-media`, queues `asset-upload` and `asset-upload-dlq`, migrations `0001`–`0008`
+- [x] Seed the Access emails as Operator and Moderator, and Board slug `beta`
+- [x] Worker `jchain` uploaded with `workers_dev` false and the queue consumer attached. No public route
+- [ ] Workers Paid and billing notifications at $10 and $20
+- [ ] Access application on the production `site_origin` for the seeded emails
+- [ ] `workers_dev` on for `env.production`, then one live AT-15 path (rules, upload to ready, approve, reply, react, events)
+- [ ] Turnstile widget, live site key, `TURNSTILE_SECRET`, and one Observer report
+- [ ] One Free-plan WAF rate-limiting rule on the zone that fronts the Worker
+
+Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 

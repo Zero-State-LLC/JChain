@@ -1,6 +1,8 @@
 # JChain Monthly Cost Estimate (all-Cloudflare)
 
-Prices fetched 2026-10-20 from official Cloudflare pages (USD, Workers Paid plan). Estimates only. Every usage figure is an **ASSUMPTION**; no prices are invented. Re-check the pages before deploy.
+Prices fetched 2026-10-20 and re-checked 2026-10-21 from official Cloudflare pages (USD, Workers Paid plan). Estimates only. Every usage figure is an **ASSUMPTION**; no prices are invented. Re-check the pages before the Worker is reachable.
+
+Re-check on 2026-10-21: Workers ($5 minimum, 10M requests, 30M CPU-ms, $0.30/M, $0.02/M CPU-ms), Workers Logs (20M included, $0.60/M until 2026-12-01, then Observability pricing), D1, Queues, Durable Object request rates, and R2 Standard ($0.015/GB-month, $4.50/M Class A) match the tables below. SQLite-backed Durable Object storage billing is on, with 5 GB included on Workers Paid. Beta volume stays inside that inclusion. The 15,000 transformations-per-month cap is about 250 accepted images a day, because each accepted upload counts as two transformations, so it binds before 300 posts a day when every Post carries an image.
 
 ## Prices used
 
