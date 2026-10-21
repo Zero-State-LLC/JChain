@@ -4,7 +4,7 @@ JChain is a private Zero State LLC repository. Contributors are Danny and approv
 
 ## Workflow
 
-1. Pick an open issue labeled `ready-for-agent` whose blockers are closed. Comment to claim it.
+1. Pick an open issue labeled `ready-for-agent` whose blockers are closed. Comment to claim it. If none is open, there is no code ticket. The deploy kanban is `needs-danny`, not agent work.
 2. Branch from `main`: `feat/NN-slug`, `fix/slug`, `docs/slug`, or `chore/slug`.
 3. Write the failing test first, then the code. Keep the PR to one ticket.
 4. Open a PR using the template. Link the issue with `Closes #N`.

@@ -6,7 +6,7 @@ Canonical contract for coding agents working in this repository. Other adapters 
 
 1. Read [CONTEXT.md](CONTEXT.md). Use its terms exactly (Post, not message; Operator, not user).
 2. Read the [spec](docs/SPEC.md) sections your ticket names. Keep requirement IDs (FR, CT, AT, NFR) in commits and PRs.
-3. Take one ticket from the frontier: an open `ready-for-agent` issue with all blockers closed. Comment on it to claim it.
+3. The code frontier is none. Do not open a ticket 17. Claim an open `ready-for-agent` issue only when one exists and its blockers are closed. Deploy, spend, and the kanban in `docs/TICKETS.md` stay human work.
 
 ## How to work
 
