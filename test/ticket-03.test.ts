@@ -192,7 +192,7 @@ describe("board pages", () => {
     expect(await pendingPage.text()).not.toContain("On the board");
     const pendingFeed = await call("/boards/beta");
     expect(await pendingFeed.text()).not.toContain("On the board");
-    await expectError(await call(`/v1/assets/${assetId}/content?variant=display`), 401, "credential_invalid");
+    await expectError(await call(`/v1/assets/${assetId}/content?variant=display`), 404, "not_found");
     await expectError(
       await call(`/v1/assets/${assetId}/content?variant=display`, { bearer: other.credential }),
       404,

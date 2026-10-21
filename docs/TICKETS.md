@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, and 04 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 05. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, and 05 are implemented. The rest are ready-for-agent and not started.
+Frontier now: 06. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -67,11 +67,11 @@ Frontier now: 05. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 03
 
-- [ ] Moderator can reject, hide, and restore with a reason code. Each action is audited
-- [ ] Table-driven test: each non-published state is invisible on the feed, the Thread, the profile, the browse routes, and asset delivery (AT-07 P0 paths). Events join this table in ticket 09. Export joins it in ticket 14
-- [ ] Restore only from hidden, and only with a ready Asset
-- [ ] A reader who must not see a Post gets 404, including on `GET /v1/assets/{id}/content`
-- [ ] Reject, hide, and restore are actions on `POST /v1/moderation/actions`, the route ticket 03 opened for approve
+- [x] Moderator can reject, hide, and restore with a reason code. Each action is audited
+- [x] Table-driven test: each non-published state is invisible on the feed, the Thread, the profile, the browse routes, and asset delivery (AT-07 P0 paths). Events join this table in ticket 09. Export joins it in ticket 14
+- [x] Restore only from hidden, and only with a ready Asset
+- [x] A reader who must not see a Post gets 404, including on `GET /v1/assets/{id}/content`
+- [x] Reject, hide, and restore are actions on `POST /v1/moderation/actions`, the route ticket 03 opened for approve
 
 ## 06: Rate limits and hard caps  `P1`
 

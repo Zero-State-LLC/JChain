@@ -31,9 +31,10 @@ async function moderate(c: Ctx): Promise<Response> {
   if (!parsed.ok) return errorResponse(requestId, "malformed");
   const action = parseAction(parsed.value);
   if (!action.ok) return errorResponse(requestId, action.code);
-  if (action.targetType !== "post" || action.action !== "approve") {
+  if (action.targetType !== "post" || !isMove(action.action)) {
     return errorResponse(requestId, "state_conflict");
   }
+  const name = action.action;
 
   const post = await c.env.DB.prepare(
     `SELECT posts.state AS state, threads.state AS thread_state,
@@ -50,44 +51,104 @@ async function moderate(c: Ctx): Promise<Response> {
   }>();
   if (!post) return errorResponse(requestId, "not_found");
   const assetReady = post.asset_id === null || post.asset_state === "ready";
-  if (post.state !== "pending_review" || post.thread_state !== "open" || !assetReady) {
+  if (!legal(name, post.state, post.thread_state, assetReady)) {
     return errorResponse(requestId, "state_conflict");
   }
 
-  const eventId = uuidv7();
-  const actionId = uuidv7();
   const occurredAt = utcSeconds();
-  // The outbox insert must see pending_review, so it runs before the update.
-  // D1 batch() is the transaction that commits the Post and the Event together.
-  const guard = `posts.id = ? AND posts.state = 'pending_review'
+  const actionId = uuidv7();
+  // events_one_per_resource allows one post.published per Post. Restore keeps that
+  // row. Hide does not write post.withdrawn; that event arrives in a later ticket.
+  let eventId: string | null = null;
+  if (name === "approve") eventId = uuidv7();
+  if (name === "restore") {
+    const existing = await c.env.DB.prepare(
+      "SELECT id FROM events WHERE type = 'post.published' AND resource_id = ?",
+    ).bind(action.targetId).first<{ id: string }>();
+    eventId = existing?.id ?? null;
+  }
+
+  const where = guard(name);
+  const statements: D1PreparedStatement[] = [];
+  if (name === "approve" && eventId !== null) {
+    statements.push(c.env.DB.prepare(
+      `INSERT INTO events (id, type, resource_id, occurred_at)
+       SELECT ?, 'post.published', posts.id, ? FROM posts WHERE ${where}`,
+    ).bind(eventId, occurredAt, action.targetId));
+  }
+  statements.push(c.env.DB.prepare(
+    `INSERT INTO moderation_actions (
+       id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+     )
+     SELECT ?, ?, 'post', posts.id, ?, ?, ?, ?, ? FROM posts WHERE ${where}`,
+  ).bind(
+    actionId,
+    principal.email,
+    name,
+    action.reasonCode,
+    action.privateNote,
+    eventId,
+    occurredAt,
+    action.targetId,
+  ));
+  statements.push(c.env.DB.prepare(
+    `UPDATE posts SET state = ? WHERE ${where}`,
+  ).bind(destination(name), action.targetId));
+  const results = await c.env.DB.batch(statements);
+  const updated = Number(results[results.length - 1]?.meta.changes ?? 0) === 1;
+  const audited = Number(results[results.length - 2]?.meta.changes ?? 0) === 1;
+  const recorded = name !== "approve" || Number(results[0]?.meta.changes ?? 0) === 1;
+  if (!updated || !audited || !recorded) return errorResponse(requestId, "state_conflict");
+  const entry: Record<string, string> = { message: logMessage(name), post_id: action.targetId };
+  if (eventId !== null) entry.event_id = eventId;
+  console.log(JSON.stringify(entry));
+  const body: Record<string, unknown> = { post_id: action.targetId, state: destination(name) };
+  if (eventId !== null) body.event_id = eventId;
+  return jsonResponse(requestId, body);
+}
+
+type MoveName = "approve" | "reject" | "hide" | "restore";
+
+function isMove(value: string): value is MoveName {
+  return value === "approve" || value === "reject" || value === "hide" || value === "restore";
+}
+
+function legal(name: MoveName, state: string, threadState: string, assetReady: boolean): boolean {
+  if (name === "approve") return state === "pending_review" && threadState === "open" && assetReady;
+  if (name === "reject") return state === "pending_review";
+  if (name === "hide") return state === "published";
+  return state === "hidden" && assetReady;
+}
+
+function destination(name: MoveName): string {
+  if (name === "reject") return "rejected";
+  if (name === "hide") return "hidden";
+  return "published";
+}
+
+function logMessage(name: MoveName): string {
+  if (name === "approve") return "post published";
+  if (name === "reject") return "post rejected";
+  if (name === "hide") return "post hidden";
+  return "post restored";
+}
+
+function guard(name: MoveName): string {
+  if (name === "approve") {
+    return `posts.id = ? AND posts.state = 'pending_review'
     AND EXISTS (SELECT 1 FROM threads WHERE threads.id = posts.thread_id AND threads.state = 'open')
     AND (posts.asset_id IS NULL OR EXISTS (
       SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
     ))`;
-  const results = await c.env.DB.batch([
-    c.env.DB.prepare(
-      `INSERT INTO events (id, type, resource_id, occurred_at)
-       SELECT ?, 'post.published', posts.id, ? FROM posts WHERE ${guard}`,
-    ).bind(eventId, occurredAt, action.targetId),
-    c.env.DB.prepare(
-      `INSERT INTO moderation_actions (
-         id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
-       )
-       SELECT ?, ?, 'post', posts.id, 'approve', ?, ?, ?, ? FROM posts WHERE ${guard}`,
-    ).bind(actionId, principal.email, action.reasonCode, action.privateNote, eventId, occurredAt, action.targetId),
-    c.env.DB.prepare(
-      `UPDATE posts SET state = 'published'
-        WHERE id = ? AND state = 'pending_review'
-          AND EXISTS (SELECT 1 FROM threads WHERE threads.id = posts.thread_id AND threads.state = 'open')
-          AND (posts.asset_id IS NULL OR EXISTS (
-            SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
-          ))`,
-    ).bind(action.targetId),
-  ]);
-  const published = Number(results[2]?.meta.changes ?? 0) === 1 && Number(results[0]?.meta.changes ?? 0) === 1;
-  if (!published) return errorResponse(requestId, "state_conflict");
-  console.log(JSON.stringify({ message: "post published", post_id: action.targetId, event_id: eventId }));
-  return jsonResponse(requestId, { event_id: eventId, post_id: action.targetId, state: "published" });
+  }
+  if (name === "restore") {
+    return `posts.id = ? AND posts.state = 'hidden'
+    AND (posts.asset_id IS NULL OR EXISTS (
+      SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
+    ))`;
+  }
+  if (name === "hide") return "posts.id = ? AND posts.state = 'published'";
+  return "posts.id = ? AND posts.state = 'pending_review'";
 }
 
 type ActionInput = {
