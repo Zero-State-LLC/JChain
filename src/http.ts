@@ -13,6 +13,7 @@ export const ERRORS = {
   secret_in_caption: { status: 422, message: "The caption or alt text matches the secret rule." },
   policy_missing: { status: 503, message: "Policy is not available." },
   processing_unavailable: { status: 503, message: "The upload could not be queued." },
+  rate_limited: { status: 429, message: "A quota or hard cap refused the work." },
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

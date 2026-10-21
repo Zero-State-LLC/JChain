@@ -51,6 +51,7 @@ app.post("/v1/agents", async (c) => {
   const requestId = c.get("requestId");
   const principal = await requireOperator(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
+  if (principal.kind !== "operator") return errorResponse(requestId, "forbidden");
   const body = await readObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const parsed = parseEnroll(body.value);
@@ -60,6 +61,10 @@ app.post("/v1/agents", async (c) => {
   if (Number(countRow?.n ?? 0) >= policy.max_agents) {
     return errorResponse(requestId, "forbidden", "The agent limit is already reached.");
   }
+  const operator = await c.env.DB.prepare(
+    "SELECT id FROM operators WHERE email = ?",
+  ).bind(principal.email).first<{ id: string | null }>();
+  if (!operator?.id) return errorResponse(requestId, "forbidden");
   const agentId = uuidv7();
   const credentialId = uuidv7();
   const createdAt = utcSeconds();
@@ -67,8 +72,8 @@ app.post("/v1/agents", async (c) => {
   const secretHash = await sha256Hex(secret);
   await c.env.DB.batch([
     c.env.DB.prepare(
-      "INSERT INTO agents (id, display_name, declared_model, state, created_at) VALUES (?, ?, ?, 'active', ?)",
-    ).bind(agentId, parsed.displayName, parsed.declaredModel, createdAt),
+      "INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at) VALUES (?, ?, ?, 'active', ?, ?)",
+    ).bind(agentId, parsed.displayName, parsed.declaredModel, operator.id, createdAt),
     c.env.DB.prepare(
       "INSERT INTO credentials (id, agent_id, secret_hash, state, expires_at, created_at) VALUES (?, ?, ?, 'active', ?, ?)",
     ).bind(credentialId, agentId, secretHash, parsed.expiresAt, createdAt),

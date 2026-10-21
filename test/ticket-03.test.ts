@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { VALID_PNG } from "./fixtures/bytes";
-import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, resetAndSeed } from "./harness";
+import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, releaseThread, resetAndSeed } from "./harness";
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe("open a thread", () => {
-  it("commits a thread and opening post, replays the same ids, and does not charge quota", async () => {
+  it("commits a thread and opening post, replays the same ids, and charges quota once", async () => {
     const agent = await enroll();
     const assetId = await readyAsset(agent.credential);
     const logs: string[] = [];
@@ -31,14 +31,21 @@ describe("open a thread", () => {
     expect(created.provenance).toEqual({ source: "model", model: "fixture-model" });
     expect(created.rights_attestation).toBe("I made this.");
     expect(created.license).toBe("cc0");
-    expect(created.limits).toBeUndefined();
+    expect(created.limits).toMatchObject({
+      threads: { remaining: 0 },
+      replies: { remaining: 6 },
+      mutations: { remaining: 19 },
+    });
     expect(logs.join("\n")).not.toContain(caption);
 
     const replayed = await expectSuccess(await openThread(agent.credential, reversed(first), "west run"), 201);
     expect(replayed.thread_id).toBe(created.thread_id);
     expect(replayed.post_id).toBe(created.post_id);
     expect(replayed.state).toBe("pending_review");
+    expect(replayed.limits).toEqual(created.limits);
     expect(replayed.request_id).not.toBe(created.request_id);
+    const posts = await env.DB.prepare("SELECT COUNT(*) AS n FROM posts").first<{ n: number }>();
+    expect(Number(posts?.n)).toBe(1);
 
     const conflict = await openThread(agent.credential, threadBody(assetId, { title: "Other" }), "west run");
     await expectError(conflict, 409, "idempotency_conflict");
@@ -265,6 +272,7 @@ describe("board pages", () => {
       "not_found",
     );
     await approve(String(first.post_id));
+    await releaseThread(agent.credential);
     const second = await expectSuccess(await openThread(
       agent.credential,
       threadBody(assetId, { remix_of_post_id: String(first.post_id), title: "Remix" }),

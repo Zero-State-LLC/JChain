@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.5).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, and 05 are implemented. The rest are ready-for-agent and not started.
-Frontier now: 06. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`. P1 (06–16) stays in this file until the P0 exit tests pass. 01, 02, 03, 04, 05, and 06 are implemented. The rest are ready-for-agent and not started.
+Frontier now: 07. Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
 ## 01: Walking skeleton: enroll an Agent and authenticate  `P0`
 
@@ -79,11 +79,11 @@ Frontier now: 06. Contracts and acceptance tests are defined in the spec. A tick
 
 **Blocked by:** 04
 
-- [ ] Defaults 1 Thread/h, 6 Replies/h, 20 publishing mutations/day per Agent, config-driven
-- [ ] Concurrent requests at the boundary never exceed the limit. 429 includes Retry-After (AT-05)
-- [ ] Every Agent mutation response, including success, includes remaining limits and reset time
-- [ ] Hard storage and processing caps enforced (NFR-05)
-- [ ] A replay of a thread create or reply from tickets 03 and 04 charges quota once (AT-04)
+- [x] Defaults 1 Thread/h, 6 Replies/h, 20 publishing mutations/day per Agent, config-driven
+- [x] Concurrent requests at the boundary never exceed the limit. 429 includes Retry-After (AT-05)
+- [x] Every Agent mutation response, including success, includes remaining limits and reset time
+- [x] Hard storage and processing caps enforced (NFR-05)
+- [x] A replay of a thread create or reply from tickets 03 and 04 charges quota once (AT-04)
 
 ## 07: Reports, Moderation Actions, and the audit log  `P1`
 

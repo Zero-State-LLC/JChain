@@ -44,6 +44,17 @@ const errorSchema = {
   },
 } as const;
 
+const rateLimitedResponse = {
+  description: "A quota or hard cap refused the work. Retry-After is the whole seconds until reset, at least 1. The body includes the calling Agent's limits.",
+  headers: {
+    "Retry-After": {
+      schema: { type: "integer", minimum: 1 },
+      description: "Seconds until the caller may retry.",
+    },
+  },
+  content: { "application/json": { schema: errorSchema } },
+};
+
 export function openApiDocument(): Record<string, unknown> {
   return {
     openapi: "3.1.0",
@@ -141,7 +152,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/uploads": {
         post: {
           operationId: "reserveUpload",
-          summary: "Reserve an Upload. Returns an upload token once, or the existing ready Asset when the hash matches.",
+          summary: "Reserve an Upload. Returns an upload token once, or the existing ready Asset when the hash matches. A new reservation is refused when processing headroom is below two transformations or stored bytes are already at the cap.",
           security: [{ bearerCredential: [] }],
           parameters: [{ $ref: "#/components/parameters/idempotencyKey" }],
           requestBody: {
@@ -161,14 +172,15 @@ export function openApiDocument(): Record<string, unknown> {
             },
           },
           responses: {
-            "200": { description: "The caller already has a ready Asset with this hash.", content: { "application/json": { schema: { type: "object" } } } },
-            "201": { description: "Upload reserved.", content: { "application/json": { schema: { type: "object" } } } },
+            "200": { description: "The caller already has a ready Asset with this hash. The calling Agent's limits are included.", content: { "application/json": { schema: { type: "object" } } } },
+            "201": { description: "Upload reserved. The calling Agent's limits are included.", content: { "application/json": { schema: { type: "object" } } } },
             "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
             "401": { description: "Credential invalid.", content: { "application/json": { schema: errorSchema } } },
             "409": { description: "Idempotency conflict.", content: { "application/json": { schema: errorSchema } } },
             "413": { description: "Declared size is over the limit.", content: { "application/json": { schema: errorSchema } } },
             "415": { description: "Type is outside the allowlist.", content: { "application/json": { schema: errorSchema } } },
             "422": { description: "Validation failed.", content: { "application/json": { schema: errorSchema } } },
+            "429": rateLimitedResponse,
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
           },
         },
@@ -187,13 +199,14 @@ export function openApiDocument(): Record<string, unknown> {
             content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } },
           },
           responses: {
-            "200": { description: "Bytes accepted. The Asset stays reserved until complete.", content: { "application/json": { schema: { type: "object" } } } },
+            "200": { description: "Bytes accepted. The Asset stays reserved until complete. The calling Agent's limits are included.", content: { "application/json": { schema: { type: "object" } } } },
             "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
             "401": { description: "Upload token invalid.", content: { "application/json": { schema: errorSchema } } },
             "409": { description: "Idempotency or state conflict.", content: { "application/json": { schema: errorSchema } } },
             "413": { description: "Body exceeds the upload limit.", content: { "application/json": { schema: errorSchema } } },
             "415": { description: "Sniffed type is not allowed.", content: { "application/json": { schema: errorSchema } } },
             "422": { description: "The bytes do not match the reservation.", content: { "application/json": { schema: errorSchema } } },
+            "429": rateLimitedResponse,
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
           },
         },
@@ -208,11 +221,12 @@ export function openApiDocument(): Record<string, unknown> {
             { $ref: "#/components/parameters/idempotencyKey" },
           ],
           responses: {
-            "202": { description: "Accepted for processing.", content: { "application/json": { schema: { type: "object" } } } },
+            "202": { description: "Accepted for processing. The calling Agent's limits are included.", content: { "application/json": { schema: { type: "object" } } } },
             "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
             "401": { description: "Credential invalid.", content: { "application/json": { schema: errorSchema } } },
             "404": { description: "Not found.", content: { "application/json": { schema: errorSchema } } },
             "409": { description: "Idempotency or state conflict.", content: { "application/json": { schema: errorSchema } } },
+            "429": rateLimitedResponse,
             "503": { description: "Policy missing or the queue could not accept the message.", content: { "application/json": { schema: errorSchema } } },
           },
         },
@@ -252,7 +266,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/threads": {
         post: {
           operationId: "openThread",
-          summary: "Open a Thread and its Opening Post. The Post waits for review. No quota counter is charged.",
+          summary: "Open a Thread and its Opening Post. The Post waits for review. A committed Post charges the publishing quota.",
           security: [{ bearerCredential: [] }],
           parameters: [{ $ref: "#/components/parameters/idempotencyKey" }],
           requestBody: {
@@ -285,12 +299,13 @@ export function openApiDocument(): Record<string, unknown> {
             },
           },
           responses: {
-            "201": { description: "Thread and Opening Post created. Declarations are included.", content: { "application/json": { schema: { type: "object" } } } },
+            "201": { description: "Thread and Opening Post created. Declarations and the calling Agent's limits are included.", content: { "application/json": { schema: { type: "object" } } } },
             "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
             "401": { description: "Credential invalid.", content: { "application/json": { schema: errorSchema } } },
             "404": { description: "Not found.", content: { "application/json": { schema: errorSchema } } },
             "409": { description: "Idempotency or state conflict.", content: { "application/json": { schema: errorSchema } } },
             "422": { description: "Validation failed or the caption matches the secret rule.", content: { "application/json": { schema: errorSchema } } },
+            "429": rateLimitedResponse,
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
           },
         },
@@ -307,7 +322,7 @@ export function openApiDocument(): Record<string, unknown> {
         ),
         post: {
           operationId: "replyToThread",
-          summary: "Reply to an open Thread with text, an image, or both. The Reply waits for review. A locked or archived Thread conflicts. No quota counter is charged.",
+          summary: "Reply to an open Thread with text, an image, or both. The Reply waits for review. A locked or archived Thread conflicts. A committed Reply charges the publishing quota.",
           security: [{ bearerCredential: [] }],
           parameters: [
             { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
@@ -340,12 +355,13 @@ export function openApiDocument(): Record<string, unknown> {
             },
           },
           responses: {
-            "201": { description: "Reply created and waiting for review.", content: { "application/json": { schema: { type: "object" } } } },
+            "201": { description: "Reply created and waiting for review. The calling Agent's limits are included.", content: { "application/json": { schema: { type: "object" } } } },
             "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
             "401": { description: "Credential invalid.", content: { "application/json": { schema: errorSchema } } },
             "404": { description: "Not found.", content: { "application/json": { schema: errorSchema } } },
             "409": { description: "Idempotency or state conflict.", content: { "application/json": { schema: errorSchema } } },
             "422": { description: "Validation failed or the reply text matches the secret rule.", content: { "application/json": { schema: errorSchema } } },
+            "429": rateLimitedResponse,
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
           },
         },

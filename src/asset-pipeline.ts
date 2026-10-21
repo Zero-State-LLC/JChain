@@ -1,5 +1,6 @@
 import { isUuidV7 } from "./ids";
 import type { Policy } from "./policy";
+import { chargeDerivativeBytes, chargeTransformations, logRejected } from "./quota";
 
 export const ASSET_QUEUE = "asset-upload";
 export const ASSET_DLQ = "asset-upload-dlq";
@@ -24,6 +25,7 @@ type AssetEnv = {
   DB: D1Database;
   MEDIA: R2Bucket;
   IMAGES: ImagesBinding;
+  QUOTA: Env["QUOTA"];
 };
 
 type AssetRow = {
@@ -121,28 +123,51 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
     return;
   }
 
+  const transformations = await chargeTransformations(env, policy);
+  if (!transformations.ok) {
+    logRejected(asset.agent_id, "global", "transformations");
+    await rejectAsset(env.DB, assetId, "processing_failed");
+    return;
+  }
+
   let display: Uint8Array;
   let thumb: Uint8Array;
+  let finished = 0;
   try {
     display = await encode(env.IMAGES, bytes, false);
+    finished = 1;
     thumb = await encode(env.IMAGES, bytes, true);
+    finished = 2;
   } catch {
+    await transformations.refund(2 - finished);
     await env.MEDIA.delete([derivativeKey(assetId, "display"), derivativeKey(assetId, "thumb")]);
     await rejectAsset(env.DB, assetId, "processing_failed");
     return;
   }
 
-  await env.MEDIA.put(derivativeKey(assetId, "display"), display, {
-    httpMetadata: { contentType: WEBP },
-  });
-  await env.MEDIA.put(derivativeKey(assetId, "thumb"), thumb, {
-    httpMetadata: { contentType: WEBP },
-  });
+  const displayKey = derivativeKey(assetId, "display");
+  const thumbKey = derivativeKey(assetId, "thumb");
+  try {
+    await env.MEDIA.put(displayKey, display, { httpMetadata: { contentType: WEBP } });
+    await env.MEDIA.put(thumbKey, thumb, { httpMetadata: { contentType: WEBP } });
+  } catch {
+    await env.MEDIA.delete([displayKey, thumbKey]);
+    await rejectAsset(env.DB, assetId, "processing_failed");
+    return;
+  }
+  const bytesCharged = await chargeDerivativeBytes(env, policy, display.byteLength + thumb.byteLength);
+  if (!bytesCharged.ok) {
+    logRejected(asset.agent_id, "global", "r2_bytes");
+    await env.MEDIA.delete([displayKey, thumbKey]);
+    await rejectAsset(env.DB, assetId, "processing_failed");
+    return;
+  }
   const updated = await env.DB.prepare(
     "UPDATE assets SET state = 'ready', reason_code = NULL, original_stored = 0 WHERE id = ? AND state = 'validating'",
   ).bind(assetId).run();
   if (Number(updated.meta.changes ?? 0) !== 1) {
-    await env.MEDIA.delete([derivativeKey(assetId, "display"), derivativeKey(assetId, "thumb")]);
+    await bytesCharged.refund();
+    await env.MEDIA.delete([displayKey, thumbKey]);
     return;
   }
   await env.MEDIA.delete(originalKey(assetId));

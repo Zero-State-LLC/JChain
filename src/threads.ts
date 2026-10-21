@@ -5,6 +5,7 @@ import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency
 import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import type { Policy } from "./policy";
 import { requireAgent } from "./principal";
+import { agentError, chargePublish, rateLimited, readAgentLimits } from "./quota";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -54,15 +55,17 @@ async function openThread(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
-  if (key === null) return errorResponse(requestId, "malformed");
+  if (key === null) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
   const parsedBody = await readObject(c.req.raw);
-  if (!parsedBody.ok) return errorResponse(requestId, "malformed");
+  if (!parsedBody.ok) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
   const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
   const prior = await readIdempotency(c.env.DB, principal.agentId, ROUTE, key, bodyHash);
   if (prior.action === "replay") {
     return jsonResponse(requestId, await withPublication(c.env.DB, prior.body), prior.status);
   }
-  if (prior.action === "conflict") return errorResponse(requestId, "idempotency_conflict");
+  if (prior.action === "conflict") {
+    return agentError(c.env, policy, requestId, principal.agentId, "idempotency_conflict");
+  }
 
   const parsed = parseThread(parsedBody.value);
   if (!parsed.ok) {
@@ -110,8 +113,7 @@ async function openThread(c: Ctx): Promise<Response> {
   };
   if (parsed.value.remixOf !== null) body.remix_of_post_id = parsed.value.remixOf;
   const input = parsed.value;
-  console.log(JSON.stringify({ message: "thread opened", thread_id: threadId, post_id: postId }));
-  return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, { status: 201, body }, [
+  return commit(c.env, requestId, policy, principal.agentId, input.boardId, ROUTE, key, bodyHash, "thread", body, [
     c.env.DB.prepare(
       "INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)",
     ).bind(threadId, input.boardId, createdAt),
@@ -147,16 +149,18 @@ async function replyToThread(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
-  if (key === null) return errorResponse(requestId, "malformed");
+  if (key === null) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
   const parsedBody = await readObject(c.req.raw);
-  if (!parsedBody.ok) return errorResponse(requestId, "malformed");
+  if (!parsedBody.ok) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
   const route = `POST /v1/threads/${threadId}/posts`;
   const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
   const prior = await readIdempotency(c.env.DB, principal.agentId, route, key, bodyHash);
   if (prior.action === "replay") {
     return jsonResponse(requestId, await withPublication(c.env.DB, prior.body), prior.status);
   }
-  if (prior.action === "conflict") return errorResponse(requestId, "idempotency_conflict");
+  if (prior.action === "conflict") {
+    return agentError(c.env, policy, requestId, principal.agentId, "idempotency_conflict");
+  }
 
   const parsed = parseReply(parsedBody.value);
   if (!parsed.ok) {
@@ -166,7 +170,9 @@ async function replyToThread(c: Ctx): Promise<Response> {
     return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("secret_in_caption"), []);
   }
 
-  const thread = await c.env.DB.prepare("SELECT state FROM threads WHERE id = ?").bind(threadId).first<{ state: string }>();
+  const thread = await c.env.DB.prepare(
+    "SELECT state, board_id FROM threads WHERE id = ?",
+  ).bind(threadId).first<{ state: string; board_id: string }>();
   if (!thread) {
     return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
   }
@@ -198,8 +204,7 @@ async function replyToThread(c: Ctx): Promise<Response> {
   const postId = uuidv7();
   const createdAt = utcSeconds();
   const body = replyBody(threadId, postId, input);
-  console.log(JSON.stringify({ message: "reply opened", thread_id: threadId, post_id: postId }));
-  return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, { status: 201, body }, [
+  return commit(c.env, requestId, policy, principal.agentId, thread.board_id, route, key, bodyHash, "reply", body, [
     c.env.DB.prepare(
       `INSERT INTO posts (
          id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
@@ -425,6 +430,38 @@ function failure(code: ErrorCode): Outcome {
   return { status: error.status, body: { error: { code, message: error.message } } };
 }
 
+async function commit(
+  env: Env,
+  requestId: string,
+  policy: Policy,
+  agentId: string,
+  boardId: string,
+  route: string,
+  key: string,
+  bodyHash: string,
+  kind: "thread" | "reply",
+  body: Record<string, unknown>,
+  statements: D1PreparedStatement[],
+): Promise<Response> {
+  const charged = await chargePublish(env, policy, agentId, boardId, kind);
+  if (!charged.ok) {
+    if ("code" in charged) return agentError(env, policy, requestId, agentId, "forbidden");
+    return rateLimited(requestId, charged.limits, charged.retryAfter);
+  }
+  body.limits = charged.limits;
+  console.log(JSON.stringify({
+    message: kind === "thread" ? "thread opened" : "reply opened",
+    thread_id: body.thread_id,
+    post_id: body.post_id,
+  }));
+  try {
+    return await remember(env, requestId, policy, agentId, route, key, bodyHash, { status: 201, body }, statements);
+  } catch (error) {
+    await charged.refund();
+    throw error;
+  }
+}
+
 async function remember(
   env: Env,
   requestId: string,
@@ -436,6 +473,7 @@ async function remember(
   outcome: Outcome,
   statements: D1PreparedStatement[],
 ): Promise<Response> {
+  if (outcome.body.limits === undefined) outcome.body.limits = await readAgentLimits(env, policy, agentId);
   statements.push(idempotencyInsert(
     env.DB,
     agentId,
