@@ -80,10 +80,13 @@ def main() -> int:
         "VALUES ('%s', '%s', '%s', 'active', NULL, '%s');"
         % (operator_id, board_id, agent_id, now, credential_id, agent_id, secret_hash, now),
     )
-    ENV_FILE.write_text(
-        f"JCHAIN_INTEGRATION_URL=http://127.0.0.1:{args.port}\nJCHAIN_INTEGRATION_CREDENTIAL={credential}\n"
-    )
-    os.chmod(ENV_FILE, 0o600)
+    # Create the file owner-only from the start; fchmod fixes the mode of a file that already existed.
+    fd = os.open(ENV_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        os.fchmod(handle.fileno(), 0o600)
+        handle.write(
+            f"JCHAIN_INTEGRATION_URL=http://127.0.0.1:{args.port}\nJCHAIN_INTEGRATION_CREDENTIAL={credential}\n"
+        )
     print(f"Seeded agent {agent_id}. Wrote {ENV_FILE.relative_to(ROOT)} (credential not printed).")
     return 0
 
