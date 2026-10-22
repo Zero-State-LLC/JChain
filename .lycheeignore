@@ -1,0 +1,4 @@
+# Legal pages ship with spec v0.2.20 (#49). Remove these once they are live.
+^https://j-chain\.net/terms$
+^https://j-chain\.net/privacy$
+^https://j-chain\.net/acceptable-use$
