@@ -1,3 +1,4 @@
+import { ACCESS_AUDIENCE, ACCESS_ISSUER, accessJwtFromRequest, emailFromAccessJwt, loadAccessKeys } from "./access-jwt";
 import { sha256Hex } from "./credential";
 
 export type AuthFailure = "access_required" | "credential_invalid" | "not_enrolled" | "forbidden";
@@ -23,7 +24,7 @@ export async function requireOperator(env: Env, request: Request, ctx: object): 
     if (!agent.ok) return agent;
     return { ok: false, code: "forbidden" };
   }
-  const email = await humanEmail(ctx);
+  const email = await humanEmail(ctx, request);
   if (email === null) return { ok: false, code: "access_required" };
   const enrolled = await enrollment(env, email);
   if (enrolled === "operator" || enrolled === "both") return { ok: true, kind: "operator", email };
@@ -42,7 +43,7 @@ export async function requireModerator(env: Env, request: Request, ctx: object):
     if (!agent.ok) return agent;
     return { ok: false, code: "forbidden" };
   }
-  const email = await humanEmail(ctx);
+  const email = await humanEmail(ctx, request);
   if (email === null) return { ok: false, code: "access_required" };
   const enrolled = await enrollment(env, email);
   if (enrolled === "moderator" || enrolled === "both") return { ok: true, kind: "moderator", email };
@@ -53,7 +54,7 @@ export async function requireModerator(env: Env, request: Request, ctx: object):
 export async function requireReader(env: Env, request: Request, ctx: object): Promise<Principal> {
   const header = request.headers.get("authorization");
   if (header !== null) return authenticateAgent(env, header);
-  const email = await humanEmail(ctx);
+  const email = await humanEmail(ctx, request);
   if (email === null) return { ok: false, code: "access_required" };
   const enrolled = await enrollment(env, email);
   if (enrolled === "operator" || enrolled === "both") return { ok: true, kind: "operator", email };
@@ -97,11 +98,26 @@ function expired(expiresAt: string): boolean {
   return Number.isNaN(expiry) || expiry <= Date.now();
 }
 
-export async function accessEmail(ctx: object): Promise<string | null> {
-  return humanEmail(ctx);
+export async function accessEmail(ctx: object, request: Request): Promise<string | null> {
+  return humanEmail(ctx, request);
 }
 
-async function humanEmail(ctx: object): Promise<string | null> {
+async function humanEmail(ctx: object, request: Request): Promise<string | null> {
+  const bound = await boundEmail(ctx);
+  if (bound !== null) return bound;
+  const token = accessJwtFromRequest(request);
+  if (token === null) return null;
+  const keys = await loadAccessKeys();
+  if (keys === null || keys.length === 0) return null;
+  return emailFromAccessJwt(token, {
+    issuer: ACCESS_ISSUER,
+    audience: ACCESS_AUDIENCE,
+    now: Date.now(),
+    keys,
+  });
+}
+
+async function boundEmail(ctx: object): Promise<string | null> {
   const access = accessOf(ctx);
   if (!access) return null;
   const identity: unknown = await access.getIdentity();
