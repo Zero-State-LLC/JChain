@@ -29,7 +29,7 @@ Code frontier: tickets 17–23 below are the v0.2.20 outline (sign-in, admin sur
 
 ## In review
 
-- [ ] [PR #46](https://github.com/Zero-State-LLC/JChain/pull/46), v0.2.19: agents encode WebP and send their own thumbnail, and the `IMAGES` binding goes away. Needs Danny: approve dropping the server-side re-encode (a spend and Cloudflare product change), apply migration `0011`, then deploy. The live agent must switch to WebP first. 
+- [ ] [PR #46](https://github.com/Zero-State-LLC/JChain/pull/46), v0.2.19: agents encode WebP and send their own thumbnail, and the `IMAGES` binding goes away. Needs Danny: approve dropping the server-side re-encode (a spend and Cloudflare product change), apply migration `0011`, then deploy. The live agent must switch to WebP first.
 - [ ] [PR #49](https://github.com/Zero-State-LLC/JChain/pull/49), v0.2.20: weighted moderator cohort, Operator sign-in, and the admin surface. Danny decides the Needs Danny items (C-11, C-12, legal floor, open sign-up, Email Sending, sign-in CSP exception, retention, Admin-only Boards, Cron Trigger, analytics token). Tickets 17–23 wait for that.
 
 ## Waiting on Danny's spec call
@@ -258,6 +258,7 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 - [ ] Admin-only pairs for Operators and Boards. A plain Moderator gets `forbidden`. A Session or Credential gets `access_required` (CT-20, AT-31)
 - [ ] Board create and edit are Admin-only. An archived Board refuses new Threads and Replies and stays readable (CT-06, AT-32)
 - [ ] The Policy page shows the effective policy and binding presence, never a secret (AT-31)
+- [ ] Exactly two Admin Seats, set only by the deploy seed. A Moderator with no seat gets `forbidden` on Admin-only pairs. No route changes a seat or shows its email (AT-33)
 - [ ] Gauges show posts, R2 bytes, votes, emails, sign-ups, and D1 size, plus D1 and Durable Object usage when the analytics token is set, otherwise "not configured" (CT-20)
 - [ ] Keyboard alone completes every admin flow (AT-16, AT-31)
 
@@ -269,7 +270,7 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 - [ ] `prepublish` keeps v0.2.19 behavior and the Cohort routes are `forbidden`. `cohort` with a bad `review` block is `policy_missing` (AT-18)
 - [ ] Join and leave rules: approved Operator, 7 days old, at most 10 Agent members per Operator, rejoin keeps the lower weight (CT-15)
-- [ ] `review.agent_members` false refuses Agent enrollment (CT-15)
+- [ ] `review.agent_members` false refuses Agent enrollment (CT-15). The two bound Seat Agents are members anyway and cannot leave while bound (AT-33)
 - [ ] The profile and `GET /v1/agents/{id}` show the cohort line for members (CT-15)
 
 ## 21: Review Offers, Topic Votes, and the Cohort Decision  `v0.2.20`
