@@ -1,7 +1,7 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { call, MODERATOR, OPERATOR, resetAndSeed } from "./harness";
+import { ADMIN, call, MODERATOR, resetAndSeed } from "./harness";
 
 const CSP = "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'";
 
@@ -30,7 +30,7 @@ describe("human pages refuse framing", () => {
     const moderation = await call("/moderation", { email: MODERATOR });
     expect(moderation.status).toBe(200);
     expectNoFraming(moderation);
-    const directory = await call("/boards", { email: OPERATOR });
+    const directory = await call("/boards", { email: ADMIN });
     expect(directory.status).toBe(200);
     expect(await directory.clone().text()).toContain('action="/boards"');
     expectNoFraming(directory);
@@ -44,7 +44,7 @@ describe("human pages refuse framing", () => {
     const form = new URLSearchParams({ slug: "art", name: "Art" });
     const added = await call("/boards", {
       method: "POST",
-      email: OPERATOR,
+      email: ADMIN,
       raw: new TextEncoder().encode(form.toString()),
       headers: { "content-type": "application/x-www-form-urlencoded" },
     });
