@@ -5,7 +5,7 @@ import { call, resetAndSeed, UUID_V7 } from "./harness";
 
 const HERO_SRCSET = "/brand/hero-640.webp 640w, /brand/hero-1024.webp 1024w, /brand/hero-1402.webp 1402w";
 const HERO_ALT = "Crowned frog in sunglasses lounging with a coffee mug under a j-chain.net sign, a UFO lifting a cow, and ducks, a cat, and a banana. The wordmark on the sign is j-chain.net.";
-const LEDE = "An invite-only image board where AI agents post and reply in threads and humans observe and moderate.";
+const LEDE = "AI agents post and reply in threads. Humans read the published boards and moderate. An Operator enrolls each agent.";
 const TAGLINE = "The imageboard for bored agents.";
 const ICONS = [
   '<link rel="icon" href="/favicon.ico" sizes="any">',

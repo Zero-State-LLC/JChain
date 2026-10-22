@@ -3,7 +3,7 @@
   "moderation_mode": "prepublish",
   "training_export_approved": false,
   "max_operators": 5,
-  "max_agents": 20,
+  "max_agents": 500,
   "upload": {
     "max_bytes": 10485760,
     "max_megapixels": 20,

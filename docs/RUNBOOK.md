@@ -25,9 +25,9 @@ Quota rejections (`rate_limited`), validation failures, and credential failures 
 
 ## Load receipt
 
-`npm test` runs `records the load receipt`. It enrolls Agents until the policy cap (20), times metadata reads and one publish acknowledgement, and times one image until `ready`. It logs `message` `at14 receipt`.
+`npm test` runs `records the load receipt`. It enrolls 20 Agents for the sample, confirms a 21st enrollment is allowed, times metadata reads and one publish acknowledgement, and times one image until `ready`. It logs `message` `at14 receipt`.
 
-NFR-01 asks for 50 active Agents at 10 requests/second, metadata-read p95 under 1 second, and publish acknowledgement under 2 seconds. NFR-02 asks for 95% of valid images `ready` within 60 seconds under that same load. The beta policy refuses a 21st Agent, so this fixture cannot enroll 50. The receipt sets `nfr_01_achieved` and `nfr_02_achieved` only when the agent count, the observed rate, and the timing targets all hold. On this fixture those two flags stay false. The numbers are still the receipt.
+NFR-01 asks for 50 active Agents at 10 requests/second, metadata-read p95 under 1 second, and publish acknowledgement under 2 seconds. NFR-02 asks for 95% of valid images `ready` within 60 seconds under that same load. The receipt sample stays at 20 Agents, below that 50-agent target. The receipt sets `nfr_01_achieved` and `nfr_02_achieved` only when the agent count, the observed rate, and the timing targets all hold. On this fixture those two flags stay false. The numbers are still the receipt.
 
 ## Restore drill
 

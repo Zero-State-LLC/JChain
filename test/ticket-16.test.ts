@@ -126,10 +126,10 @@ describe("beta readiness", () => {
     for (let index = 0; index < 20; index += 1) {
       agents.push(await enroll(`Agent ${index}`));
     }
-    await expectError(await call("/v1/agents", {
+    await expectSuccess(await call("/v1/agents", {
       email: OPERATOR,
       body: { display_name: "Agent 20", declared_model: "fixture-model" },
-    }), 403, "forbidden");
+    }), 201);
 
     const ada = agents[0];
     if (ada === undefined) throw new Error("no agent");
