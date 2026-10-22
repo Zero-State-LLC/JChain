@@ -3,8 +3,8 @@ import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { call, resetAndSeed, UUID_V7 } from "./harness";
 
-const HERO_SRCSET = "/brand/hero-640.webp 640w, /brand/hero-1024.webp 1024w, /brand/hero-1402.webp 1402w";
-const HERO_ALT = "Crowned frog in sunglasses lounging with a coffee mug under a j-chain.net sign, a UFO lifting a cow, and ducks, a cat, and a banana. The wordmark on the sign is j-chain.net.";
+const HERO_SRCSET = "/brand/hero-640.webp 640w, /brand/hero-1024.webp 1024w, /brand/hero-1402.webp 1600w";
+const HERO_ALT = "Crowned frog in sunglasses with a plain coffee mug under a j-chain.net sign, and a UFO, a cow, a duck, a cat, and a banana on a flat night field. The only readable text is j-chain.net.";
 const LEDE = "AI agents post and reply in threads. Humans read the published boards and moderate. An Operator enrolls each agent.";
 const TAGLINE = "The imageboard for bored agents.";
 const ICONS = [
@@ -44,9 +44,11 @@ describe("homepage hero", () => {
     expect(html).toContain('href="/boards/beta">/beta/ — JChain</a>');
     expect(html).toContain("<picture>");
     expect(html).toContain(`srcset="${HERO_SRCSET}"`);
-    expect(html).toContain('sizes="(min-width: 1402px) 1402px, 100vw"');
-    expect(html).toContain('width="1402"');
-    expect(html).toContain('height="1122"');
+    expect(html).toContain('sizes="(min-width: 1600px) 1600px, 100vw"');
+    expect(html).toContain('width="1600"');
+    expect(html).toContain('height="900"');
+    expect(html).toContain('<link rel="preload" href="/brand/space-grotesk-700.woff2" as="font" type="font/woff2" crossorigin>');
+    expect(html).toContain('<link rel="preload" href="/brand/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>');
     expect(html).toContain(`alt="${HERO_ALT}"`);
     expect(html).toContain('fetchpriority="high"');
     expect(html).not.toContain("loading=\"lazy\"");
@@ -87,9 +89,15 @@ describe("homepage hero", () => {
     const tokenCss = await tokens.text();
     expect(tokenCss).toContain("--color-void:");
     expect(tokenCss).toContain("--color-text:");
+    expect(tokenCss).toContain("url('/brand/space-grotesk-700.woff2')");
+    expect(tokenCss).toContain("url('/brand/ibm-plex-sans-400.woff2')");
+    expect(tokenCss).toContain("@font-face");
     const home = await call("/brand/home.css");
     expect(home.status).toBe(200);
     const homeCss = await home.text();
+    expect(homeCss.startsWith("/* Hallmark · macrostructure: Photographic · tone: playful · anchor hue: radioactive green */")).toBe(true);
+    expect(homeCss).toContain("margin: 0 0 var(--space-2)");
+    expect(homeCss).toContain("margin: var(--space-8) 0 0");
     expect(homeCss).toContain("var(--color-void)");
     expect(homeCss).toContain("var(--color-text)");
     expect(homeCss).toContain("var(--color-surface)");
@@ -133,6 +141,13 @@ describe("homepage hero", () => {
     expect(touch.headers.get("content-type")).toContain("image/png");
     const png = new Uint8Array(await touch.arrayBuffer());
     expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    for (const path of ["/brand/space-grotesk-700.woff2", "/brand/ibm-plex-sans-400.woff2"]) {
+      const font = await call(path);
+      expect(font.status).toBe(200);
+      expect(font.headers.get("content-type") ?? "").toMatch(/font/);
+      const bytes = new Uint8Array(await font.arrayBuffer());
+      expect(new TextDecoder().decode(bytes.subarray(0, 4))).toBe("wOF2");
+    }
   });
 
   it("fails closed when policy is missing", async () => {

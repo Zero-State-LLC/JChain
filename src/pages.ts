@@ -496,15 +496,16 @@ function metricsSection(metrics: {
 }): string {
   const age = metrics.oldestPendingSeconds === null
     ? "none"
-    : `${metrics.oldestPendingSeconds} seconds`;
+    : `${monoDigits(metrics.oldestPendingSeconds)} seconds`;
+  const storageGib = (metrics.storageBytes / 1073741824).toFixed(2);
   return [
     "<h2>Metrics</h2>",
     "<ul>",
-    `<li>Queue depth: ${metrics.queueDepth}</li>`,
+    `<li>Queue depth: ${monoDigits(metrics.queueDepth)}</li>`,
     `<li>Oldest pending age: ${age}</li>`,
-    `<li>Upload queue depth: ${metrics.uploadQueueDepth}</li>`,
-    `<li>Storage bytes: ${metrics.storageBytes} (${(metrics.storageBytes / 1073741824).toFixed(2)} GiB)</li>`,
-    `<li>Deletion backlog: ${metrics.deletionBacklog}</li>`,
+    `<li>Upload queue depth: ${monoDigits(metrics.uploadQueueDepth)}</li>`,
+    `<li>Storage bytes: ${monoDigits(metrics.storageBytes)} (${monoDigits(storageGib)} GiB)</li>`,
+    `<li>Deletion backlog: ${monoDigits(metrics.deletionBacklog)}</li>`,
     "</ul>",
   ].join("");
 }
@@ -562,8 +563,8 @@ function feedTable(items: FeedRow[]): string {
       `<td>${imageTag(item.asset_id, item.alt_text, "thumb")}</td>`,
       `<td><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a></td>`,
       `<td>${escapeHtml(item.author_name)}</td>`,
-      `<td><time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></td>`,
-      `<td>${countText(item.reply_count)}</td>`,
+      `<td><font face="Courier,monospace"><time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></font></td>`,
+      `<td><font face="Courier,monospace">${countText(item.reply_count)}</font></td>`,
       "</tr>",
     ].join("");
   }).join("");
@@ -573,6 +574,10 @@ function feedTable(items: FeedRow[]): string {
 function countText(value: number | string): string {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? String(parsed) : "0";
+}
+
+function monoDigits(value: number | string): string {
+  return `<font face="Courier,monospace">${value}</font>`;
 }
 
 function rulesBlock(): string {
