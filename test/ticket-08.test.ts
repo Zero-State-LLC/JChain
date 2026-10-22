@@ -101,6 +101,7 @@ describe("publishing stop", () => {
     expect(before.headers.get("content-security-policy")).toContain("script-src 'none'");
     const html = await before.text();
     expect(html).toContain("<p>Disengaged</p>");
+    expect(html).toContain('<section class="stop" aria-labelledby="publishing-stop">');
     expect(html).toContain('action="/moderation/publishing-stop"');
     expect(html).toContain('name="engaged" value="true"');
     expect(html).toContain('name="engaged" value="false"');
@@ -118,6 +119,7 @@ describe("publishing stop", () => {
     expect(engaged.engaged).toBe(true);
     const after = await (await call("/moderation", { email: MODERATOR })).text();
     expect(after).toContain("<p>Engaged</p>");
+    expect(after).toContain('<section class="stop stop-engaged" aria-labelledby="publishing-stop">');
     expect(after).not.toContain("<p>Disengaged</p>");
   });
 
