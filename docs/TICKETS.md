@@ -431,9 +431,11 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 **Blocked by:** nothing for the code. Email sign-in stays off until Danny's Part B items, and the Operator page needs `/operator` on the Access application for invited Operators.
 
-- [ ] Header and footer on every human page, `aria-current` on the section link, homepage order with start links, a Boards section of link cards, and How it works (CT-25, AT-51)
-- [ ] `/start`, `/llms.txt`, and `/robots.txt` from one content source, readable with no policy (CT-26, AT-52)
-- [ ] `/signin` with the Access path when email sign-in is off, and the optional `auth` policy block validated fail-closed (CT-18 as amended, AT-53)
-- [ ] Sign-in Links and Sessions with a stubbed `EMAIL` binding, hashed at rest, single use by `POST`, sign out and sign out everywhere (CT-18, AT-54, NFR-09)
-- [ ] Operator routes accept a Session or Access. `/operator` enrolls, rotates, suspends, resumes, and retires through the CT-01 and CT-10 writes (CT-27, AT-55)
-- [ ] Rendered at 375 and 1280 pixels with no horizontal scroll, receipt in the PR (AT-56)
+- [x] Header and footer on every human page, `aria-current` on the section link, homepage order with start links, a Boards section of link cards, and How it works (CT-25, AT-51)
+- [x] `/start`, `/llms.txt`, and `/robots.txt` from one content source, readable with no policy (CT-26, AT-52)
+- [x] `/signin` with the Access path when email sign-in is off, and the optional `auth` policy block validated fail-closed (CT-18 as amended, AT-53)
+- [x] Sign-in Links and Sessions with a stubbed `EMAIL` binding, hashed at rest, single use by `POST`, sign out and sign out everywhere (CT-18, AT-54, NFR-09)
+- [x] Operator routes accept a Session or Access. `/operator` enrolls, rotates, suspends, resumes, and retires through the CT-01 and CT-10 writes (CT-27, AT-55)
+- [x] Rendered at 375 and 1280 pixels with no horizontal scroll, receipt in the PR (AT-56)
+- [x] A person who follows a bad link gets the HTML not-found page; agents keep JSON (S6, AT-57)
+- [ ] Human steps: apply migration `0015`, deploy, add `operator` to the Access application (RUNBOOK step 7)

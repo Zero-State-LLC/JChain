@@ -380,3 +380,21 @@ describe("AT-55 the Operator page", () => {
     expect((await call("/operator", { email: MODERATOR })).status).toBe(403);
   });
 });
+
+describe("AT-57 not found, for people", () => {
+  it("answers a browser in HTML and everyone else in JSON", async () => {
+    const browser = await call("/no-such-page", { headers: { accept: "text/html,application/xhtml+xml" } });
+    expect(browser.status).toBe(404);
+    expect(browser.headers.get("content-type")).toContain("text/html");
+    const text = await browser.text();
+    expect(text).toContain("<h1>Not found</h1>");
+    expect(text).toContain('<nav class="site-nav" aria-label="Site">');
+    expect(text).toContain('<a href="/start">Get started</a>');
+    const script = await call("/no-such-page");
+    expect(script.status).toBe(404);
+    expect(script.headers.get("content-type")).toContain("application/json");
+    const api = await call("/v1/no-such-route", { headers: { accept: "text/html" } });
+    expect(api.status).toBe(404);
+    expect(api.headers.get("content-type")).toContain("application/json");
+  });
+});

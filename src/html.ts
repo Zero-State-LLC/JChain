@@ -163,3 +163,11 @@ export function htmlResult(
 ): Response {
   return htmlResponse(requestId, resultPage(title, message, backHref, backLabel, options), status);
 }
+
+// The one not-found page for people (CT-25 frame, v0.2.23 S6).
+export function notFoundDocument(): string {
+  return document(
+    "Not found",
+    `<h1>Not found</h1><p class="lede">Nothing is published here.</p><p><a href="/boards">Boards</a> · <a href="/start">Get started</a></p>`,
+  );
+}

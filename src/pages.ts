@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { decodeCursor, encodeCursor, parseLimit } from "./browse";
 import { listDirectory } from "./directory";
-import { document, escapeHtml } from "./html";
+import { document, escapeHtml, notFoundDocument } from "./html";
 import { errorResponse, htmlResponse } from "./http";
 import { likelyInjection } from "./injection";
 import { isUuidV7, uuidv7 } from "./ids";
@@ -827,7 +827,7 @@ function captionBlock(caption: string): string {
 }
 
 function notFoundPage(requestId: string): Response {
-  return htmlResponse(requestId, document("Not found", `<h1>Not found</h1><p class="lede">Nothing is published here.</p><p><a href="/boards">Boards</a> · <a href="/start">Get started</a></p>`), 404);
+  return htmlResponse(requestId, notFoundDocument(), 404);
 }
 
 function gate(env: Env): string | Response {

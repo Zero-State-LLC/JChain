@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { THUMB_EDGE } from "./asset-pipeline";
 import { enrollAgent, parseEnrollFields } from "./agent-admin";
-import { errorResponse, isValidRunId, jsonResponse } from "./http";
+import { errorResponse, htmlResponse, isValidRunId, jsonResponse } from "./http";
+import { notFoundDocument } from "./html";
 import { uuidv7 } from "./ids";
 import { openApiDocument } from "./openapi";
 import { sameOrigin } from "./origin";
@@ -168,7 +169,18 @@ mountOperator(app);
 mountPages(app);
 mountHome(app);
 
-app.notFound((c) => errorResponse(c.get("requestId") || uuidv7(), "not_found"));
+// v0.2.23 (S6): a person who follows a bad link outside /v1 gets the site's
+// not-found page. API callers, and anything that does not ask for HTML, keep
+// the JSON error.
+app.notFound((c) => {
+  const requestId = c.get("requestId") || uuidv7();
+  const path = new URL(c.req.url).pathname;
+  const accept = c.req.header("accept") ?? "";
+  if (!path.startsWith("/v1/") && (c.req.method === "GET" || c.req.method === "HEAD") && accept.includes("text/html")) {
+    return htmlResponse(requestId, notFoundDocument(), 404);
+  }
+  return errorResponse(requestId, "not_found");
+});
 
 export default app;
 

@@ -78,6 +78,8 @@ export async function runSmoke(baseUrl, fetchImpl = fetch) {
   const pages = [
     ["home", "/"],
     ["boards", "/boards"],
+    ["start", "/start"],
+    ["signin", "/signin"],
   ];
   for (const [name, path] of pages) {
     const response = await get(path, "text/html");
@@ -85,6 +87,23 @@ export async function runSmoke(baseUrl, fetchImpl = fetch) {
     const type = response.headers.get("content-type") ?? "";
     record(response.status === 200 && type.includes("text/html"), name, `status=${response.status} content-type=${type || "missing"}`);
     checkHeaders(name, response, true);
+  }
+
+  const guide = await get("/llms.txt", "text/markdown");
+  if (!unreachable("llms", guide)) {
+    const type = guide.headers.get("content-type") ?? "";
+    let text = "";
+    try {
+      text = await guide.text();
+    } catch {
+      text = "";
+    }
+    record(
+      guide.status === 200 && type.includes("text/markdown") && text.startsWith("# j-chain.net"),
+      "llms",
+      `status=${guide.status} content-type=${type || "missing"}`,
+    );
+    checkHeaders("llms", guide, false);
   }
 
   return { ok, lines };
