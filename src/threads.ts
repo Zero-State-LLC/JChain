@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { submitBlocked } from "./blocked-hashes";
 import { sha256Hex } from "./credential";
 import { ERRORS, type ErrorCode, errorResponse, characterLength, isValidRunId, jsonResponse } from "./http";
 import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency";
@@ -87,7 +88,7 @@ async function openThread(c: Ctx): Promise<Response> {
   if (!asset || asset.agent_id !== principal.agentId) {
     return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("not_found"), []);
   }
-  if (asset.state !== "ready") {
+  if (asset.state !== "ready" || await submitBlocked(c.env.DB, parsed.value.assetId)) {
     return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("state_conflict"), []);
   }
   if (parsed.value.remixOf !== null) {
@@ -197,7 +198,7 @@ async function replyToThread(c: Ctx): Promise<Response> {
     if (!asset || asset.agent_id !== principal.agentId) {
       return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
     }
-    if (asset.state !== "ready") {
+    if (asset.state !== "ready" || await submitBlocked(c.env.DB, input.assetId)) {
       return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("state_conflict"), []);
     }
   }

@@ -1,3 +1,4 @@
+import { blockedMatch, sha256Bytes } from "./blocked-hashes";
 import { isUuidV7, utcSeconds } from "./ids";
 import type { Policy } from "./policy";
 import { chargeDerivativeBytes, logRejected, refundAssetBytes } from "./quota";
@@ -134,6 +135,17 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
     return;
   }
 
+  // CT-21: exact match against the Blocked Hash list before anything is stored or charged.
+  const displayHash = await sha256Bytes(display.bytes);
+  const thumbHash = await sha256Bytes(thumb);
+  const match = await blockedMatch(env.DB, [asset.sha256, asset.thumb_sha256, displayHash, thumbHash]);
+  if (match) {
+    await env.MEDIA.delete([originalKey(assetId), originalThumbKey(assetId)]);
+    if (match.prohibited) await quarantineBlocked(env.DB, assetId);
+    else await rejectAsset(env.DB, assetId, "processing_failed", true);
+    return;
+  }
+
   const twin = await env.DB.prepare(
     "SELECT id FROM assets WHERE agent_id = ? AND sha256 = ? AND state = 'ready' AND id != ?",
   ).bind(asset.agent_id, asset.sha256, assetId).first<{ id: string }>();
@@ -161,8 +173,10 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
     return;
   }
   const updated = await env.DB.prepare(
-    "UPDATE assets SET state = 'ready', reason_code = NULL, original_stored = 0, thumb_stored = 0 WHERE id = ? AND state = 'validating'",
-  ).bind(assetId).run();
+    `UPDATE assets SET state = 'ready', reason_code = NULL, original_stored = 0, thumb_stored = 0,
+            display_sha256 = ?, derived_thumb_sha256 = ?
+      WHERE id = ? AND state = 'validating'`,
+  ).bind(displayHash, thumbHash, assetId).run();
   if (Number(updated.meta.changes ?? 0) !== 1) {
     await bytesCharged.refund();
     await env.MEDIA.delete([displayKey, thumbKey]);
@@ -211,14 +225,25 @@ async function loadAsset(db: D1Database, assetId: string): Promise<AssetRow | nu
   ).bind(assetId).first<AssetRow>();
 }
 
-async function rejectAsset(db: D1Database, assetId: string, reason: ReasonCode): Promise<void> {
+async function rejectAsset(db: D1Database, assetId: string, reason: ReasonCode, blocked = false): Promise<void> {
   const updated = await db.prepare(
     `UPDATE assets
-        SET state = 'rejected', reason_code = ?, rejected_at = ?
+        SET state = 'rejected', reason_code = ?, blocked = ?, rejected_at = ?
       WHERE id = ? AND state IN ('uploaded', 'validating')`,
-  ).bind(reason, utcSeconds(), assetId).run();
+  ).bind(reason, blocked ? 1 : 0, utcSeconds(), assetId).run();
   if (Number(updated.meta.changes ?? 0) === 1) {
-    console.log(JSON.stringify({ message: "asset rejected", asset_id: assetId, reason_code: reason }));
+    const reasonCode = blocked ? "blocked" : reason;
+    console.log(JSON.stringify({ message: "asset rejected", asset_id: assetId, reason_code: reasonCode }));
+  }
+}
+
+// A prohibited match. blocked = 1 marks the Asset for the front of the Moderator queue.
+async function quarantineBlocked(db: D1Database, assetId: string): Promise<void> {
+  const updated = await db.prepare(
+    "UPDATE assets SET state = 'quarantined', blocked = 1 WHERE id = ? AND state IN ('uploaded', 'validating')",
+  ).bind(assetId).run();
+  if (Number(updated.meta.changes ?? 0) === 1) {
+    console.log(JSON.stringify({ message: "asset quarantined", asset_id: assetId, queue_first: true }));
   }
 }
 

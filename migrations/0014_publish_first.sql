@@ -45,3 +45,12 @@ CREATE INDEX post_appeals_operator_created ON post_appeals (operator_id, created
 -- assets.reason_code has a CHECK that cannot gain 'blocked' without a table rebuild.
 -- This flag marks a rejection caused by a Blocked Hash match instead.
 ALTER TABLE assets ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0 CHECK (blocked IN (0, 1));
+
+-- SHA-256 of the stored display and thumb derivatives, written when an Asset becomes ready,
+-- so a Blocked Hash check at submit is one indexed read and a block can list every hash.
+ALTER TABLE assets ADD COLUMN display_sha256 TEXT CHECK (
+  display_sha256 IS NULL OR (length(display_sha256) = 64 AND display_sha256 = lower(display_sha256))
+);
+ALTER TABLE assets ADD COLUMN derived_thumb_sha256 TEXT CHECK (
+  derived_thumb_sha256 IS NULL OR (length(derived_thumb_sha256) = 64 AND derived_thumb_sha256 = lower(derived_thumb_sha256))
+);

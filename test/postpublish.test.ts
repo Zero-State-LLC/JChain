@@ -211,6 +211,139 @@ describe("AT-48 policy validation", () => {
   });
 });
 
+describe("AT-40 and AT-49 Blocked Hashes", () => {
+  async function uploadSettled(credential: string): Promise<string> {
+    const reserved = await expectSuccess(await call("/v1/uploads", {
+      bearer: credential,
+      headers: { "idempotency-key": crypto.randomUUID() },
+      body: {
+        content_type: "image/webp",
+        byte_size: VALID_WEBP.byteLength,
+        sha256: await sha256HexBytes(VALID_WEBP),
+      },
+    }), 201);
+    const assetId = String(reserved.asset_id);
+    await expectSuccess(await call(`/v1/uploads/${assetId}/content`, {
+      method: "PUT",
+      raw: VALID_WEBP,
+      headers: { "idempotency-key": crypto.randomUUID(), "upload-token": String(reserved.upload_token) },
+    }));
+    await expectSuccess(await call(`/v1/uploads/${assetId}/complete`, {
+      method: "POST",
+      bearer: credential,
+      headers: { "idempotency-key": crypto.randomUUID() },
+    }), 202);
+    await settle(assetId);
+    return assetId;
+  }
+
+  async function blockedCount(): Promise<number> {
+    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM blocked_hashes").first<{ n: number }>();
+    return Number(row?.n ?? 0);
+  }
+
+  async function postsWithAsset(assetId: string): Promise<number> {
+    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM posts WHERE asset_id = ?")
+      .bind(assetId).first<{ n: number }>();
+    return Number(row?.n ?? 0);
+  }
+
+  function moderate(body: Record<string, unknown>): Promise<Response> {
+    return call("/v1/moderation/actions", { email: MODERATOR, body });
+  }
+
+  it("blocks the bytes of a Post a Moderator removes, so a new upload is rejected as blocked", async () => {
+    const ada = await enroll("Ada");
+    const assetId = await readyAsset(ada.credential);
+    const fake = fakeQueue();
+    const opened = await expectSuccess(await submit("/v1/threads", ada.credential, threadBody(assetId), {
+      env: postEnv(POSTPUBLISH, fake.queue),
+    }), 201);
+    const postId = String(opened.post_id);
+    if (opened.state !== "published") {
+      await expectSuccess(await moderate({
+        target_type: "post", target_id: postId, action: "approve", reason_code: "rules",
+      }));
+    }
+    const removed = await expectSuccess(await moderate({
+      target_type: "post", target_id: postId, action: "remove", reason_code: "rules",
+    }));
+    expect(removed.state).toBe("removal_pending");
+    const rows = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM blocked_hashes WHERE asset_id = ? AND prohibited = 0",
+    ).bind(assetId).first<{ n: number }>();
+    expect(Number(rows?.n ?? 0)).toBeGreaterThan(0);
+
+    const bea = await enroll("Bea");
+    const second = await uploadSettled(bea.credential);
+    const status = await expectSuccess(await call(`/v1/assets/${second}/status`, { bearer: bea.credential }));
+    expect(status.state).toBe("rejected");
+    expect(status.reason_code).toBe("blocked");
+    const row = await env.DB.prepare("SELECT state, blocked FROM assets WHERE id = ?")
+      .bind(second).first<{ state: string; blocked: number }>();
+    expect(row).toEqual({ state: "rejected", blocked: 1 });
+  });
+
+  it("blocks the bytes of an Asset a Moderator quarantines", async () => {
+    const ada = await enroll("Ada");
+    const assetId = await readyAsset(ada.credential);
+    const done = await expectSuccess(await moderate({
+      target_type: "asset", target_id: assetId, action: "quarantine_asset", reason_code: "rules",
+    }));
+    expect(done.state).toBe("quarantined");
+    expect(await blockedCount()).toBeGreaterThan(0);
+  });
+
+  it("quarantines a new upload that matches a prohibited Blocked Hash", async () => {
+    await env.DB.prepare(
+      "INSERT INTO blocked_hashes (sha256, prohibited, asset_id, created_at) VALUES (?, 1, NULL, ?)",
+    ).bind(await sha256HexBytes(VALID_WEBP), "2026-01-01T00:00:00Z").run();
+    const ada = await enroll("Ada");
+    const assetId = await uploadSettled(ada.credential);
+    const status = await expectSuccess(await call(`/v1/assets/${assetId}/status`, { bearer: ada.credential }));
+    expect(status.state).toBe("quarantined");
+  });
+
+  it("refuses a thread and a reply whose ready Asset was blocked afterwards (AT-49)", async () => {
+    const ada = await enroll("Ada");
+    const assetId = await readyAsset(ada.credential);
+    const opened = await expectSuccess(await submit("/v1/threads", ada.credential, threadBody(assetId)), 201);
+    const asset = await env.DB.prepare("SELECT display_sha256 FROM assets WHERE id = ?")
+      .bind(assetId).first<{ display_sha256: string | null }>();
+    expect(asset?.display_sha256).toMatch(/^[0-9a-f]{64}$/);
+    await env.DB.prepare(
+      "INSERT INTO blocked_hashes (sha256, prohibited, asset_id, created_at) VALUES (?, 0, NULL, ?)",
+    ).bind(String(asset?.display_sha256), "2026-01-01T00:00:00Z").run();
+
+    await expectError(await submit("/v1/threads", ada.credential, threadBody(assetId)), 409, "state_conflict");
+    await expectError(await submit(`/v1/threads/${String(opened.thread_id)}/posts`, ada.credential, {
+      text: "Again",
+      asset_id: assetId,
+      alt_text: "A square",
+      provenance: { source: "model", model: "fixture-model" },
+      rights_attestation: "I made this.",
+      license: "cc0",
+    }), 409, "state_conflict");
+    expect(await postsWithAsset(assetId)).toBe(1);
+  });
+
+  it("adds nothing to the list on an owner deletion", async () => {
+    const ada = await enroll("Ada");
+    const assetId = await readyAsset(ada.credential);
+    await expectSuccess(await submit("/v1/threads", ada.credential, threadBody(assetId)), 201);
+    const response = await call("/v1/deletion-requests", { email: OPERATOR, body: { agent_id: ada.agentId } });
+    expect(response.status).toBeLessThan(300);
+    expect(await blockedCount()).toBe(0);
+  });
+
+  it("keeps prepublish submits with an unblocked Asset pending review", async () => {
+    const ada = await enroll("Ada");
+    const assetId = await readyAsset(ada.credential);
+    const opened = await expectSuccess(await submit("/v1/threads", ada.credential, threadBody(assetId)), 201);
+    expect(opened.state).toBe("pending_review");
+  });
+});
+
 function variant(mutate: (policy: Record<string, unknown>) => void): string {
   const policy = JSON.parse(POSTPUBLISH) as Record<string, unknown>;
   mutate(policy);
