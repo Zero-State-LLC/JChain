@@ -23,7 +23,19 @@ type FeedRow = {
   asset_id: string | null;
   author_name: string;
   reply_count: number | string;
+  last_post_at?: string | null;
 };
+
+type DirectoryRow = {
+  slug: string;
+  name: string;
+  description: string;
+  thread_count: number | string;
+  last_post_at: string | null;
+};
+
+const PAGE_NUMBER = /^[1-9][0-9]{0,3}$/;
+const DEFAULT_LIMIT = 25;
 
 type ThreadRow = FeedRow & {
   post_id: string;
@@ -88,26 +100,39 @@ export function mountPages(app: Hono<AppEnv>): void {
 async function boardIndex(c: PageCtx): Promise<Response> {
   const requestId = gate(c.env);
   if (requestId instanceof Response) return requestId;
-  const listed = await c.env.DB.prepare(
-    "SELECT slug, name FROM boards ORDER BY slug",
-  ).all<{ slug: string; name: string }>();
+  const listed = await c.env.DB.prepare(`
+    SELECT boards.slug AS slug, boards.name AS name, boards.description AS description,
+           (SELECT COUNT(*) FROM threads
+             JOIN posts ON posts.thread_id = threads.id
+            WHERE threads.board_id = boards.id AND ${VISIBLE_POST} AND posts.title IS NOT NULL) AS thread_count,
+           (SELECT MAX(posts.created_at) FROM threads
+             JOIN posts ON posts.thread_id = threads.id
+            WHERE threads.board_id = boards.id AND ${VISIBLE_POST}) AS last_post_at
+      FROM boards
+     ORDER BY boards.slug`).all<DirectoryRow>();
   const rows = listed.results ?? [];
   const table = rows.length === 0
     ? `<p class="empty">No boards yet.</p>`
-    : `<div class="scroll"><table class="directory"><thead><tr><th scope="col">Board</th><th scope="col">Topic</th></tr></thead><tbody>${
-      rows.map((row) => `<tr><td><a href="/boards/${escapeHtml(row.slug)}">/${escapeHtml(row.slug)}/</a></td><td>${escapeHtml(row.name)}</td></tr>`).join("")
+    : `<div class="scroll"><table class="directory"><thead><tr><th scope="col">Board</th><th scope="col">Topic</th><th scope="col">About</th><th scope="col">Threads</th><th scope="col">Last post</th></tr></thead><tbody>${
+      rows.map((row) => [
+        "<tr>",
+        `<td><a href="/boards/${escapeHtml(row.slug)}">/${escapeHtml(row.slug)}/</a></td>`,
+        `<td>${escapeHtml(row.name)}</td>`,
+        `<td class="about">${escapeHtml(row.description)}</td>`,
+        `<td class="num">${countText(row.thread_count)}</td>`,
+        `<td class="num">${timeText(row.last_post_at)}</td>`,
+        "</tr>",
+      ].join("")).join("")
     }</tbody></table></div>`;
-  const email = await accessEmail(c.executionCtx, c.req.raw);
-  const operator = email === null
-    ? null
-    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first();
-  const form = operator === null
+  const operator = await isOperator(c);
+  const form = !operator
     ? ""
     : [
       `<section class="panel" aria-labelledby="add-board"><h2 id="add-board">Add a board</h2>`,
       `<form class="stack" method="post" action="/boards">`,
       `<p class="field"><label for="slug">Slug</label> <input id="slug" name="slug" maxlength="20" required pattern="[a-z][a-z0-9]{0,19}" aria-describedby="slug-hint" autocomplete="off"> <span class="hint" id="slug-hint">Lowercase letters and digits, starting with a letter.</span></p>`,
       `<p class="field"><label for="name">Topic</label> <input id="name" name="name" maxlength="60" required autocomplete="off"></p>`,
+      descriptionField(""),
       `<p><button type="submit">Add board</button></p>`,
       `</form></section>`,
     ].join("");
@@ -119,35 +144,116 @@ async function feed(c: PageCtx): Promise<Response> {
   if (requestId instanceof Response) return requestId;
   const slug = c.req.param("slug");
   if (slug === undefined) return notFoundPage(requestId);
-  const board = await c.env.DB.prepare("SELECT id, name FROM boards WHERE slug = ?").bind(slug).first<{
+  const board = await c.env.DB.prepare("SELECT id, name, description FROM boards WHERE slug = ?").bind(slug).first<{
     id: string;
     name: string;
+    description: string;
   }>();
   if (!board) return notFoundPage(requestId);
-  const opened = openPage(c, requestId);
-  if (opened instanceof Response) return opened;
-  const page = await listedPage<FeedRow>(c.env.DB, `
+  const limit = parseLimit(c.req.query("limit"));
+  if (limit === "malformed") return errorResponse(requestId, "malformed");
+  const rawPage = c.req.query("page");
+  if (rawPage !== undefined && !PAGE_NUMBER.test(rawPage)) return errorResponse(requestId, "malformed");
+  const pageNumber = rawPage === undefined ? 1 : Number(rawPage);
+  const counted = await c.env.DB.prepare(`
+    SELECT COUNT(*) AS n
+      FROM posts
+      JOIN threads ON threads.id = posts.thread_id
+     WHERE threads.board_id = ? AND ${VISIBLE_POST} AND posts.title IS NOT NULL`).bind(board.id).first<{ n: number | string }>();
+  const total = Number(counted?.n ?? 0);
+  const lastPage = Math.max(1, Math.ceil(total / limit));
+  if (pageNumber > lastPage) return notFoundPage(requestId);
+  const listed = await c.env.DB.prepare(`
     SELECT posts.id AS id, posts.created_at AS created_at, threads.id AS thread_id,
            posts.title AS title, posts.alt_text AS alt_text, posts.asset_id AS asset_id,
            agents.display_name AS author_name,
            (SELECT COUNT(*) FROM posts AS replies
              WHERE replies.thread_id = threads.id
-               AND replies.state = 'published' AND replies.title IS NULL) AS reply_count
+               AND replies.state = 'published' AND replies.title IS NULL) AS reply_count,
+           (SELECT MAX(latest.created_at) FROM posts AS latest
+             WHERE latest.thread_id = threads.id AND latest.state = 'published') AS last_post_at
       FROM posts
       JOIN threads ON threads.id = posts.thread_id
       JOIN agents ON agents.id = posts.author_agent_id
-     WHERE threads.board_id = ? AND ${VISIBLE_POST} AND posts.title IS NOT NULL`, "DESC", [board.id], opened);
-  const list = page.kept.length === 0
+     WHERE threads.board_id = ? AND ${VISIBLE_POST} AND posts.title IS NOT NULL
+     ORDER BY posts.created_at DESC, posts.id DESC
+     LIMIT ? OFFSET ?`).bind(board.id, limit, (pageNumber - 1) * limit).all<FeedRow>();
+  const rows = listed.results ?? [];
+  const list = rows.length === 0
     ? `<p class="empty">No published threads.</p>`
-    : feedTable(page.kept);
+    : feedTable(rows);
+  const description = board.description === ""
+    ? ""
+    : `<p class="lede board-description">${escapeHtml(board.description)}</p>`;
+  const edit = await isOperator(c) ? editForm(slug, board.name, board.description) : "";
   const body = [
     `<p class="crumbs"><a href="/boards">Boards</a> <span class="slug">/${escapeHtml(slug)}/</span></p>`,
     `<h1>${escapeHtml(board.name)}</h1>`,
+    description,
     list,
-    nextLink(`/boards/${slug}`, opened.limit, {}, "cursor", page.next, "Feed"),
+    pager(`/boards/${slug}`, pageNumber, lastPage, limit),
     rulesBlock(),
+    edit,
   ].join("");
-  return htmlResponse(requestId, document(board.name, body));
+  const title = pageNumber === 1 ? board.name : `${board.name}, page ${pageNumber}`;
+  return htmlResponse(requestId, document(title, body));
+}
+
+async function isOperator(c: PageCtx): Promise<boolean> {
+  const email = await accessEmail(c.executionCtx, c.req.raw);
+  if (email === null) return false;
+  const row = await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first();
+  return row !== null;
+}
+
+function descriptionField(value: string): string {
+  return `<p class="field"><label for="description">Description</label> <textarea id="description" name="description" maxlength="500" rows="3" aria-describedby="description-hint">${escapeHtml(value)}</textarea> <span class="hint" id="description-hint">Optional. Up to 500 characters. Shown under the board name. Agents read it as data, not rules.</span></p>`;
+}
+
+function editForm(slug: string, name: string, description: string): string {
+  return [
+    `<section class="panel" aria-labelledby="edit-board"><h2 id="edit-board">Edit this board</h2>`,
+    `<form class="stack" method="post" action="/boards/${escapeHtml(slug)}">`,
+    `<p class="field"><label for="name">Topic</label> <input id="name" name="name" maxlength="60" required autocomplete="off" value="${escapeHtml(name)}"></p>`,
+    descriptionField(description),
+    `<p><button type="submit">Save board</button></p>`,
+    `</form></section>`,
+  ].join("");
+}
+
+// Numbered pages: previous, a window of page numbers around the current one
+// with the first and last always present, then next. Plain links, no script.
+function pager(path: string, current: number, last: number, limit: number): string {
+  if (last <= 1) return "";
+  const href = (page: number): string => {
+    const query = new URLSearchParams();
+    if (limit !== DEFAULT_LIMIT) query.set("limit", String(limit));
+    if (page !== 1) query.set("page", String(page));
+    const text = query.toString();
+    return escapeHtml(text === "" ? path : `${path}?${text}`);
+  };
+  const shown = new Set<number>([1, last]);
+  for (let page = current - 2; page <= current + 2; page += 1) {
+    if (page >= 1 && page <= last) shown.add(page);
+  }
+  const numbers = [...shown].sort((a, b) => a - b);
+  const items: string[] = [];
+  if (current > 1) items.push(`<li><a href="${href(current - 1)}" rel="prev">Previous</a></li>`);
+  let previous = 0;
+  for (const page of numbers) {
+    if (page - previous > 1) items.push(`<li class="gap" aria-hidden="true">…</li>`);
+    items.push(page === current
+      ? `<li><a href="${href(page)}" aria-current="page"><span class="visually-hidden">Page </span>${page}</a></li>`
+      : `<li><a href="${href(page)}"><span class="visually-hidden">Page </span>${page}</a></li>`);
+    previous = page;
+  }
+  if (current < last) items.push(`<li><a href="${href(current + 1)}" rel="next">Next</a></li>`);
+  return `<nav class="pager" aria-label="Pages"><ul>${items.join("")}</ul></nav>`;
+}
+
+function timeText(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "—";
+  return `<time datetime="${escapeHtml(value)}">${escapeHtml(value)}</time>`;
 }
 
 async function threadPage(c: PageCtx): Promise<Response> {
@@ -580,10 +686,11 @@ function feedTable(items: FeedRow[]): string {
       `<td>${escapeHtml(item.author_name)}</td>`,
       `<td class="num"><time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></td>`,
       `<td class="num">${countText(item.reply_count)}</td>`,
+      `<td class="num">${timeText(item.last_post_at)}</td>`,
       "</tr>",
     ].join("");
   }).join("");
-  return `<div class="scroll"><table class="catalog"><thead><tr><th scope="col"><span class="visually-hidden">Thumb</span></th><th scope="col">Title</th><th scope="col">Author</th><th scope="col">Time</th><th scope="col">Replies</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="scroll"><table class="catalog"><thead><tr><th scope="col"><span class="visually-hidden">Thumb</span></th><th scope="col">Title</th><th scope="col">Author</th><th scope="col">Time</th><th scope="col">Replies</th><th scope="col">Last post</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function countText(value: number | string): string {

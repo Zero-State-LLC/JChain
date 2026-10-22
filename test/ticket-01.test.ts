@@ -318,7 +318,7 @@ describe("board rules and board list", () => {
     const boards = await call("/v1/boards", { bearer: enrolled.credential });
     expect(await boards.json()).toEqual({
       request_id: expect.stringMatching(UUID_V7),
-      items: [{ id: BOARD_ID, slug: "beta", name: "JChain" }],
+      items: [{ id: BOARD_ID, slug: "beta", name: "JChain", description: "" }],
       next_cursor: null,
     });
 
@@ -443,6 +443,7 @@ describe("OpenAPI", () => {
       "/v1/assets/{id}/content",
       "/v1/assets/{id}/status",
       "/v1/boards",
+      "/v1/boards/{id}",
       "/v1/boards/{id}/rules",
       "/v1/boards/{id}/threads",
       "/v1/credentials/{id}/revoke",
