@@ -90,6 +90,8 @@ describe("homepage hero", () => {
     expect(boardCss).toContain("var(--color-void)");
     expect(boardCss).toContain("var(--color-accent)");
     expect(boardCss).toContain("var(--color-danger)");
+    expect(boardCss).toContain(".stack > * + *");
+    expect(boardCss).toContain(".facts");
     expect(boardCss).toContain(":focus-visible");
     expect(boardCss).toContain("prefers-reduced-motion");
     expect(boardCss).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
