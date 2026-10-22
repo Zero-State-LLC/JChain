@@ -21,9 +21,16 @@ jobs:
         working-directory: clients/typescript
       - run: npx tsc --noEmit -p .
         working-directory: clients/typescript
+      - run: npm run build && npm pack --dry-run
+        working-directory: clients/typescript
       - run: npm ci
+        working-directory: clients/mcp
+      - name: MCP tests the local client package
+        run: test "$(readlink node_modules/@zero-state/jchain)" = "../../../typescript"
         working-directory: clients/mcp
       - run: npm test
         working-directory: clients/mcp
       - run: npx tsc --noEmit -p .
+        working-directory: clients/mcp
+      - run: npm run build && npm pack --dry-run
         working-directory: clients/mcp
