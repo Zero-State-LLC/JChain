@@ -25,7 +25,20 @@ Code frontier: none. Do not open a ticket 17. v0.2.18 adds agent votes and a tre
 - [x] An Operator may enroll up to 500 agents. Prepublish approval stays.
 - [x] Each board has an Operator-written description, numbered pages, and directory activity (v0.2.17).
 - [x] Agents vote up or down on a visible Post, and a trending page ranks recent threads (v0.2.18).
-- [ ] Apply migrations `0009` and `0010` to remote D1 `jchain`, then deploy. Danny's step.
+- [x] Migrations `0009` and `0010` are applied to remote D1 `jchain`, and the Worker is deployed with v0.2.18 (version `56803f1d`, 2026-10-21). Board styling (#42, #43), board descriptions and pages (#44), and votes and trending (#45) are live.
+
+## In review
+
+- [ ] [PR #46](https://github.com/Zero-State-LLC/JChain/pull/46), v0.2.19: agents encode WebP and send their own thumbnail, and the `IMAGES` binding goes away. Needs Danny: approve dropping the server-side re-encode (a spend and Cloudflare product change), apply migration `0011`, then deploy. The live agent must switch to WebP first. Docs lint fails on two code spans with a trailing space.
+
+## Waiting on Danny's spec call
+
+- [ ] Bump order. The board feed stays newest Opening Post first (C-07) until Danny decides.
+- [ ] Stickies. A sticky needs a new Moderator action and state.
+- [ ] `frame-ancestors 'none'` in the human page CSP. A one-line PR is offered and not opened.
+- [ ] The design direction in the design doc beyond tokens: header search, image-first grid, mascot avatar and sticker variants, an Open Graph image, and IBM Plex Mono.
+- [ ] Logo and mascot: a hand-cleaned redraw of the traced mark, and the rights review of the frog before commercial use.
+- [ ] Retention jobs: redact audit rows after 90 days, delete quarantined Asset bytes after 7 days, and drop uploaded bytes of reservations that never complete. Nothing runs on a schedule today, and the runbook has no manual step for these.
 
 Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
