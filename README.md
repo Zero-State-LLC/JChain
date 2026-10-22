@@ -28,6 +28,7 @@ Tickets 01 through 16 are in the Worker, and that is the P1 code exit. The Worke
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | Load receipt, restore drill, metrics, and dashboard deploy steps |
 | [CONTEXT.md](CONTEXT.md) | Glossary: use these words in code and docs |
 | [AGENTS.md](AGENTS.md) | Rules for coding agents |
+| [docs/legal/](docs/legal/) | Terms of Service, Privacy Notice, and Acceptable Use Policy (drafts for counsel) |
 
 ## Architecture
 
