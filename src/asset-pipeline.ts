@@ -1,13 +1,13 @@
 import { isUuidV7 } from "./ids";
 import type { Policy } from "./policy";
-import { chargeDerivativeBytes, chargeTransformations, logRejected } from "./quota";
+import { chargeDerivativeBytes, logRejected } from "./quota";
+import { type WebpCheck, readWebp } from "./webp";
 
 export const ASSET_QUEUE = "asset-upload";
 export const ASSET_DLQ = "asset-upload-dlq";
 
 const WEBP = "image/webp";
-const QUALITY = 80;
-const THUMB_EDGE = 320;
+export const THUMB_EDGE = 320;
 
 export type ReasonCode =
   | "unsupported_type"
@@ -24,7 +24,6 @@ export type SniffedType = "image/jpeg" | "image/png" | "image/webp";
 type AssetEnv = {
   DB: D1Database;
   MEDIA: R2Bucket;
-  IMAGES: ImagesBinding;
   QUOTA: Env["QUOTA"];
 };
 
@@ -33,10 +32,15 @@ type AssetRow = {
   agent_id: string;
   state: string;
   sha256: string;
+  thumb_sha256: string | null;
 };
 
 export function originalKey(assetId: string): string {
   return `originals/${assetId}`;
+}
+
+export function originalThumbKey(assetId: string): string {
+  return `originals/${assetId}/thumb`;
 }
 
 export function derivativeKey(assetId: string, variant: "display" | "thumb"): string {
@@ -64,20 +68,11 @@ export function isAnimated(bytes: Uint8Array, type: SniffedType): boolean {
   return false;
 }
 
-export function imageStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(bytes);
-      controller.close();
-    },
-  });
-}
-
 export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetId: string): Promise<void> {
   const asset = await loadAsset(env.DB, assetId);
   if (!asset) return;
   if (asset.state === "ready") {
-    await env.MEDIA.delete(originalKey(assetId));
+    await env.MEDIA.delete([originalKey(assetId), originalThumbKey(assetId)]);
     return;
   }
   if (asset.state !== "uploaded" && asset.state !== "validating") return;
@@ -86,31 +81,43 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
     "UPDATE assets SET state = 'validating', reason_code = NULL WHERE id = ? AND state IN ('uploaded', 'validating')",
   ).bind(assetId).run();
 
-  const stored = await env.MEDIA.get(originalKey(assetId));
-  if (!stored) {
+  const display = await stagedWebp(env.MEDIA, originalKey(assetId));
+  if (display === null) {
     await rejectAsset(env.DB, assetId, "processing_failed");
     return;
   }
-  const bytes = new Uint8Array(await stored.arrayBuffer());
-
-  let info: ImageInfoResponse;
-  try {
-    info = await env.IMAGES.info(imageStream(bytes));
-  } catch {
-    await rejectAsset(env.DB, assetId, "invalid_image");
+  if (!display.ok) {
+    await rejectAsset(env.DB, assetId, display.reason);
     return;
   }
-  const size = dimensions(info);
-  if (!size) {
-    await rejectAsset(env.DB, assetId, "invalid_image");
-    return;
-  }
-  if (size.width > policy.upload.max_edge_px || size.height > policy.upload.max_edge_px) {
+  if (display.width > policy.upload.max_edge_px || display.height > policy.upload.max_edge_px) {
     await rejectAsset(env.DB, assetId, "edge_too_long");
     return;
   }
-  if (size.width * size.height > policy.upload.max_megapixels * 1_000_000) {
+  if (display.width * display.height > policy.upload.max_megapixels * 1_000_000) {
     await rejectAsset(env.DB, assetId, "too_many_pixels");
+    return;
+  }
+
+  // The agent sends the thumbnail. A display image that already fits the thumbnail box is its own thumbnail.
+  let thumb: Uint8Array = display.bytes;
+  if (asset.thumb_sha256 !== null) {
+    const staged = await stagedWebp(env.MEDIA, originalThumbKey(assetId));
+    if (staged === null) {
+      await rejectAsset(env.DB, assetId, "processing_failed");
+      return;
+    }
+    if (!staged.ok) {
+      await rejectAsset(env.DB, assetId, staged.reason);
+      return;
+    }
+    if (!fitsThumbnail(display, staged)) {
+      await rejectAsset(env.DB, assetId, "invalid_image");
+      return;
+    }
+    thumb = staged.bytes;
+  } else if (Math.max(display.width, display.height) > THUMB_EDGE) {
+    await rejectAsset(env.DB, assetId, "invalid_image");
     return;
   }
 
@@ -118,29 +125,7 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
     "SELECT id FROM assets WHERE agent_id = ? AND sha256 = ? AND state = 'ready' AND id != ?",
   ).bind(asset.agent_id, asset.sha256, assetId).first<{ id: string }>();
   if (twin) {
-    await env.MEDIA.delete(originalKey(assetId));
-    await rejectAsset(env.DB, assetId, "processing_failed");
-    return;
-  }
-
-  const transformations = await chargeTransformations(env, policy);
-  if (!transformations.ok) {
-    logRejected(asset.agent_id, "global", "transformations");
-    await rejectAsset(env.DB, assetId, "processing_failed");
-    return;
-  }
-
-  let display: Uint8Array;
-  let thumb: Uint8Array;
-  let finished = 0;
-  try {
-    display = await encode(env.IMAGES, bytes, false);
-    finished = 1;
-    thumb = await encode(env.IMAGES, bytes, true);
-    finished = 2;
-  } catch {
-    await transformations.refund(2 - finished);
-    await env.MEDIA.delete([derivativeKey(assetId, "display"), derivativeKey(assetId, "thumb")]);
+    await env.MEDIA.delete([originalKey(assetId), originalThumbKey(assetId)]);
     await rejectAsset(env.DB, assetId, "processing_failed");
     return;
   }
@@ -148,14 +133,14 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
   const displayKey = derivativeKey(assetId, "display");
   const thumbKey = derivativeKey(assetId, "thumb");
   try {
-    await env.MEDIA.put(displayKey, display, { httpMetadata: { contentType: WEBP } });
+    await env.MEDIA.put(displayKey, display.bytes, { httpMetadata: { contentType: WEBP } });
     await env.MEDIA.put(thumbKey, thumb, { httpMetadata: { contentType: WEBP } });
   } catch {
     await env.MEDIA.delete([displayKey, thumbKey]);
     await rejectAsset(env.DB, assetId, "processing_failed");
     return;
   }
-  const bytesCharged = await chargeDerivativeBytes(env, policy, display.byteLength + thumb.byteLength);
+  const bytesCharged = await chargeDerivativeBytes(env, policy, display.bytes.byteLength + thumb.byteLength);
   if (!bytesCharged.ok) {
     logRejected(asset.agent_id, "global", "r2_bytes");
     await env.MEDIA.delete([displayKey, thumbKey]);
@@ -163,14 +148,14 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
     return;
   }
   const updated = await env.DB.prepare(
-    "UPDATE assets SET state = 'ready', reason_code = NULL, original_stored = 0 WHERE id = ? AND state = 'validating'",
+    "UPDATE assets SET state = 'ready', reason_code = NULL, original_stored = 0, thumb_stored = 0 WHERE id = ? AND state = 'validating'",
   ).bind(assetId).run();
   if (Number(updated.meta.changes ?? 0) !== 1) {
     await bytesCharged.refund();
     await env.MEDIA.delete([displayKey, thumbKey]);
     return;
   }
-  await env.MEDIA.delete(originalKey(assetId));
+  await env.MEDIA.delete([originalKey(assetId), originalThumbKey(assetId)]);
   console.log(JSON.stringify({ message: "asset ready", asset_id: assetId }));
 }
 
@@ -194,30 +179,22 @@ export function assetIdFromMessage(body: unknown): string | null {
   return assetId;
 }
 
-async function encode(images: ImagesBinding, bytes: Uint8Array, thumbnail: boolean): Promise<Uint8Array> {
-  let transformer = images.input(imageStream(bytes));
-  if (thumbnail) {
-    transformer = transformer.transform({ width: THUMB_EDGE, height: THUMB_EDGE, fit: "scale-down" });
-  }
-  const result = await transformer.output({ format: WEBP, quality: QUALITY, anim: false });
-  if (result.contentType() !== WEBP) throw new Error("image output was not webp");
-  const encoded = new Uint8Array(await result.response().arrayBuffer());
-  if (encoded.byteLength === 0 || indexOfAscii(encoded, "ANIM") >= 0) {
-    throw new Error("image output was not a static webp");
-  }
-  return encoded;
+async function stagedWebp(media: R2Bucket, key: string): Promise<WebpCheck | null> {
+  const stored = await media.get(key);
+  if (!stored) return null;
+  return readWebp(new Uint8Array(await stored.arrayBuffer()));
 }
 
-function dimensions(info: ImageInfoResponse): { width: number; height: number } | null {
-  if (!("width" in info) || !("height" in info)) return null;
-  if (!Number.isInteger(info.width) || !Number.isInteger(info.height)) return null;
-  if (info.width < 1 || info.height < 1) return null;
-  return { width: info.width, height: info.height };
+// A thumbnail fits the box and keeps the display image's shape, within one pixel of rounding.
+function fitsThumbnail(display: { width: number; height: number }, thumb: { width: number; height: number }): boolean {
+  if (Math.max(thumb.width, thumb.height) > THUMB_EDGE) return false;
+  const scale = Math.min(1, THUMB_EDGE / Math.max(display.width, display.height));
+  return Math.abs(thumb.width - display.width * scale) <= 1 && Math.abs(thumb.height - display.height * scale) <= 1;
 }
 
 async function loadAsset(db: D1Database, assetId: string): Promise<AssetRow | null> {
   return db.prepare(
-    "SELECT id, agent_id, state, sha256 FROM assets WHERE id = ?",
+    "SELECT id, agent_id, state, sha256, thumb_sha256 FROM assets WHERE id = ?",
   ).bind(assetId).first<AssetRow>();
 }
 

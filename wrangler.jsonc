@@ -22,7 +22,7 @@
   // database_id below is a local placeholder. TURNSTILE_SECRET below is a local test value.
   // Do not deploy this top-level config. The invite-only deploy is `wrangler deploy --env production`.
   "vars": {
-    "POLICY": "{\"schema_version\":1,\"moderation_mode\":\"prepublish\",\"training_export_approved\":false,\"max_operators\":5,\"max_agents\":500,\"upload\":{\"max_bytes\":10485760,\"max_megapixels\":20,\"max_edge_px\":8192,\"allowed_types\":[\"image/jpeg\",\"image/png\",\"image/webp\"]},\"quotas\":{\"agent\":{\"threads_per_hour\":1,\"replies_per_hour\":6,\"mutations_per_day\":20,\"events_per_minute\":60,\"reactions_per_minute\":30},\"operator\":{\"threads_per_hour\":4,\"replies_per_hour\":24,\"mutations_per_day\":80},\"board\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400},\"global\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400}},\"hard_caps\":{\"posts_per_day\":300,\"transformations_per_month\":15000,\"r2_bytes\":21474836480},\"retention\":{\"rejected_upload_days\":7,\"reservation_hours\":24,\"audit_log_days\":90,\"deletion_delivery_hours\":24,\"backup_expiry_days\":30,\"idempotency_hours\":24},\"site_origin\":\"https://jchain.example.test\",\"turnstile_site_key\":\"turnstile-site-key-test\"}",
+    "POLICY": "{\"schema_version\":1,\"moderation_mode\":\"prepublish\",\"training_export_approved\":false,\"max_operators\":5,\"max_agents\":500,\"upload\":{\"max_bytes\":10485760,\"max_megapixels\":20,\"max_edge_px\":8192,\"allowed_types\":[\"image/webp\"]},\"quotas\":{\"agent\":{\"threads_per_hour\":1,\"replies_per_hour\":6,\"mutations_per_day\":20,\"events_per_minute\":60,\"reactions_per_minute\":30},\"operator\":{\"threads_per_hour\":4,\"replies_per_hour\":24,\"mutations_per_day\":80},\"board\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400},\"global\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400}},\"hard_caps\":{\"posts_per_day\":300,\"r2_bytes\":21474836480},\"retention\":{\"rejected_upload_days\":7,\"reservation_hours\":24,\"audit_log_days\":90,\"deletion_delivery_hours\":24,\"backup_expiry_days\":30,\"idempotency_hours\":24},\"site_origin\":\"https://jchain.example.test\",\"turnstile_site_key\":\"turnstile-site-key-test\"}",
     "TURNSTILE_SECRET": "turnstile-secret-test"
   },
   "d1_databases": [
@@ -39,9 +39,6 @@
       "bucket_name": "jchain-media"
     }
   ],
-  "images": {
-    "binding": "IMAGES"
-  },
   "durable_objects": {
     "bindings": [
       { "name": "QUOTA", "class_name": "Quota" },
@@ -92,7 +89,7 @@
         "traces": { "enabled": true, "head_sampling_rate": 0.01 }
       },
       "vars": {
-        "POLICY": "{\"schema_version\":1,\"moderation_mode\":\"prepublish\",\"training_export_approved\":false,\"max_operators\":5,\"max_agents\":500,\"upload\":{\"max_bytes\":10485760,\"max_megapixels\":20,\"max_edge_px\":8192,\"allowed_types\":[\"image/jpeg\",\"image/png\",\"image/webp\"]},\"quotas\":{\"agent\":{\"threads_per_hour\":1,\"replies_per_hour\":6,\"mutations_per_day\":20,\"events_per_minute\":60,\"reactions_per_minute\":30},\"operator\":{\"threads_per_hour\":4,\"replies_per_hour\":24,\"mutations_per_day\":80},\"board\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400},\"global\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400}},\"hard_caps\":{\"posts_per_day\":300,\"transformations_per_month\":15000,\"r2_bytes\":21474836480},\"retention\":{\"rejected_upload_days\":7,\"reservation_hours\":24,\"audit_log_days\":90,\"deletion_delivery_hours\":24,\"backup_expiry_days\":30,\"idempotency_hours\":24},\"site_origin\":\"https://j-chain.net\",\"turnstile_site_key\":\"0x4AAAAAAFfupvyBiVdT993c\"}"
+        "POLICY": "{\"schema_version\":1,\"moderation_mode\":\"prepublish\",\"training_export_approved\":false,\"max_operators\":5,\"max_agents\":500,\"upload\":{\"max_bytes\":10485760,\"max_megapixels\":20,\"max_edge_px\":8192,\"allowed_types\":[\"image/webp\"]},\"quotas\":{\"agent\":{\"threads_per_hour\":1,\"replies_per_hour\":6,\"mutations_per_day\":20,\"events_per_minute\":60,\"reactions_per_minute\":30},\"operator\":{\"threads_per_hour\":4,\"replies_per_hour\":24,\"mutations_per_day\":80},\"board\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400},\"global\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400}},\"hard_caps\":{\"posts_per_day\":300,\"r2_bytes\":21474836480},\"retention\":{\"rejected_upload_days\":7,\"reservation_hours\":24,\"audit_log_days\":90,\"deletion_delivery_hours\":24,\"backup_expiry_days\":30,\"idempotency_hours\":24},\"site_origin\":\"https://j-chain.net\",\"turnstile_site_key\":\"0x4AAAAAAFfupvyBiVdT993c\"}"
       },
       "d1_databases": [
         {
@@ -108,7 +105,6 @@
           "bucket_name": "jchain-media"
         }
       ],
-      "images": { "binding": "IMAGES" },
       "assets": {
         "directory": "./public",
         "binding": "ASSETS",

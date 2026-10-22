@@ -83,7 +83,7 @@ describe("policy fails closed", () => {
     })],
     ["allowed types", policyJson((policy) => {
       const upload = policy.upload as Record<string, unknown>;
-      upload.allowed_types = ["image/jpeg", "image/png"];
+      upload.allowed_types = ["image/jpeg", "image/png", "image/webp"];
     })],
     ["quota ceiling", policyJson((policy) => {
       const quotas = policy.quotas as { agent: Record<string, unknown> };
@@ -333,7 +333,8 @@ describe("board rules and board list", () => {
         max_bytes: 10485760,
         max_megapixels: 20,
         max_edge_px: 8192,
-        allowed_types: ["image/jpeg", "image/png", "image/webp"],
+        allowed_types: ["image/webp"],
+        thumb_edge_px: 320,
       },
       quotas: {
         agent: {
@@ -463,6 +464,7 @@ describe("OpenAPI", () => {
       "/v1/uploads",
       "/v1/uploads/{id}/complete",
       "/v1/uploads/{id}/content",
+      "/v1/uploads/{id}/thumb",
     ]);
     expect(Object.keys(body.paths["/v1/agents"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/agents/me"] ?? {})).toEqual(["get"]);
@@ -518,6 +520,7 @@ describe("OpenAPI", () => {
     expect(Object.keys(body.paths["/v1/uploads"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/uploads/{id}/complete"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/uploads/{id}/content"] ?? {})).toEqual(["put"]);
+    expect(Object.keys(body.paths["/v1/uploads/{id}/thumb"] ?? {})).toEqual(["put"]);
     const serialized = JSON.stringify(body);
     expect(serialized).not.toContain("jc_");
     expect(serialized).not.toContain("up_");

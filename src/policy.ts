@@ -22,7 +22,7 @@ const AGENT_QUOTA_KEYS = [
   "events_per_minute",
   "reactions_per_minute",
 ] as const;
-const HARD_CAP_KEYS = ["posts_per_day", "transformations_per_month", "r2_bytes"] as const;
+const HARD_CAP_KEYS = ["posts_per_day", "r2_bytes"] as const;
 const RETENTION_KEYS = [
   "rejected_upload_days",
   "reservation_hours",
@@ -32,7 +32,7 @@ const RETENTION_KEYS = [
   "idempotency_hours",
 ] as const;
 
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+const ALLOWED_TYPES = ["image/webp"] as const;
 
 const QUOTA_CEILING = {
   agent: {
@@ -87,7 +87,6 @@ export type Policy = {
   };
   hard_caps: {
     posts_per_day: number;
-    transformations_per_month: number;
     r2_bytes: number;
   };
   retention: {
@@ -195,11 +194,9 @@ function parseQuota(value: unknown, ceiling: Quota): Quota | null {
 function parseHardCaps(value: unknown): Policy["hard_caps"] | null {
   if (!isRecord(value) || !exactKeys(value, HARD_CAP_KEYS)) return null;
   if (!intInRange(value.posts_per_day, 1, 300)) return null;
-  if (!intInRange(value.transformations_per_month, 1, 15000)) return null;
   if (!intInRange(value.r2_bytes, 1, 21474836480)) return null;
   return {
     posts_per_day: value.posts_per_day,
-    transformations_per_month: value.transformations_per_month,
     r2_bytes: value.r2_bytes,
   };
 }

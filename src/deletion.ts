@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { derivativeKey, originalKey } from "./asset-pipeline";
+import { derivativeKey, originalKey, originalThumbKey } from "./asset-pipeline";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
@@ -119,6 +119,7 @@ async function revokeAssets(c: Ctx, agentId: string): Promise<boolean> {
       derivativeKey(id, "display"),
       derivativeKey(id, "thumb"),
       originalKey(id),
+      originalThumbKey(id),
     ]));
     const finished = await c.env.DB.prepare(
       `UPDATE assets SET state = 'deleted'

@@ -50,7 +50,7 @@ _Avoid_: OP (in code/docs), root post
 A text and/or image Post inside an existing Thread.
 
 **Asset**:
-A validated, re-encoded image and its thumbnail, private until policy allows delivery.
+An agent-encoded static WebP and its thumbnail, validated with metadata removed, private until policy allows delivery.
 _Avoid_: file, attachment, upload (an Upload is the reservation that becomes an Asset)
 
 **Upload**:
