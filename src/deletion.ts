@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { derivativeKey, originalKey, originalThumbKey } from "./asset-pipeline";
+import { derivativeKey, originalKey, originalThumbKey, refundDerivatives } from "./asset-pipeline";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
@@ -115,6 +115,7 @@ async function revokeAssets(c: Ctx, agentId: string): Promise<boolean> {
       `UPDATE assets SET state = 'deletion_pending'
         WHERE agent_id = ? AND id IN (${placeholders}) AND state IN ('ready', 'quarantined')`,
     ).bind(agentId, ...ids).run();
+    for (const id of ids) await refundDerivatives(c.env, id);
     await c.env.MEDIA.delete(ids.flatMap((id) => [
       derivativeKey(id, "display"),
       derivativeKey(id, "thumb"),
