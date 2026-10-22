@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { THUMB_EDGE } from "./asset-pipeline";
 import { newCredentialSecret, sha256Hex } from "./credential";
 import { characterLength, errorResponse, isValidRunId, jsonResponse } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
@@ -153,7 +154,7 @@ app.get("/v1/boards/:id/rules", async (c) => {
     board_id: board.id,
     slug: board.slug,
     moderation: policy.moderation_mode,
-    upload: policy.upload,
+    upload: { ...policy.upload, thumb_edge_px: THUMB_EDGE },
     quotas: policy.quotas,
     allowed_licenses: [...ALLOWED_LICENSES],
     prohibited: [...PROHIBITED],

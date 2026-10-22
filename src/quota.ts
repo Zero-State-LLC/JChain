@@ -203,41 +203,13 @@ export async function chargeAgentWindow(
 export async function processingHeadroom(
   env: QuotaBinding,
   policy: Policy,
-): Promise<{ ok: true } | { ok: false; counter: "transformations" | "r2_bytes"; retryAfter: number }> {
-  const month = monthWindow();
+): Promise<{ ok: true } | { ok: false; counter: "r2_bytes"; retryAfter: number }> {
   const result = await env.QUOTA.getByName("global").apply([
-    zero(
-      `transformations:${month.key}`,
-      policy.hard_caps.transformations_per_month,
-      month.resetAt,
-      "transformations",
-    ),
     zero("r2_bytes", policy.hard_caps.r2_bytes, null, "r2_bytes"),
   ]);
-  if (!result.ok) return { ok: false, counter: "transformations", retryAfter: result.retry_after };
-  if ((result.remaining.transformations ?? 0) < 2) {
-    return { ok: false, counter: "transformations", retryAfter: secondsUntil(month.resetAt) };
-  }
+  if (!result.ok) return { ok: false, counter: "r2_bytes", retryAfter: result.retry_after };
   if ((result.remaining.r2_bytes ?? 0) <= 0) return { ok: false, counter: "r2_bytes", retryAfter: 1 };
   return { ok: true };
-}
-
-export async function chargeTransformations(
-  env: QuotaBinding,
-  policy: Policy,
-): Promise<{ ok: true; refund: (amount: number) => Promise<void> } | { ok: false; retryAfter: number }> {
-  const month = monthWindow();
-  const key = `transformations:${month.key}`;
-  const quota = env.QUOTA.getByName("global");
-  const result = await quota.apply([{
-    key,
-    amount: 2,
-    limit: policy.hard_caps.transformations_per_month,
-    reset_at: month.resetAt,
-    counter: "transformations",
-  }]);
-  if (!result.ok) return { ok: false, retryAfter: result.retry_after };
-  return { ok: true, refund: (amount: number) => quota.refund([{ key, amount }]) };
 }
 
 export async function chargeDerivativeBytes(
@@ -448,12 +420,6 @@ function dayWindow(now = new Date()): Window {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
   return { key: utcSeconds(start).slice(0, 10), resetAt: utcSeconds(end) };
-}
-
-function monthWindow(now = new Date()): Window {
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-  return { key: utcSeconds(start).slice(0, 7), resetAt: utcSeconds(end) };
 }
 
 function secondsUntil(resetAt: string | null, now = Date.now()): number {
