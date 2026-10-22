@@ -3,6 +3,7 @@ const AUDIENCE = "e741f2323fa334b133b485c4c64d23965bb35b7db655f398790181db5804ff
 const CERTS_URL = `${ISSUER}/cdn-cgi/access/certs`;
 const SKEW_MS = 60_000;
 const CACHE_MS = 60 * 60 * 1000;
+const REFRESH_GAP_MS = 60_000;
 const MAX_TOKEN_LENGTH = 8192;
 
 export const ACCESS_ISSUER = ISSUER;
@@ -19,9 +20,15 @@ type JwtCheck = {
 
 let testKeys: AccessKey[] | undefined;
 let cached: { expiresAt: number; keys: AccessKey[] } | undefined;
+let lastForcedRefresh = Number.NEGATIVE_INFINITY;
 
 export function useAccessKeysForTests(keys: AccessKey[] | undefined): void {
   testKeys = keys;
+}
+
+export function resetAccessKeyCacheForTests(): void {
+  cached = undefined;
+  lastForcedRefresh = Number.NEGATIVE_INFINITY;
 }
 
 export function accessJwtFromRequest(request: Request): string | null {
@@ -32,9 +39,14 @@ export function accessJwtFromRequest(request: Request): string | null {
   return null;
 }
 
-export async function loadAccessKeys(now = Date.now()): Promise<AccessKey[] | null> {
+export async function loadAccessKeys(now = Date.now(), force = false): Promise<AccessKey[] | null> {
   if (testKeys !== undefined) return testKeys;
-  if (cached !== undefined && cached.expiresAt > now) return cached.keys;
+  if (force) {
+    if (cached !== undefined && now - lastForcedRefresh < REFRESH_GAP_MS) return cached.keys;
+    lastForcedRefresh = now;
+  } else if (cached !== undefined && cached.expiresAt > now) {
+    return cached.keys;
+  }
   try {
     const response = await fetch(CERTS_URL);
     if (!response.ok) return cached?.keys ?? null;
@@ -45,6 +57,19 @@ export async function loadAccessKeys(now = Date.now()): Promise<AccessKey[] | nu
   } catch {
     return cached?.keys ?? null;
   }
+}
+
+export async function emailForAccessToken(token: string, now = Date.now()): Promise<string | null> {
+  const keys = await loadAccessKeys(now);
+  if (keys === null || keys.length === 0) return null;
+  const check: JwtCheck = { issuer: ACCESS_ISSUER, audience: ACCESS_AUDIENCE, now, keys };
+  const email = await emailFromAccessJwt(token, check);
+  if (email !== null) return email;
+  const kid = jwtKid(token);
+  if (kid === null || keys.some((key) => key.kid === kid)) return null;
+  const refreshed = await loadAccessKeys(now, true);
+  if (refreshed === null) return null;
+  return emailFromAccessJwt(token, { ...check, keys: refreshed });
 }
 
 export async function emailFromAccessJwt(token: string, check: JwtCheck): Promise<string | null> {
@@ -81,6 +106,13 @@ async function signatureMatches(encodedHeader: string, encodedPayload: string, e
   } catch {
     return false;
   }
+}
+
+function jwtKid(token: string): string | null {
+  if (!isCompactJwt(token)) return null;
+  const header = decodeJson(token.split(".")[0] ?? "");
+  if (header === null || header.alg !== "RS256" || typeof header.kid !== "string") return null;
+  return header.kid;
 }
 
 function jwtFromCookie(header: string | null): string | null {

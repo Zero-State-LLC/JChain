@@ -1,15 +1,18 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACCESS_AUDIENCE,
   ACCESS_ISSUER,
   type AccessKey,
   accessJwtFromRequest,
+  emailForAccessToken,
   emailFromAccessJwt,
+  resetAccessKeyCacheForTests,
   useAccessKeysForTests,
 } from "../src/access-jwt";
 import { MODERATOR, OPERATOR, call, resetAndSeed } from "./harness";
 
 const encoder = new TextEncoder();
+const CERTS_URL = `${ACCESS_ISSUER}/cdn-cgi/access/certs`;
 let privateKey: CryptoKey;
 let publicKey: AccessKey;
 
@@ -30,6 +33,8 @@ beforeAll(async () => {
 
 afterEach(() => {
   useAccessKeysForTests(undefined);
+  resetAccessKeyCacheForTests();
+  vi.restoreAllMocks();
 });
 
 describe("Access JWT", () => {
@@ -134,15 +139,96 @@ describe("Access JWT on a human route", () => {
   });
 });
 
-async function signJwt(payload: Record<string, unknown>, header: Record<string, unknown> = { alg: "RS256", kid: "test", typ: "JWT" }): Promise<string> {
+describe("Access key refresh", () => {
+  it("loads a new kid once and then waits before another refresh", async () => {
+    const rotated = await generateKey();
+    const now = Date.now();
+    const payload = {
+      iss: ACCESS_ISSUER,
+      aud: [ACCESS_AUDIENCE],
+      email: MODERATOR,
+      exp: Math.floor(now / 1000) + 600,
+    };
+    const token = await signJwt(payload, { alg: "RS256", kid: "rotated", typ: "JWT" }, rotated.privateKey);
+    const calls = mockCerts([jwkSet(publicKey), jwkSet(rotated.publicKey)]);
+    expect(await emailForAccessToken(token, now)).toBe(MODERATOR);
+    expect(calls.count).toBe(2);
+
+    const unknown = await signJwt(payload, { alg: "RS256", kid: "other", typ: "JWT" }, rotated.privateKey);
+    expect(await emailForAccessToken(unknown, now)).toBeNull();
+    expect(calls.count).toBe(2);
+    expect(await emailForAccessToken(unknown, now + 60_000)).toBeNull();
+    expect(calls.count).toBe(3);
+  });
+
+  it("does not refresh when the cached kid is present", async () => {
+    const now = Date.now();
+    const token = await signJwt({
+      iss: ACCESS_ISSUER,
+      aud: [ACCESS_AUDIENCE],
+      email: MODERATOR,
+      exp: Math.floor(now / 1000) + 600,
+    });
+    const calls = mockCerts([jwkSet(publicKey)]);
+    expect(await emailForAccessToken(token, now)).toBe(MODERATOR);
+    expect(await emailForAccessToken(token, now)).toBe(MODERATOR);
+    expect(calls.count).toBe(1);
+
+    const wrongKey = await generateKey();
+    const forged = await signJwt({
+      iss: ACCESS_ISSUER,
+      aud: [ACCESS_AUDIENCE],
+      email: MODERATOR,
+      exp: Math.floor(now / 1000) + 600,
+    }, { alg: "RS256", kid: "test", typ: "JWT" }, wrongKey.privateKey);
+    expect(await emailForAccessToken(forged, now)).toBeNull();
+    expect(calls.count).toBe(1);
+  });
+});
+
+async function signJwt(
+  payload: Record<string, unknown>,
+  header: Record<string, unknown> = { alg: "RS256", kid: "test", typ: "JWT" },
+  key: CryptoKey = privateKey,
+): Promise<string> {
   const encodedHeader = base64Url(encoder.encode(JSON.stringify(header)));
   const encodedPayload = base64Url(encoder.encode(JSON.stringify(payload)));
   const signature = new Uint8Array(await crypto.subtle.sign(
     "RSASSA-PKCS1-v1_5",
-    privateKey,
+    key,
     encoder.encode(`${encodedHeader}.${encodedPayload}`),
   ));
   return `${encodedHeader}.${encodedPayload}.${base64Url(signature)}`;
+}
+
+async function generateKey(): Promise<{ privateKey: CryptoKey; publicKey: AccessKey }> {
+  const generated = await crypto.subtle.generateKey(
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true,
+    ["sign", "verify"],
+  );
+  if (!("privateKey" in generated)) throw new Error("expected a key pair");
+  const exported = await crypto.subtle.exportKey("jwk", generated.publicKey);
+  if (!("n" in exported) || typeof exported.n !== "string" || typeof exported.e !== "string") {
+    throw new Error("expected a public JWK");
+  }
+  return { privateKey: generated.privateKey, publicKey: { kid: "rotated", n: exported.n, e: exported.e } };
+}
+
+function jwkSet(key: AccessKey): { keys: Array<AccessKey & { kty: "RSA"; alg: "RS256" }> } {
+  return { keys: [{ kty: "RSA", alg: "RS256", kid: key.kid, n: key.n, e: key.e }] };
+}
+
+function mockCerts(sets: Array<{ keys: unknown[] }>): { count: number } {
+  const calls = { count: 0 };
+  vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (url !== CERTS_URL) return Promise.reject(new Error(`unexpected fetch ${url}`));
+    const body = sets[Math.min(calls.count, sets.length - 1)];
+    calls.count += 1;
+    return Promise.resolve(Response.json(body));
+  });
+  return calls;
 }
 
 function base64Url(bytes: Uint8Array): string {

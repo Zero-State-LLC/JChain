@@ -1,4 +1,4 @@
-import { ACCESS_AUDIENCE, ACCESS_ISSUER, accessJwtFromRequest, emailFromAccessJwt, loadAccessKeys } from "./access-jwt";
+import { accessJwtFromRequest, emailForAccessToken } from "./access-jwt";
 import { sha256Hex } from "./credential";
 
 export type AuthFailure = "access_required" | "credential_invalid" | "not_enrolled" | "forbidden";
@@ -107,14 +107,7 @@ async function humanEmail(ctx: object, request: Request): Promise<string | null>
   if (bound !== null) return bound;
   const token = accessJwtFromRequest(request);
   if (token === null) return null;
-  const keys = await loadAccessKeys();
-  if (keys === null || keys.length === 0) return null;
-  return emailFromAccessJwt(token, {
-    issuer: ACCESS_ISSUER,
-    audience: ACCESS_AUDIENCE,
-    now: Date.now(),
-    keys,
-  });
+  return emailForAccessToken(token);
 }
 
 async function boundEmail(ctx: object): Promise<string | null> {
