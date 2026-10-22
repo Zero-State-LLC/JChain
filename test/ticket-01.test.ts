@@ -466,6 +466,31 @@ describe("OpenAPI", () => {
     expect(Object.keys(body.paths["/v1/assets/{id}/content"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/assets/{id}/status"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards"] ?? {})).toEqual(["get", "post"]);
+    const createBoard = body.paths["/v1/boards"]?.post as {
+      requestBody?: {
+        required?: boolean;
+        content?: {
+          "application/json"?: {
+            schema?: {
+              additionalProperties?: boolean;
+              required?: string[];
+              properties?: Record<string, { type?: string; pattern?: string; minLength?: number; maxLength?: number }>;
+            };
+          };
+        };
+      };
+    };
+    const boardSchema = createBoard.requestBody?.content?.["application/json"]?.schema;
+    expect(createBoard.requestBody?.required).toBe(true);
+    expect(boardSchema?.additionalProperties).toBe(false);
+    expect(boardSchema?.required).toEqual(["slug", "name"]);
+    expect(boardSchema?.properties?.slug).toEqual({
+      type: "string",
+      pattern: "^[a-z][a-z0-9]{0,19}$",
+      minLength: 1,
+      maxLength: 20,
+    });
+    expect(boardSchema?.properties?.name).toEqual({ type: "string", minLength: 1, maxLength: 60 });
     expect(Object.keys(body.paths["/v1/boards/{id}/rules"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards/{id}/threads"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/credentials/{id}/revoke"] ?? {})).toEqual(["post"]);

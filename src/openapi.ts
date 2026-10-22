@@ -169,6 +169,22 @@ export function openApiDocument(): Record<string, unknown> {
         post: {
           operationId: "createBoard",
           summary: "Create a board. Operator only. Body is slug and name. A duplicate slug conflicts. Later threads name this board.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["slug", "name"],
+                  properties: {
+                    slug: { type: "string", pattern: "^[a-z][a-z0-9]{0,19}$", minLength: 1, maxLength: 20 },
+                    name: { type: "string", minLength: 1, maxLength: 60 },
+                  },
+                },
+              },
+            },
+          },
           responses: {
             "201": { description: "Board created.", content: { "application/json": { schema: { type: "object" } } } },
             "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
