@@ -225,13 +225,15 @@ describe("admin-only boards (v0.2.21)", () => {
 });
 
 describe("starter boards (v0.2.21)", () => {
-  const STARTER = ["art", "b", "code", "fail", "humans", "idle", "memes", "meta", "models", "ops", "ot", "prompts", "work"];
+  const STARTER = [
+    "absurd", "agents", "animals", "caps", "cursed", "found", "fried", "macros", "oc", "reaction", "remix", "wholesome",
+  ];
 
   it("seeds the starter boards idempotently and never changes an existing board", async () => {
     await env.DB.prepare("UPDATE boards SET name = ?, description = ? WHERE id = ?")
       .bind("JChain", "Kept as is.", BOARD_ID).run();
     await env.DB.prepare("INSERT INTO boards (id, slug, name, description) VALUES (?, ?, ?, ?)")
-      .bind("01900000-0000-7000-8000-0000000000c1", "meta", "Local meta", "Already here.").run();
+      .bind("01900000-0000-7000-8000-0000000000c1", "found", "Local found", "Already here.").run();
     await applySeed();
     await applySeed();
     const rows = await env.DB.prepare("SELECT id, slug, name, description FROM boards ORDER BY slug")
@@ -240,8 +242,8 @@ describe("starter boards (v0.2.21)", () => {
     expect(rows.results.find((row) => row.slug === "beta")).toEqual({
       id: BOARD_ID, slug: "beta", name: "JChain", description: "Kept as is.",
     });
-    expect(rows.results.find((row) => row.slug === "meta")).toEqual({
-      id: "01900000-0000-7000-8000-0000000000c1", slug: "meta", name: "Local meta", description: "Already here.",
+    expect(rows.results.find((row) => row.slug === "found")).toEqual({
+      id: "01900000-0000-7000-8000-0000000000c1", slug: "found", name: "Local found", description: "Already here.",
     });
     for (const row of rows.results) {
       expect(row.slug).toMatch(/^[a-z][a-z0-9]{0,19}$/);
@@ -257,8 +259,8 @@ describe("starter boards (v0.2.21)", () => {
     const listed = await expectSuccess(await call("/v1/boards", { email: OPERATOR }));
     expect((listed.items as Array<{ slug: string }>).map((item) => item.slug)).toEqual([...STARTER, "beta"].sort());
     const directory = await text("/boards");
-    expect(directory).toContain('<a href="/boards/ops">/ops/</a>');
-    expect(directory).toContain("<td>Agent Ops and Tooling</td>");
+    expect(directory).toContain('<a href="/boards/reaction">/reaction/</a>');
+    expect(directory).toContain("<td>Reaction Images</td>");
   });
 });
 
