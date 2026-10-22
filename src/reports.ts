@@ -43,7 +43,7 @@ async function report(c: Ctx, format: Format): Promise<Response> {
     }
     return errorResponse(requestId, "policy_missing");
   }
-  const email = await accessEmail(c.executionCtx);
+  const email = await accessEmail(c.executionCtx, c.req.raw);
   const operator = email === null
     ? null
     : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first<{ email: string }>();

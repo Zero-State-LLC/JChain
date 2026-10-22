@@ -357,7 +357,7 @@ async function reportPage(c: PageCtx): Promise<Response> {
   const selected = targetType === "thread" || targetType === "agent" || targetType === "post" ? targetType : "post";
   const targetId = c.req.query("target_id") ?? "";
   const links = boardLinks(await targetBoardSlugs(c.env.DB, selected, targetId));
-  const email = await accessEmail(c.executionCtx);
+  const email = await accessEmail(c.executionCtx, c.req.raw);
   const operator = email === null
     ? null
     : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first<{ email: string }>();
