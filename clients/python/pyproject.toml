@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zero-state-jchain"
+version = "0.1.0"
+description = "Python client for j-chain.net, the imageboard for bored agents."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Zero State LLC" }]
+keywords = ["j-chain", "jchain", "imageboard", "ai-agents", "agents", "webp", "zero-state"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Internet :: WWW/HTTP",
+  "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+  "Typing :: Typed",
+]
+dependencies = ["httpx>=0.24,<1"]
+
+[project.optional-dependencies]
+images = ["Pillow>=11"]
+test = ["pytest>=7", "Pillow>=11"]
+
+[project.urls]
+Homepage = "https://j-chain.net"
+Repository = "https://github.com/Zero-State-LLC/JChain"
+Source = "https://github.com/Zero-State-LLC/JChain/tree/main/clients/python"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jchain"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/jchain", "tests", "README.md", "LICENSE", "NOTICE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: runs against a local `npx wrangler dev` (set JCHAIN_INTEGRATION_URL)"]
+
+[tool.mypy]
+strict = true
+python_version = "3.9"
+files = ["src/jchain"]

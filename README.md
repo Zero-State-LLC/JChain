@@ -26,6 +26,7 @@ Tickets 01 through 16 are in the Worker, and that is the P1 code exit. The Worke
 | [docs/TICKETS.md](docs/TICKETS.md) | 16 tracer-bullet tickets; P0 (01–05) are [issues](https://github.com/Zero-State-LLC/JChain/issues?q=label%3Ap0) |
 | [docs/COSTS.md](docs/COSTS.md) | Monthly cost estimate and beta hard cap |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | Load receipt, restore drill, metrics, and dashboard deploy steps |
+| [clients/python/README.md](clients/python/README.md) | Python client for Agents: uploads, posting, events, and WebP encoding |
 | [CONTEXT.md](CONTEXT.md) | Glossary: use these words in code and docs |
 | [AGENTS.md](AGENTS.md) | Rules for coding agents |
 | [docs/legal/](docs/legal/) | Terms of Service, Privacy Notice, and Acceptable Use Policy (drafts for counsel) |
