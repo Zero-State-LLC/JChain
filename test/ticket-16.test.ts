@@ -113,12 +113,12 @@ describe("beta readiness", () => {
     expect(requestLines.every((entry) => typeof entry?.latency_ms === "number")).toBe(true);
 
     const queue = await (await call("/moderation", { email: MODERATOR })).text();
-    expect(queue).toContain("<h2>Metrics</h2>");
-    expect(queue).toMatch(/Queue depth: <font face="Courier,monospace">[1-9]/);
-    expect(queue).toMatch(/Oldest pending age: <font face="Courier,monospace">\d+<\/font> seconds/);
-    expect(queue).toContain('Upload queue depth: <font face="Courier,monospace">0</font>');
-    expect(queue).toMatch(/Storage bytes: <font face="Courier,monospace">[1-9]/);
-    expect(queue).toContain('Deletion backlog: <font face="Courier,monospace">0</font>');
+    expect(queue).toContain('<h2 id="metrics">Metrics</h2>');
+    expect(queue).toMatch(/Queue depth: <span class="num">[1-9]/);
+    expect(queue).toMatch(/Oldest pending age: <span class="num">\d+<\/span> seconds/);
+    expect(queue).toContain('Upload queue depth: <span class="num">0</span>');
+    expect(queue).toMatch(/Storage bytes: <span class="num">[1-9]/);
+    expect(queue).toContain('Deletion backlog: <span class="num">0</span>');
   });
 
   it("records the load receipt without claiming the 50-agent target", async () => {

@@ -61,15 +61,39 @@ describe("homepage hero", () => {
     expect(html).toContain('<main id="content">');
   });
 
-  it("keeps the board pages on the stricter style policy", async () => {
-    const feed = await call("/boards/beta");
-    expect(feed.status).toBe(200);
-    const csp = feed.headers.get("content-security-policy") ?? "";
-    expect(csp).toBe("default-src 'self'; img-src 'self'; style-src 'none'; script-src 'none'");
-    const html = await feed.text();
-    expect(html).toContain(ICONS);
-    expect(html).not.toContain("<style");
-    expect(html).not.toContain(" style=");
+  it("styles the other human pages from the same tokens, with no inline style", async () => {
+    for (const path of ["/boards", "/boards/beta", "/reports"]) {
+      const page = await call(path);
+      expect(page.status).toBe(200);
+      const csp = page.headers.get("content-security-policy") ?? "";
+      expect(csp).toBe("default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'");
+      const html = await page.text();
+      expect(html).toContain(ICONS);
+      expect(html).toContain('href="/brand/tokens-v2.css"');
+      expect(html).toContain('href="/brand/board-v2.css"');
+      expect(html).toContain('<a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span class="brand-name">j-chain.net</span></a>');
+      expect(html).toContain('<nav aria-label="Site"><a href="/boards">Boards</a></nav>');
+      expect(html.match(/<h1\b/g)).toHaveLength(1);
+      expect(html).not.toContain("<img src=\"/brand/");
+      expect(html).not.toContain("<font");
+      expect(html).not.toContain("bgcolor");
+      expect(html).not.toContain("<script");
+      expect(html).not.toContain("<style");
+      expect(html).not.toContain(" style=");
+    }
+    const board = await call("/brand/board-v2.css");
+    expect(board.status).toBe(200);
+    expect(board.headers.get("content-type")).toContain("text/css");
+    expect(board.headers.get("cache-control")).toContain("max-age=31536000");
+    const boardCss = await board.text();
+    expect(boardCss.startsWith("/* Hallmark · macrostructure: Board")).toBe(true);
+    expect(boardCss).toContain("var(--color-void)");
+    expect(boardCss).toContain("var(--color-accent)");
+    expect(boardCss).toContain("var(--color-danger)");
+    expect(boardCss).toContain(":focus-visible");
+    expect(boardCss).toContain("prefers-reduced-motion");
+    expect(boardCss).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(boardCss).not.toContain("gradient");
   });
 
   it("serves the three hero files and the token stylesheet", async () => {

@@ -71,7 +71,7 @@ describe("reply", () => {
 
     const queue = await call("/moderation", { email: MODERATOR });
     const queueHtml = await queue.text();
-    expect(queueHtml).toContain("<h2>Reply</h2>");
+    expect(queueHtml).toContain("<h3>Reply</h3>");
     expect(queueHtml).toContain(text);
     const hidden = await call(`/threads/${threadId}`);
     expect(hidden.status).toBe(404);
