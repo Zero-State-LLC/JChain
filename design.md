@@ -65,7 +65,7 @@ Verify at 320, 375, 414, and 768px; no horizontal overflow. Keep primary control
 
 ## Asset family and production
 
-1. Hero illustration: wide 16:9, narrative absurdity, wordmark only.
+1. Hero illustration: Danny's original scene at its native 5:4 (1402x1122), never cropped to 16:9 or upscaled, with a light grain and tone pass; narrative absurdity, wordmark only.
 2. Mascot portrait: square, legible at small sizes.
 3. Simplified mark: one-color frog silhouette or frog-crown glyph, original vector redraw required.
 4. Sticker/emote family: expressive poses on transparent backgrounds.

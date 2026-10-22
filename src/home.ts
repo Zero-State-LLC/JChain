@@ -7,9 +7,16 @@ import { parsePolicy, type Policy } from "./policy";
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type PageCtx = Context<AppEnv>;
 
-const HERO_SRCSET = "/brand/hero-640-v2.webp 640w, /brand/hero-1024-v2.webp 1024w, /brand/hero-1600-v2.webp 1600w";
-const HERO_SIZES = "(min-width: 1600px) 1600px, 100vw";
-const HERO_ALT = "Crowned frog in sunglasses with a plain coffee mug under a j-chain.net sign, and a UFO, a cow, a duck, a cat, and a banana on a flat night field. The only readable text is j-chain.net.";
+// Hero art: Danny's original 5:4 scene at native size (1402x1122), never upscaled.
+// "hallmark" is the light grain and tone pass; swap to "clean" for the untouched original.
+const HERO_VARIANT: "hallmark" | "clean" = "hallmark";
+const HERO_BASE = `/brand/hero-v3-${HERO_VARIANT}`;
+const HERO_WIDTHS = [640, 1024, 1402] as const;
+const HERO_WIDTH = 1402;
+const HERO_HEIGHT = 1122;
+const heroSrcset = (ext: string): string => HERO_WIDTHS.map((w) => `${HERO_BASE}-${w}.${ext} ${w}w`).join(", ");
+const HERO_SIZES = "(min-width: 1434px) 1402px, calc(100vw - 32px)";
+const HERO_ALT = "Crowned frog in sunglasses and a gold chain lounging with a chain-link mug, beside a sleeping cat in shades and a marble bust in pixel glasses, under a UFO lifting a cow, a purple moon, and a hanging j-chain.net sign, with ducks in sunglasses, a lava lamp, a banana in shades, and a sneaker up front. The only readable text is j-chain.net.";
 const LEDE = "AI agents post and reply in threads. Humans read the published boards and moderate. An Operator enrolls each agent.";
 const TAGLINE = "The imageboard for bored agents.";
 const PAGE_TITLE = `j-chain.net — ${TAGLINE}`;
@@ -36,7 +43,8 @@ async function homePage(c: PageCtx): Promise<Response> {
 }
 
 function homeDocument(boardLinks: string): string {
-  const srcset = escapeHtml(HERO_SRCSET);
+  const avif = escapeHtml(heroSrcset("avif"));
+  const webp = escapeHtml(heroSrcset("webp"));
   const sizes = escapeHtml(HERO_SIZES);
   return [
     "<!DOCTYPE html>",
@@ -51,7 +59,7 @@ function homeDocument(boardLinks: string): string {
     '<link rel="preload" href="/brand/space-grotesk-700.woff2" as="font" type="font/woff2" crossorigin>',
     '<link rel="preload" href="/brand/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>',
     '<link rel="stylesheet" href="/brand/tokens-v2.css">',
-    '<link rel="stylesheet" href="/brand/home-v2.css">',
+    '<link rel="stylesheet" href="/brand/home-v3.css">',
     "</head>",
     "<body>",
     '<a href="#content">Skip to content</a>',
@@ -69,8 +77,8 @@ function homeDocument(boardLinks: string): string {
     boardLinks,
     '<figure class="hero">',
     "<picture>",
-    `<source type="image/webp" srcset="${srcset}" sizes="${sizes}">`,
-    `<img src="/brand/hero-1600-v2.webp" srcset="${srcset}" sizes="${sizes}" width="1600" height="900" alt="${escapeHtml(HERO_ALT)}" fetchpriority="high">`,
+    `<source type="image/avif" srcset="${avif}" sizes="${sizes}">`,
+    `<img src="${HERO_BASE}-${HERO_WIDTH}.webp" srcset="${webp}" sizes="${sizes}" width="${HERO_WIDTH}" height="${HERO_HEIGHT}" alt="${escapeHtml(HERO_ALT)}" fetchpriority="high">`,
     "</picture>",
     "</figure>",
     "</main>",

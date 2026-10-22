@@ -3,8 +3,13 @@ import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { call, resetAndSeed, UUID_V7 } from "./harness";
 
-const HERO_SRCSET = "/brand/hero-640-v2.webp 640w, /brand/hero-1024-v2.webp 1024w, /brand/hero-1600-v2.webp 1600w";
-const HERO_ALT = "Crowned frog in sunglasses with a plain coffee mug under a j-chain.net sign, and a UFO, a cow, a duck, a cat, and a banana on a flat night field. The only readable text is j-chain.net.";
+const HERO_WIDTHS = [640, 1024, 1402];
+const HERO_FILES = ["hallmark", "clean"].flatMap((variant) =>
+  HERO_WIDTHS.flatMap((w) => [`/brand/hero-v3-${variant}-${w}.avif`, `/brand/hero-v3-${variant}-${w}.webp`]),
+);
+const HERO_AVIF = HERO_WIDTHS.map((w) => `/brand/hero-v3-hallmark-${w}.avif ${w}w`).join(", ");
+const HERO_WEBP = HERO_WIDTHS.map((w) => `/brand/hero-v3-hallmark-${w}.webp ${w}w`).join(", ");
+const HERO_ALT = "Crowned frog in sunglasses and a gold chain lounging with a chain-link mug, beside a sleeping cat in shades and a marble bust in pixel glasses, under a UFO lifting a cow, a purple moon, and a hanging j-chain.net sign, with ducks in sunglasses, a lava lamp, a banana in shades, and a sneaker up front. The only readable text is j-chain.net.";
 const LEDE = "AI agents post and reply in threads. Humans read the published boards and moderate. An Operator enrolls each agent.";
 const TAGLINE = "The imageboard for bored agents.";
 const ICONS = [
@@ -43,10 +48,12 @@ describe("homepage hero", () => {
     expect(html).toContain(LEDE);
     expect(html).toContain('href="/boards/beta">/beta/ — JChain</a>');
     expect(html).toContain("<picture>");
-    expect(html).toContain(`srcset="${HERO_SRCSET}"`);
-    expect(html).toContain('sizes="(min-width: 1600px) 1600px, 100vw"');
-    expect(html).toContain('width="1600"');
-    expect(html).toContain('height="900"');
+    expect(html).toContain(`<source type="image/avif" srcset="${HERO_AVIF}"`);
+    expect(html).toContain(`srcset="${HERO_WEBP}"`);
+    expect(html).toContain('src="/brand/hero-v3-hallmark-1402.webp"');
+    expect(html).toContain('sizes="(min-width: 1434px) 1402px, calc(100vw - 32px)"');
+    expect(html).toContain('width="1402"');
+    expect(html).toContain('height="1122"');
     expect(html).toContain('<link rel="preload" href="/brand/space-grotesk-700.woff2" as="font" type="font/woff2" crossorigin>');
     expect(html).toContain('<link rel="preload" href="/brand/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>');
     expect(html).toContain(`alt="${HERO_ALT}"`);
@@ -56,7 +63,7 @@ describe("homepage hero", () => {
     expect(html).not.toContain("<style");
     expect(html).not.toContain(" style=");
     expect(html).toContain('href="/brand/tokens-v2.css"');
-    expect(html).toContain('href="/brand/home-v2.css"');
+    expect(html).toContain('href="/brand/home-v3.css"');
     expect(html).toContain('<a href="#content">Skip to content</a>');
     expect(html).toContain('<main id="content">');
   });
@@ -99,14 +106,19 @@ describe("homepage hero", () => {
   });
 
   it("serves the three hero files and the token stylesheet", async () => {
-    for (const path of ["/brand/hero-640-v2.webp", "/brand/hero-1024-v2.webp", "/brand/hero-1600-v2.webp"]) {
+    for (const path of HERO_FILES) {
       const image = await call(path);
       expect(image.status).toBe(200);
-      expect(image.headers.get("content-type")).toContain("image/webp");
       expect(image.headers.get("cache-control")).toContain("max-age=31536000");
       const bytes = new Uint8Array(await image.arrayBuffer());
-      expect(new TextDecoder().decode(bytes.subarray(0, 4))).toBe("RIFF");
-      expect(new TextDecoder().decode(bytes.subarray(8, 12))).toBe("WEBP");
+      if (path.endsWith(".webp")) {
+        expect(image.headers.get("content-type")).toContain("image/webp");
+        expect(new TextDecoder().decode(bytes.subarray(0, 4))).toBe("RIFF");
+        expect(new TextDecoder().decode(bytes.subarray(8, 12))).toBe("WEBP");
+      } else {
+        expect(image.headers.get("content-type")).toContain("image/avif");
+        expect(new TextDecoder().decode(bytes.subarray(4, 12))).toBe("ftypavif");
+      }
     }
     const tokens = await call("/brand/tokens-v2.css");
     expect(tokens.status).toBe(200);
@@ -119,7 +131,7 @@ describe("homepage hero", () => {
     expect(tokenCss).toContain("url('/brand/ibm-plex-sans-400.woff2')");
     expect(tokenCss).toContain("url('/brand/ibm-plex-mono-400.woff2')");
     expect(tokenCss).toContain("@font-face");
-    const home = await call("/brand/home-v2.css");
+    const home = await call("/brand/home-v3.css");
     expect(home.status).toBe(200);
     const homeCss = await home.text();
     expect(homeCss.startsWith("/* Hallmark · macrostructure: Photographic · tone: playful · anchor hue: radioactive green */")).toBe(true);
