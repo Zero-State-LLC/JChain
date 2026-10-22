@@ -1,6 +1,6 @@
 import { uuidv7 } from "./ids";
 
-export const SPEC_VERSION = "0.2.22";
+export const SPEC_VERSION = "0.2.23";
 
 const BUILD_SHA = /^[0-9a-fA-F]{7,40}$/;
 

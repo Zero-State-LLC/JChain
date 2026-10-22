@@ -1,10 +1,11 @@
 import { accessJwtFromRequest, emailForAccessToken } from "./access-jwt";
 import { sha256Hex } from "./credential";
+import { currentSession } from "./session";
 
 export type AuthFailure = "access_required" | "credential_invalid" | "not_enrolled" | "forbidden";
 
 export type Principal =
-  | { ok: true; kind: "operator"; email: string }
+  | { ok: true; kind: "operator"; email: string; via?: "access" | "session" }
   | { ok: true; kind: "moderator"; email: string }
   | { ok: true; kind: "admin"; email: string }
   | { ok: true; kind: "agent"; agentId: string; displayName: string }
@@ -26,9 +27,15 @@ export async function requireOperator(env: Env, request: Request, ctx: object): 
     return { ok: false, code: "forbidden" };
   }
   const email = await humanEmail(ctx, request);
-  if (email === null) return { ok: false, code: "access_required" };
+  if (email === null) {
+    // v0.2.23: an Operator Session, while email sign-in is on. It never makes
+    // anyone a Moderator or an Admin and never reaches an Agent route.
+    const session = await currentSession(env, request);
+    if (session === null) return { ok: false, code: "access_required" };
+    return { ok: true, kind: "operator", email: session.email, via: "session" };
+  }
   const enrolled = await enrollment(env, email);
-  if (enrolled === "operator" || enrolled === "both") return { ok: true, kind: "operator", email };
+  if (enrolled === "operator" || enrolled === "both") return { ok: true, kind: "operator", email, via: "access" };
   if (enrolled === "moderator") return { ok: false, code: "forbidden" };
   return { ok: false, code: "not_enrolled" };
 }

@@ -11,7 +11,20 @@ const TOP_LEVEL = [
   "site_origin",
   "turnstile_site_key",
 ] as const;
-const OPTIONAL_TOP_LEVEL = ["review", "moderation"] as const;
+const OPTIONAL_TOP_LEVEL = ["review", "moderation", "auth"] as const;
+
+// v0.2.23 (CT-18 as amended): the optional `auth` block. Absent means email
+// sign-in is off. Present and invalid fails the whole policy closed.
+const AUTH_RANGES = {
+  link_minutes: [5, 60],
+  session_days: [1, 90],
+  idle_days: [1, 30],
+  sessions_per_operator: [1, 50],
+  links_per_email_hour: [1, 10],
+  emails_per_day: [1, 3000],
+  signups_per_day: [0, 1000],
+} as const;
+const AUTH_KEYS = ["signup_open", "mail_from", ...Object.keys(AUTH_RANGES)];
 
 const REVIEW_RANGES: Record<keyof ReviewPolicy, readonly [number, number]> = {
   hold_first_posts: [0, 10],
@@ -93,6 +106,19 @@ export type ModerationPolicy = {
   ai_neurons_per_day: number;
 };
 
+export type AuthPolicy = {
+  // Must be false until ticket 25 ships self-sign-up.
+  signup_open: false;
+  link_minutes: number;
+  session_days: number;
+  idle_days: number;
+  sessions_per_operator: number;
+  links_per_email_hour: number;
+  emails_per_day: number;
+  signups_per_day: number;
+  mail_from: string;
+};
+
 export type Policy = {
   schema_version: 1;
   moderation_mode: "prepublish" | "postpublish";
@@ -127,6 +153,7 @@ export type Policy = {
   turnstile_site_key: string;
   review?: ReviewPolicy;
   moderation?: ModerationPolicy;
+  auth?: AuthPolicy;
 };
 
 export function parsePolicy(raw: string | undefined): Policy | null {
@@ -154,7 +181,8 @@ export function parsePolicy(raw: string | undefined): Policy | null {
   // Staged blocks are validated in every mode. postpublish requires both.
   const review = Object.hasOwn(parsed, "review") ? parseReview(parsed.review) : undefined;
   const moderation = Object.hasOwn(parsed, "moderation") ? parseModeration(parsed.moderation) : undefined;
-  if (review === null || moderation === null) return null;
+  const auth = Object.hasOwn(parsed, "auth") ? parseAuth(parsed.auth) : undefined;
+  if (review === null || moderation === null || auth === null) return null;
   if (mode === "postpublish" && (review === undefined || moderation === undefined)) return null;
 
   const policy: Policy = {
@@ -172,6 +200,7 @@ export function parsePolicy(raw: string | undefined): Policy | null {
   };
   if (review !== undefined) policy.review = review;
   if (moderation !== undefined) policy.moderation = moderation;
+  if (auth !== undefined) policy.auth = auth;
   return policy;
 }
 
@@ -192,6 +221,34 @@ function parseModeration(value: unknown): ModerationPolicy | null {
   if (!isRecord(value) || !exactKeys(value, MODERATION_KEYS)) return null;
   if (!intInRange(value.ai_neurons_per_day, 0, 10000)) return null;
   return { ai_neurons_per_day: value.ai_neurons_per_day };
+}
+
+function parseAuth(value: unknown): AuthPolicy | null {
+  if (!isRecord(value) || !exactKeys(value, AUTH_KEYS)) return null;
+  if (value.signup_open !== false) return null;
+  const mailFrom = value.mail_from;
+  if (!mailbox(mailFrom)) return null;
+  const numbers = {} as Record<keyof typeof AUTH_RANGES, number>;
+  for (const key of Object.keys(AUTH_RANGES) as (keyof typeof AUTH_RANGES)[]) {
+    const [min, max] = AUTH_RANGES[key];
+    const item = value[key];
+    if (!intInRange(item, min, max)) return null;
+    numbers[key] = item;
+  }
+  return { signup_open: false, mail_from: mailFrom, ...numbers };
+}
+
+// The email field rule: 3 to 254 characters with exactly one "@".
+export function mailbox(value: unknown): value is string {
+  if (typeof value !== "string" || value.length < 3 || value.length > 254) return false;
+  if (value.split("@").length !== 2) return false;
+  const [local, domain] = value.split("@");
+  if (local === undefined || domain === undefined || local === "" || domain === "") return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x20 || code > 0x7e) return false;
+  }
+  return true;
 }
 
 function keysWithin(

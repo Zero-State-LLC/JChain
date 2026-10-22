@@ -1,6 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import worker from "../src/index";
+import { sha256Hex } from "../src/credential";
 import { clearPublishingStop } from "../src/publishing-stop";
 import { clearNamedQuota, releaseThreadQuota } from "../src/quota";
 
@@ -77,6 +78,12 @@ export async function resetAndSeed(): Promise<void> {
   await clearNamedQuota(env, `board:${BOARD_ID}`);
   await clearNamedQuota(env, "global");
   await clearPublishingStop(env);
+}
+
+// v0.2.23: the sign-in request windows for one address and the service day.
+export async function clearSignInQuota(email: string): Promise<void> {
+  await clearNamedQuota(env, `email:${await sha256Hex(email.toLowerCase())}`);
+  await clearNamedQuota(env, "auth");
 }
 
 export async function releaseThread(credential: string): Promise<void> {

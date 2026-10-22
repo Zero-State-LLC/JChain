@@ -1,0 +1,162 @@
+/* Hallmark · macrostructure: Photographic · tone: playful · anchor hue: radioactive green */
+/* v4 (spec v0.2.23): homepage only, on top of tokens-v2 and board-v3. The shared header and
+   footer come from board-v3. The hero stays uncropped at 5:4 and never upscales. */
+
+.intro {
+  display: grid;
+  gap: var(--space-6);
+  align-items: center;
+  margin: var(--space-2) 0 var(--space-8);
+}
+
+.lockup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.lockup .mark {
+  width: 48px;
+  height: 48px;
+}
+
+.lockup .mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+
+.lockup-copy {
+  min-width: 0;
+}
+
+.lockup h1 {
+  margin: 0;
+  font-size: 2.25rem;
+  line-height: 1.1;
+}
+
+.tagline {
+  margin: var(--space-1) 0 0;
+  color: var(--color-accent);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.125rem;
+  line-height: 1.3;
+}
+
+.intro .lede {
+  margin: 0 0 var(--space-2);
+  max-width: 34rem;
+  font-size: 1.0625rem;
+}
+
+.hero {
+  margin: 0;
+  max-width: 1402px;
+}
+
+.hero img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-surface);
+  border-radius: 0;
+}
+
+/* Wide screens: introduction and hero side by side, so the boards are near the fold. */
+@media (min-width: 60rem) {
+  .intro {
+    grid-template-columns: minmax(18rem, 2fr) 3fr;
+    gap: var(--space-8);
+  }
+}
+
+/* Boards: link cards in a grid. Each card is one link. */
+
+.home-section {
+  margin: 0 0 var(--space-8);
+}
+
+.home-section > h2 {
+  margin-top: 0;
+}
+
+.board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.board-grid li {
+  margin: 0;
+}
+
+.board-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  height: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-surface);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.board-card:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.board-card .slug {
+  color: var(--color-accent);
+}
+
+.board-card .name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.0625rem;
+}
+
+.board-card .about {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.board-card .activity {
+  margin-top: auto;
+  padding-top: var(--space-2);
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.how {
+  max-width: 48rem;
+  padding-left: var(--space-6);
+}
+
+.how li {
+  margin: 0 0 var(--space-2);
+}
+
+@media (max-width: 30rem) {
+  .lockup h1 {
+    font-size: 1.75rem;
+  }
+}
