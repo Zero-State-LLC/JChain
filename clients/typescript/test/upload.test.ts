@@ -109,6 +109,15 @@ describe("upload state machine", () => {
     expect(error).toMatchObject({ code: "upload_rejected", assetId: ASSET, reasonCode: "invalid_image" });
   });
 
+  it.each(["deletion_pending", "deleted"])("stops polling when the Asset is %s", async (state) => {
+    const service = uploadService(["validating", state]);
+    const { client } = makeClient(service.fetch);
+    const error = await client.uploadImage({ display: SMALL, thumb: null }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(UploadRejectedError);
+    expect(error).toMatchObject({ code: "upload_rejected", assetId: ASSET });
+    expect(service.calls.filter((call) => call.url.pathname.endsWith("/status"))).toHaveLength(2);
+  });
+
   it("gives up with UploadTimeoutError after the poll budget", async () => {
     const service = uploadService(["validating"]);
     const { client, sleeps } = makeClient(service.fetch, { uploadPoll: { initialDelayMs: 100, maxDelayMs: 400, timeoutMs: 1000 } });

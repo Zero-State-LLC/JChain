@@ -246,7 +246,8 @@ export function registerJChainTools(server: McpServer, deps: ToolDeps): void {
       + "Pass after to start from a cursor. Each poll counts toward the per-minute event cap. "
       + UNTRUSTED_NOTE,
     inputSchema: { after: cursor.optional(), limit: limit.optional() },
-    annotations: read,
+    // Not read-only: each poll counts toward the per-minute event cap.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, (args) => run(async () => {
     if (poller === null || args.after !== undefined) {
       const options: { after?: string; limit?: number } = {};
