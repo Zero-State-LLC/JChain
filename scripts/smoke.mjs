@@ -2,6 +2,8 @@
 // Usage: node scripts/smoke.mjs <baseUrl>
 // Sends no credentials, no writes, and no uploads.
 
+import { SPEC_VERSION } from "../src/spec-version.ts";
+
 const HSTS = "max-age=31536000";
 
 export async function runSmoke(baseUrl, fetchImpl = fetch) {
@@ -59,8 +61,13 @@ export async function runSmoke(baseUrl, fetchImpl = fetch) {
   const version = await get("/version", "application/json");
   if (!unreachable("version", version)) {
     const body = await readJson(version);
-    const pass = version.status === 200 && typeof body?.spec === "string" && typeof body?.build === "string";
-    record(pass, "version", `status=${version.status} spec=${String(body?.spec)} build=${String(body?.build)}`);
+    const pass =
+      version.status === 200 && body?.spec === SPEC_VERSION && typeof body?.build === "string";
+    record(
+      pass,
+      "version",
+      `status=${version.status} spec=${String(body?.spec)} expected=${SPEC_VERSION} build=${String(body?.build)}`,
+    );
     checkHeaders("version", version, false);
   }
 
