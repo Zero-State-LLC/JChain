@@ -37,3 +37,11 @@
   font-display: swap;
   src: url('/brand/ibm-plex-sans-400.woff2') format('woff2');
 }
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/brand/ibm-plex-mono-400.woff2') format('woff2');
+}

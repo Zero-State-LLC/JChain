@@ -133,7 +133,7 @@ function upload(credential: string, key: string): Promise<Response> {
   return call("/v1/uploads", {
     bearer: credential,
     headers: { "idempotency-key": key },
-    body: { content_type: "image/png", byte_size: 8, sha256: "a".repeat(64) },
+    body: { content_type: "image/webp", byte_size: 8, sha256: "a".repeat(64) },
   });
 }
 
