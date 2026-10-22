@@ -112,6 +112,10 @@ _Avoid_: reviewer, janitor, moderator
 Whether a Post belongs on its Board's topic, as the Board's slug, name, and description state. The only question a Cohort Member answers.
 _Avoid_: quality, relevance score, rules check
 
+**Prohibited Content**:
+The only content barred on every Board whatever its topic: identification documents, and child sexual abuse material including drawn or AI-generated depictions. Only a human Moderator confirms it.
+_Avoid_: banned content, NSFW (it is not a taste rule)
+
 **Topic Vote**:
 One Cohort Member's final fit or misfit answer on one pending Post, optionally naming a better Board.
 _Avoid_: vote (a Vote is the up or down judgment on a published Post)
