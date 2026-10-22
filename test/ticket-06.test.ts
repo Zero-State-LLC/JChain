@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import betaDocument from "../policy/beta.json";
 import worker from "../src/index";
-import { VALID_JPG, VALID_PNG } from "./fixtures/bytes";
+import { OTHER_WEBP, VALID_WEBP } from "./fixtures/bytes";
 import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, resetAndSeed } from "./harness";
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
@@ -171,11 +171,11 @@ describe("publishing quota", () => {
 describe("hard caps", () => {
   it("includes limits on upload mutations and does not count them as publishing", async () => {
     const agent = await enroll();
-    const reserved = await expectSuccess(await reserve(agent.credential, VALID_PNG, "image/png"), 201);
+    const reserved = await expectSuccess(await reserve(agent.credential, VALID_WEBP, "image/webp"), 201);
     expectLimits(reserved.limits, { threads: 1, replies: 6, mutations: 20 });
     const put = await expectSuccess(await call(`/v1/uploads/${String(reserved.asset_id)}/content`, {
       method: "PUT",
-      raw: VALID_PNG,
+      raw: VALID_WEBP,
       headers: {
         "idempotency-key": "put-limits",
         "upload-token": String(reserved.upload_token),
@@ -194,37 +194,39 @@ describe("hard caps", () => {
     expect(status.limits).toBeUndefined();
   });
 
-  it("refuses a new reservation when two transformations will not fit", async () => {
+  it("refuses a new reservation when stored bytes are at the cap and still dedupes", async () => {
     const agent = await enroll();
     const policy = policyJson((document) => {
-      document.hard_caps.transformations_per_month = 1;
+      document.hard_caps.r2_bytes = VALID_WEBP.byteLength * 2;
     });
-    const response = await reserve(agent.credential, VALID_PNG, "image/png", "over-transform", policy);
-    expect(response.status).toBe(429);
+    const assetId = await readyAsset(agent.credential, policy);
+    const deduped = await expectSuccess(await reserve(agent.credential, VALID_WEBP, "image/webp", "deduped", policy));
+    expect(deduped).toMatchObject({ asset_id: assetId, deduped: true });
+    expectLimits(deduped.limits, { threads: 1, replies: 6, mutations: 20 });
+    const response = await reserve(agent.credential, OTHER_WEBP, "image/webp", "over-bytes", policy);
     expect(response.headers.get("retry-after")).toMatch(/^[1-9]\d*$/);
     const body = await expectError(response, 429, "rate_limited");
     expectLimits(body.limits, { threads: 1, replies: 6, mutations: 20 });
-    expect(await count("assets")).toBe(0);
-    expect(await keyCount("over-transform")).toBe(0);
+    expect(await count("assets")).toBe(1);
+    expect(await keyCount("over-bytes")).toBe(0);
   });
 
-  it("rejects a derivative that would exceed the byte cap and keeps the transformation charge", async () => {
+  it("rejects a derivative that would exceed the byte cap", async () => {
     const agent = await enroll();
     const policy = policyJson((document) => {
       document.hard_caps.r2_bytes = 1;
-      document.hard_caps.transformations_per_month = 2;
     });
     const logs: string[] = [];
     vi.spyOn(console, "log").mockImplementation((line: unknown) => {
       logs.push(String(line));
     });
     const reserved = await expectSuccess(
-      await reserve(agent.credential, VALID_PNG, "image/png", "bytes", policy),
+      await reserve(agent.credential, VALID_WEBP, "image/webp", "bytes", policy),
       201,
     );
     await expectSuccess(await call(`/v1/uploads/${String(reserved.asset_id)}/content`, {
       method: "PUT",
-      raw: VALID_PNG,
+      raw: VALID_WEBP,
       policy,
       headers: {
         "idempotency-key": "bytes-put",
@@ -243,61 +245,20 @@ describe("hard caps", () => {
     }));
     expect(status).toMatchObject({ state: "rejected", reason_code: "processing_failed" });
     expect(await derivativeCount()).toBe(0);
-    const again = await reserve(agent.credential, VALID_JPG, "image/jpeg", "bytes-again", policy);
-    await expectError(again, 429, "rate_limited");
     expect(logs.some((line) => line.includes("\"counter\":\"r2_bytes\""))).toBe(true);
   });
 
-  it("keeps the transformation that already ran when the thumbnail output throws", async () => {
+  it("deletes a partial derivative write", async () => {
     const agent = await enroll();
-    const tight = policyJson((document) => {
-      document.hard_caps.transformations_per_month = 2;
-    });
-    const assetId = await upload(agent.credential, VALID_PNG, "image/png", "partial-output", tight, { failOutput: 2 });
-    const status = await expectSuccess(await call(`/v1/assets/${assetId}/status`, {
-      bearer: agent.credential,
-    }));
-    expect(status).toMatchObject({ state: "rejected", reason_code: "processing_failed" });
-    const blocked = await reserve(agent.credential, VALID_JPG, "image/jpeg", "partial-output-again", tight);
-    await expectError(blocked, 429, "rate_limited");
-
-    const room = policyJson((document) => {
-      document.hard_caps.transformations_per_month = 3;
-    });
-    const admitted = await reserve(agent.credential, VALID_JPG, "image/jpeg", "partial-output-room", room);
-    await expectSuccess(admitted, 201);
-  });
-
-  it("deletes a partial derivative write and keeps both transformation charges", async () => {
-    const agent = await enroll();
-    const policy = policyJson((document) => {
-      document.hard_caps.transformations_per_month = 2;
-    });
-    const assetId = await upload(agent.credential, VALID_PNG, "image/png", "partial-put", policy, { failPut: true });
+    const policy = policyJson(() => {});
+    const assetId = await upload(agent.credential, VALID_WEBP, "image/webp", "partial-put", policy, { failPut: true });
     const status = await expectSuccess(await call(`/v1/assets/${assetId}/status`, {
       bearer: agent.credential,
     }));
     expect(status).toMatchObject({ state: "rejected", reason_code: "processing_failed" });
     expect(await derivativeCount()).toBe(0);
-    const again = await reserve(agent.credential, VALID_JPG, "image/jpeg", "partial-put-again", policy);
-    await expectError(again, 429, "rate_limited");
   });
 
-  it("does not charge transformations for a deduped upload", async () => {
-    const agent = await enroll();
-    const policy = policyJson((document) => {
-      document.hard_caps.transformations_per_month = 4;
-    });
-    const assetId = await readyAsset(agent.credential, policy);
-    const deduped = await expectSuccess(await reserve(agent.credential, VALID_PNG, "image/png", "deduped", policy));
-    expect(deduped).toMatchObject({ asset_id: assetId, deduped: true });
-    expectLimits(deduped.limits, { threads: 1, replies: 6, mutations: 20 });
-    const second = await expectSuccess(
-      await reserve(agent.credential, VALID_JPG, "image/jpeg", "fresh", policy),
-      201,
-    );
-    expect(second.asset_id).not.toBe(assetId);
-  });
 });
 
 describe("limits on authenticated agent errors", () => {
@@ -396,10 +357,10 @@ function reserve(
 }
 
 async function readyAsset(credential: string, policy?: string): Promise<string> {
-  const reserved = await expectSuccess(await reserve(credential, VALID_PNG, "image/png", crypto.randomUUID(), policy), 201);
+  const reserved = await expectSuccess(await reserve(credential, VALID_WEBP, "image/webp", crypto.randomUUID(), policy), 201);
   await expectSuccess(await call(`/v1/uploads/${String(reserved.asset_id)}/content`, {
     method: "PUT",
-    raw: VALID_PNG,
+    raw: VALID_WEBP,
     policy,
     headers: {
       "idempotency-key": crypto.randomUUID(),
@@ -420,7 +381,7 @@ async function readyAsset(credential: string, policy?: string): Promise<string> 
   return String(reserved.asset_id);
 }
 
-type ScriptedFailure = { failOutput?: number; failPut?: boolean };
+type ScriptedFailure = { failPut?: boolean };
 
 async function upload(
   credential: string,
@@ -464,32 +425,6 @@ async function settle(assetId: string, policy?: string, script?: ScriptedFailure
 }
 
 function scriptedEnv(policy?: string, script: ScriptedFailure = {}): Env {
-  const payload = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 1]);
-  let outputs = 0;
-  const handle = {
-    transform() {
-      return handle;
-    },
-    draw() {
-      return handle;
-    },
-    async output() {
-      outputs += 1;
-      if (script.failOutput !== undefined && outputs >= script.failOutput) {
-        throw new Error("output failed");
-      }
-      return {
-        contentType: () => "image/webp",
-        response: () => new Response(payload),
-        image: () => new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(payload);
-            controller.close();
-          },
-        }),
-      };
-    },
-  };
   let puts = 0;
   const media = script.failPut
     ? new Proxy(env.MEDIA, {
@@ -507,23 +442,8 @@ function scriptedEnv(policy?: string, script: ScriptedFailure = {}): Env {
       },
     })
     : env.MEDIA;
-  const images = new Proxy(env.IMAGES, {
-    get(target, property, receiver) {
-      if (property === "info") {
-        return async (): Promise<ImageInfoResponse> => ({
-          format: "image/png",
-          fileSize: VALID_PNG.byteLength,
-          width: 1,
-          height: 1,
-        });
-      }
-      if (property === "input") return () => handle;
-      return Reflect.get(target, property, receiver);
-    },
-  });
   return new Proxy(env, {
     get(target, property) {
-      if (property === "IMAGES") return images;
       if (property === "MEDIA" && script.failPut) return media;
       if (property === "POLICY" && policy !== undefined) return policy;
       const value = Reflect.get(target, property, target) as unknown;

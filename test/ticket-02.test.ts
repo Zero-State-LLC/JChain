@@ -4,13 +4,17 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import betaDocument from "../policy/beta.json";
 import worker from "../src/index";
 import { sha256Hex } from "../src/credential";
+import { readWebp } from "../src/webp";
 import {
-  ANIMATED_PNG,
+  ALPHA_WEBP,
   ANIMATED_WEBP,
   IMAGE_SVG,
+  LARGE_THUMB_WEBP,
+  LARGE_WEBP,
+  METADATA_WEBP,
+  OTHER_WEBP,
   OVERSIZED_BIN,
-  SPOOFED_JPG,
-  VALID_JPG,
+  SQUARE_THUMB_WEBP,
   VALID_PNG,
   VALID_WEBP,
 } from "./fixtures/bytes";
@@ -32,7 +36,7 @@ describe("reserve an upload", () => {
     vi.spyOn(console, "log").mockImplementation((line: unknown) => {
       logs.push(String(line));
     });
-    const response = await reserve(agent.credential, VALID_PNG, "image/png");
+    const response = await reserve(agent.credential, VALID_WEBP, "image/webp");
     const body = await expectSuccess(response, 201);
     expect(body.asset_id).toMatch(UUID_V7);
     expect(body.upload_token).toMatch(/^up_[A-Za-z0-9_-]{43}$/);
@@ -58,23 +62,31 @@ describe("reserve an upload", () => {
 
   it("requires a valid idempotency key and a parseable reservation", async () => {
     const agent = await enroll();
-    const missing = await reserve(agent.credential, VALID_PNG, "image/png", {}, { "idempotency-key": "" });
+    const missing = await reserve(agent.credential, VALID_WEBP, "image/webp", {}, { "idempotency-key": "" });
     await expectError(missing, 400, "malformed");
     const invalid = await call("/v1/uploads", {
       bearer: agent.credential,
       headers: { "idempotency-key": "run-\u007f" },
-      body: await reservation(VALID_PNG, "image/png"),
+      body: await reservation(VALID_WEBP, "image/webp"),
     });
     await expectError(invalid, 400, "malformed");
-    const unknown = await reserve(agent.credential, VALID_PNG, "image/png", { note: "nope" });
+    const unknown = await reserve(agent.credential, VALID_WEBP, "image/webp", { note: "nope" });
     await expectError(unknown, 400, "malformed");
-    const hash = await reserve(agent.credential, VALID_PNG, "image/png", { sha256: "abcd" });
+    const hash = await reserve(agent.credential, VALID_WEBP, "image/webp", { sha256: "abcd" });
     await expectError(hash, 422, "validation_failed");
-    const type = await reserve(agent.credential, VALID_PNG, "image/svg+xml");
+    const type = await reserve(agent.credential, VALID_WEBP, "image/svg+xml");
     await expectError(type, 415, "unsupported_media");
-    const zero = await reserve(agent.credential, VALID_PNG, "image/png", { byte_size: 0 });
+    const png = await reserve(agent.credential, VALID_PNG, "image/png");
+    await expectError(png, 415, "unsupported_media");
+    const thumbKey = await reserve(agent.credential, VALID_WEBP, "image/webp", { thumb: { byte_size: 1, sha256: "ab".repeat(32), width: 1 } });
+    await expectError(thumbKey, 400, "malformed");
+    const thumbShape = await reserve(agent.credential, VALID_WEBP, "image/webp", { thumb: "small" });
+    await expectError(thumbShape, 400, "malformed");
+    const thumbHash = await reserve(agent.credential, VALID_WEBP, "image/webp", { thumb: { byte_size: 1, sha256: "abcd" } });
+    await expectError(thumbHash, 422, "validation_failed");
+    const zero = await reserve(agent.credential, VALID_WEBP, "image/webp", { byte_size: 0 });
     await expectError(zero, 422, "validation_failed");
-    await expectError(await call("/v1/uploads", { email: OPERATOR, headers: { "idempotency-key": "op" }, body: await reservation(VALID_PNG, "image/png") }), 401, "credential_invalid");
+    await expectError(await call("/v1/uploads", { email: OPERATOR, headers: { "idempotency-key": "op" }, body: await reservation(VALID_WEBP, "image/webp") }), 401, "credential_invalid");
   });
 
   it("rejects a declared size over the policy cap and creates no upload", async () => {
@@ -82,7 +94,7 @@ describe("reserve an upload", () => {
     const response = await call("/v1/uploads", {
       bearer: agent.credential,
       headers: { "idempotency-key": "too-big" },
-      body: { content_type: "image/jpeg", byte_size: 1025, sha256: "a".repeat(64) },
+      body: { content_type: "image/webp", byte_size: 1025, sha256: "a".repeat(64) },
       policy: policyJson((policy) => {
         (policy.upload as { max_bytes: number }).max_bytes = 1024;
       }),
@@ -93,21 +105,21 @@ describe("reserve an upload", () => {
 
   it("replays the same reservation and conflicts when the body changes", async () => {
     const agent = await enroll();
-    const first = await expectSuccess(await reserve(agent.credential, VALID_JPG, "image/jpeg", {}, { "idempotency-key": "west run" }), 201);
+    const first = await expectSuccess(await reserve(agent.credential, OTHER_WEBP, "image/webp", {}, { "idempotency-key": "west run" }), 201);
     const reordered = await call("/v1/uploads", {
       bearer: agent.credential,
       headers: { "idempotency-key": "west run" },
       body: {
-        sha256: await sha256HexBytes(VALID_JPG),
-        byte_size: VALID_JPG.byteLength,
-        content_type: "image/jpeg",
+        sha256: await sha256HexBytes(OTHER_WEBP),
+        byte_size: OTHER_WEBP.byteLength,
+        content_type: "image/webp",
       },
     });
     const second = await expectSuccess(reordered, 201);
     expect(second.asset_id).toBe(first.asset_id);
     expect(second.upload_token).toBe(first.upload_token);
     expect(second.expires_at).toBe(first.expires_at);
-    const conflict = await reserve(agent.credential, VALID_PNG, "image/png", {}, { "idempotency-key": "west run" });
+    const conflict = await reserve(agent.credential, VALID_WEBP, "image/webp", {}, { "idempotency-key": "west run" });
     await expectError(conflict, 409, "idempotency_conflict");
   });
 
@@ -116,7 +128,7 @@ describe("reserve an upload", () => {
     const response = await call("/v1/uploads", {
       bearer: "jc_missing",
       headers: { "idempotency-key": "policy" },
-      body: { content_type: "image/png", byte_size: 1, sha256: "ab".repeat(32) },
+      body: { content_type: "image/webp", byte_size: 1, sha256: "ab".repeat(32) },
       policy: null,
     });
     await expectError(response, 503, "policy_missing");
@@ -124,14 +136,10 @@ describe("reserve an upload", () => {
 });
 
 describe("content put", () => {
-  it("accepts jpeg, png, and static webp that match the reservation", async () => {
+  it("accepts a static webp, with or without alpha, that matches the reservation", async () => {
     const agent = await enroll();
-    for (const [bytes, type] of [
-      [VALID_JPG, "image/jpeg"],
-      [VALID_PNG, "image/png"],
-      [VALID_WEBP, "image/webp"],
-    ] as const) {
-      const reserved = await expectSuccess(await reserve(agent.credential, bytes, type), 201);
+    for (const bytes of [VALID_WEBP, ALPHA_WEBP]) {
+      const reserved = await expectSuccess(await reserve(agent.credential, bytes, "image/webp"), 201);
       const response = await put(String(reserved.asset_id), String(reserved.upload_token), bytes);
       const body = await expectSuccess(response);
       expect(body).toMatchObject({ asset_id: reserved.asset_id, state: "reserved" });
@@ -141,10 +149,9 @@ describe("content put", () => {
 
   it("rejects svg, animation, spoofed bytes, and oversized bodies with the spec reason codes", async () => {
     const agent = await enroll();
-    await expectRejected(agent.credential, IMAGE_SVG, "image/png", 415, "unsupported_type");
-    await expectRejected(agent.credential, ANIMATED_PNG, "image/png", 422, "animated");
+    await expectRejected(agent.credential, IMAGE_SVG, "image/webp", 415, "unsupported_type");
     await expectRejected(agent.credential, ANIMATED_WEBP, "image/webp", 422, "animated");
-    await expectRejected(agent.credential, SPOOFED_JPG, "image/jpeg", 422, "signature_mismatch");
+    await expectRejected(agent.credential, VALID_PNG, "image/webp", 422, "signature_mismatch");
 
     const tight = policyJson((policy) => {
       (policy.upload as { max_bytes: number }).max_bytes = 1024;
@@ -153,7 +160,7 @@ describe("content put", () => {
     const reserved = await expectSuccess(await call("/v1/uploads", {
       bearer: agent.credential,
       headers: { "idempotency-key": "oversize-reserve" },
-      body: { content_type: "image/jpeg", byte_size: 1024, sha256: "ab".repeat(32) },
+      body: { content_type: "image/webp", byte_size: 1024, sha256: "ab".repeat(32) },
       policy: tight,
     }), 201);
     const oversized = await put(String(reserved.asset_id), String(reserved.upload_token), OVERSIZED_BIN, "oversize-put", tight);
@@ -167,47 +174,77 @@ describe("content put", () => {
 
   it("leaves the reservation open when the hash or the size does not match", async () => {
     const agent = await enroll();
-    const wrongHash = await expectSuccess(await reserve(agent.credential, VALID_JPG, "image/jpeg", {
-      sha256: await sha256HexBytes(VALID_PNG),
+    const wrongHash = await expectSuccess(await reserve(agent.credential, OTHER_WEBP, "image/webp", {
+      sha256: await sha256HexBytes(VALID_WEBP),
     }), 201);
-    const mismatch = await put(String(wrongHash.asset_id), String(wrongHash.upload_token), VALID_JPG, "hash-once");
+    const mismatch = await put(String(wrongHash.asset_id), String(wrongHash.upload_token), OTHER_WEBP, "hash-once");
     await expectError(mismatch, 422, "validation_failed");
     expect((await expectSuccess(await assetStatus(String(wrongHash.asset_id), agent.credential))).state).toBe("reserved");
-    await expectError(await put(String(wrongHash.asset_id), String(wrongHash.upload_token), VALID_JPG, "hash-once"), 422, "validation_failed");
-    await expectError(await put(String(wrongHash.asset_id), String(wrongHash.upload_token), VALID_PNG, "hash-once"), 409, "idempotency_conflict");
+    await expectError(await put(String(wrongHash.asset_id), String(wrongHash.upload_token), OTHER_WEBP, "hash-once"), 422, "validation_failed");
+    await expectError(await put(String(wrongHash.asset_id), String(wrongHash.upload_token), VALID_WEBP, "hash-once"), 409, "idempotency_conflict");
 
-    const short = await expectSuccess(await reserve(agent.credential, VALID_PNG, "image/png", { byte_size: 8 }), 201);
-    await expectError(await put(String(short.asset_id), String(short.upload_token), VALID_PNG, "short"), 422, "validation_failed");
+    const short = await expectSuccess(await reserve(agent.credential, VALID_WEBP, "image/webp", { byte_size: 8 }), 201);
+    await expectError(await put(String(short.asset_id), String(short.upload_token), VALID_WEBP, "short"), 422, "validation_failed");
     expect((await expectSuccess(await assetStatus(String(short.asset_id), agent.credential))).state).toBe("reserved");
   });
 
   it("accepts only the token for that asset", async () => {
     const agent = await enroll();
-    const first = await expectSuccess(await reserve(agent.credential, VALID_PNG, "image/png", {}, { "idempotency-key": "a" }), 201);
-    const second = await expectSuccess(await reserve(agent.credential, VALID_JPG, "image/jpeg", {}, { "idempotency-key": "b" }), 201);
-    await expectError(await put(String(first.asset_id), String(second.upload_token), VALID_PNG), 401, "credential_invalid");
+    const first = await expectSuccess(await reserve(agent.credential, VALID_WEBP, "image/webp", {}, { "idempotency-key": "a" }), 201);
+    const second = await expectSuccess(await reserve(agent.credential, OTHER_WEBP, "image/webp", {}, { "idempotency-key": "b" }), 201);
+    await expectError(await put(String(first.asset_id), String(second.upload_token), VALID_WEBP), 401, "credential_invalid");
     await expectError(await call(`/v1/uploads/${first.asset_id}/content`, {
       method: "PUT",
       bearer: agent.credential,
-      raw: VALID_PNG,
+      raw: VALID_WEBP,
       headers: { "idempotency-key": "no-token" },
     }), 401, "credential_invalid");
     await env.DB.prepare("UPDATE upload_tokens SET expires_at = ? WHERE asset_id = ?").bind("2020-01-01T00:00:00Z", first.asset_id).run();
-    await expectError(await put(String(first.asset_id), String(first.upload_token), VALID_PNG, "expired"), 401, "credential_invalid");
+    await expectError(await put(String(first.asset_id), String(first.upload_token), VALID_WEBP, "expired"), 401, "credential_invalid");
     expect((await expectSuccess(await assetStatus(String(first.asset_id), agent.credential))).state).toBe("reserved");
   });
 });
 
+describe("thumbnail put", () => {
+  it("takes a declared thumbnail and refuses complete until it arrives", async () => {
+    const agent = await enroll();
+    const reserved = await expectSuccess(await reserve(agent.credential, LARGE_WEBP, "image/webp", await thumbOf(LARGE_THUMB_WEBP)), 201);
+    const assetId = String(reserved.asset_id);
+    const token = String(reserved.upload_token);
+    await expectSuccess(await put(assetId, token, LARGE_WEBP));
+    await expectError(await complete(assetId, agent.credential, "early"), 409, "state_conflict");
+    await expectError(await putThumb(assetId, token, LARGE_WEBP), 422, "validation_failed");
+    const body = await expectSuccess(await putThumb(assetId, token, LARGE_THUMB_WEBP, "thumb-once"));
+    expect(body).toMatchObject({ asset_id: assetId, state: "reserved" });
+    const replay = await expectSuccess(await putThumb(assetId, token, LARGE_THUMB_WEBP, "thumb-once"));
+    expect(replay.asset_id).toBe(assetId);
+    await expectSuccess(await complete(assetId, agent.credential, "late"), 202);
+  });
+
+  it("conflicts when the reservation declared no thumbnail", async () => {
+    const agent = await enroll();
+    const reserved = await expectSuccess(await reserve(agent.credential, VALID_WEBP, "image/webp"), 201);
+    await expectError(await putThumb(String(reserved.asset_id), String(reserved.upload_token), VALID_WEBP), 409, "state_conflict");
+  });
+
+  it("rejects an animated thumbnail with the asset", async () => {
+    const agent = await enroll();
+    const reserved = await expectSuccess(await reserve(agent.credential, VALID_WEBP, "image/webp", await thumbOf(ANIMATED_WEBP)), 201);
+    const assetId = String(reserved.asset_id);
+    await expectSuccess(await put(assetId, String(reserved.upload_token), VALID_WEBP));
+    await expectError(await putThumb(assetId, String(reserved.upload_token), ANIMATED_WEBP), 422, "validation_failed");
+    expect(await expectSuccess(await assetStatus(assetId, agent.credential))).toMatchObject({ state: "rejected", reason_code: "animated" });
+  });
+});
+
 describe("ready asset", () => {
-  it("re-encodes through the Images binding, deletes the original, and serves only the owner", async () => {
+  it("stores the agent's webp without a paid transform, deletes the staged bytes, and serves only the owner", async () => {
     const owner = await enroll("Owner");
     const other = await enroll("Other");
-    const script = newScript();
-    script.info = { format: "image/png", fileSize: VALID_PNG.byteLength, width: 1, height: 1 };
-    const reserved = await expectSuccess(await reserve(owner.credential, VALID_PNG, "image/png"), 201);
+    const reserved = await expectSuccess(await reserve(owner.credential, VALID_WEBP, "image/webp"), 201);
     const assetId = String(reserved.asset_id);
-    await expectSuccess(await put(assetId, String(reserved.upload_token), VALID_PNG));
-    expect(await storedCopies(VALID_PNG)).toBe(1);
+    await expectSuccess(await put(assetId, String(reserved.upload_token), VALID_WEBP));
+    expect(await storedCopies(VALID_WEBP)).toBe(1);
 
     await expectError(await assetContent(assetId, owner.credential, "display"), 404, "not_found");
     await expectError(await call(`/v1/uploads/${assetId}/complete`, {
@@ -237,19 +274,12 @@ describe("ready asset", () => {
     await expectError(await complete(assetId, owner.credential, "other-key", counting), 409, "state_conflict");
     expect(sends).toBe(1);
 
-    const result = await settle(assetId, queueEnv(script));
+    const result = await settle(assetId);
     expect(result.retryMessages).toEqual([]);
-    expect(script.infoCalls).toBe(1);
-    expect(script.inputCalls).toBe(2);
-    expect(script.transforms).toEqual([{ width: 320, height: 320, fit: "scale-down" }]);
-    expect(script.outputs).toEqual([
-      { format: "image/webp", quality: 80, anim: false },
-      { format: "image/webp", quality: 80, anim: false },
-    ]);
 
     const status = await expectSuccess(await assetStatus(assetId, owner.credential));
     expect(status).toEqual({ asset_id: assetId, state: "ready", request_id: status.request_id });
-    expect(await storedCopies(VALID_PNG)).toBe(0);
+    expect(await stagedCount()).toBe(0);
     expect(await objectCount()).toBe(2);
 
     const display = await assetContent(assetId, owner.credential, "display");
@@ -258,11 +288,9 @@ describe("ready asset", () => {
     expect(display.headers.get("content-type")).toContain("image/webp");
     expect(display.headers.get("cache-control")).toBe("no-store");
     expect(display.headers.get("x-request-id")).toMatch(UUID_V7);
-    const displayBytes = new Uint8Array(await display.arrayBuffer());
-    const thumbBytes = new Uint8Array(await thumb.arrayBuffer());
-    expect(sameBytes(displayBytes, script.payloads[0] ?? new Uint8Array())).toBe(true);
-    expect(sameBytes(thumbBytes, script.payloads[1] ?? new Uint8Array())).toBe(true);
-    expect(sameBytes(displayBytes, thumbBytes)).toBe(false);
+    // A display image inside the thumbnail box is its own thumbnail.
+    expect(sameBytes(new Uint8Array(await display.arrayBuffer()), VALID_WEBP)).toBe(true);
+    expect(sameBytes(new Uint8Array(await thumb.arrayBuffer()), VALID_WEBP)).toBe(true);
 
     await expectError(await assetContent(assetId, other.credential, "display"), 404, "not_found");
     await expectError(await assetStatus(assetId, other.credential), 404, "not_found");
@@ -274,62 +302,82 @@ describe("ready asset", () => {
     await expectError(await call(`/v1/assets/${assetId}/status`, { email: OPERATOR }), 401, "credential_invalid");
 
     const before = await objectCount();
-    const deduped = await expectSuccess(await reserve(owner.credential, VALID_PNG, "image/png", {}, { "idempotency-key": "again" }));
+    const deduped = await expectSuccess(await reserve(owner.credential, VALID_WEBP, "image/webp", {}, { "idempotency-key": "again" }));
     expect(deduped).toMatchObject({ asset_id: assetId, deduped: true });
     expect(deduped.upload_token).toBeUndefined();
     expect(deduped.expires_at).toBeUndefined();
     expect(await objectCount()).toBe(before);
 
-    const outsider = await expectSuccess(await reserve(other.credential, VALID_PNG, "image/png", {}, { "idempotency-key": "theirs" }), 201);
+    const outsider = await expectSuccess(await reserve(other.credential, VALID_WEBP, "image/webp", {}, { "idempotency-key": "theirs" }), 201);
     expect(outsider.asset_id).not.toBe(assetId);
     expect(outsider.upload_token).toMatch(/^up_[A-Za-z0-9_-]{43}$/);
     expect(JSON.stringify(outsider)).not.toContain(assetId);
     expect(await objectCount()).toBe(before);
   });
 
-  it("rejects dimensions and info failures before re-encoding", async () => {
+  it("serves the agent's thumbnail for an image larger than the thumbnail box", async () => {
     const agent = await enroll();
-    const edge = newScript();
-    edge.info = { format: "image/png", fileSize: VALID_PNG.byteLength, width: 2, height: 1 };
-    const edgeId = await uploaded(agent.credential, VALID_PNG, "image/png");
-    await settle(edgeId, queueEnv(edge, policyJson((policy) => {
+    const assetId = await uploaded(agent.credential, LARGE_WEBP, LARGE_THUMB_WEBP);
+    await settle(assetId);
+    expect((await expectSuccess(await assetStatus(assetId, agent.credential))).state).toBe("ready");
+    expect(await stagedCount()).toBe(0);
+    const display = new Uint8Array(await (await assetContent(assetId, agent.credential, "display")).arrayBuffer());
+    const thumb = new Uint8Array(await (await assetContent(assetId, agent.credential, "thumb")).arrayBuffer());
+    expect(sameBytes(display, LARGE_WEBP)).toBe(true);
+    expect(sameBytes(thumb, LARGE_THUMB_WEBP)).toBe(true);
+  });
+
+  it("drops metadata chunks before storing", async () => {
+    const agent = await enroll();
+    const assetId = await uploaded(agent.credential, METADATA_WEBP);
+    await settle(assetId);
+    expect((await expectSuccess(await assetStatus(assetId, agent.credential))).state).toBe("ready");
+    const display = new Uint8Array(await (await assetContent(assetId, agent.credential, "display")).arrayBuffer());
+    const text = new TextDecoder("latin1").decode(display);
+    expect(text).not.toContain("EXIF");
+    expect(text).not.toContain("ICCP");
+    expect(text).not.toContain("secret caption");
+    expect(readWebp(display)).toMatchObject({ ok: true, width: 2, height: 2 });
+    expect(display.byteLength).toBeLessThan(METADATA_WEBP.byteLength);
+  });
+
+  it("rejects a missing or misshapen thumbnail", async () => {
+    const agent = await enroll();
+    const bare = await uploaded(agent.credential, LARGE_WEBP);
+    await settle(bare);
+    expect(await expectSuccess(await assetStatus(bare, agent.credential))).toMatchObject({ state: "rejected", reason_code: "invalid_image" });
+
+    const square = await uploaded(agent.credential, LARGE_WEBP, SQUARE_THUMB_WEBP);
+    await settle(square);
+    expect(await expectSuccess(await assetStatus(square, agent.credential))).toMatchObject({ state: "rejected", reason_code: "invalid_image" });
+    await expectError(await assetContent(square, agent.credential, "thumb"), 404, "not_found");
+  });
+
+  it("rejects dimensions and a broken container from the headers alone", async () => {
+    const agent = await enroll();
+    const edgeId = await uploaded(agent.credential, METADATA_WEBP);
+    await settle(edgeId, queueEnv(policyJson((policy) => {
       (policy.upload as { max_edge_px: number }).max_edge_px = 1;
     })));
     expect((await expectSuccess(await assetStatus(edgeId, agent.credential))).reason_code).toBe("edge_too_long");
-    expect(edge.inputCalls).toBe(0);
 
-    const pixels = newScript();
-    pixels.info = { format: "image/png", fileSize: VALID_PNG.byteLength, width: 2000, height: 2000 };
-    const pixelsId = await uploaded(agent.credential, VALID_JPG, "image/jpeg");
-    await settle(pixelsId, queueEnv(pixels, policyJson((policy) => {
+    const pixelsId = await uploaded(agent.credential, withLosslessSize(VALID_WEBP, 2000, 2000), VALID_WEBP);
+    await settle(pixelsId, queueEnv(policyJson((policy) => {
       (policy.upload as { max_megapixels: number }).max_megapixels = 1;
     })));
     expect((await expectSuccess(await assetStatus(pixelsId, agent.credential))).reason_code).toBe("too_many_pixels");
-    expect(pixels.inputCalls).toBe(0);
 
-    const broken = newScript();
-    broken.infoError = true;
-    const brokenId = await uploaded(agent.credential, VALID_WEBP, "image/webp");
-    await settle(brokenId, queueEnv(broken));
+    const trailing = new Uint8Array(VALID_WEBP.byteLength + 1);
+    trailing.set(VALID_WEBP);
+    const brokenId = await uploaded(agent.credential, trailing);
+    await settle(brokenId);
     expect((await expectSuccess(await assetStatus(brokenId, agent.credential))).reason_code).toBe("invalid_image");
-    expect(broken.inputCalls).toBe(0);
     await expectError(await assetContent(brokenId, agent.credential, "thumb"), 404, "not_found");
   });
 
-  it("rejects a re-encode failure and a dead-letter message as processing_failed", async () => {
+  it("rejects a dead-letter message as processing_failed", async () => {
     const agent = await enroll();
-    const failed = newScript();
-    failed.info = { format: "image/png", fileSize: VALID_PNG.byteLength, width: 1, height: 1 };
-    failed.outputError = true;
-    const failedId = await uploaded(agent.credential, VALID_PNG, "image/png");
-    const copies = await storedCopies(VALID_PNG);
-    const objects = await objectCount();
-    await settle(failedId, queueEnv(failed));
-    expect((await expectSuccess(await assetStatus(failedId, agent.credential))).reason_code).toBe("processing_failed");
-    expect(await storedCopies(VALID_PNG)).toBe(copies);
-    expect(await objectCount()).toBe(objects);
-
-    const abandoned = await uploaded(agent.credential, VALID_JPG, "image/jpeg");
+    const abandoned = await uploaded(agent.credential, OTHER_WEBP);
     await settle(abandoned, env, "asset-upload-dlq");
     expect((await expectSuccess(await assetStatus(abandoned, agent.credential))).reason_code).toBe("processing_failed");
   });
@@ -350,7 +398,7 @@ describe("ready asset", () => {
 
   it("keeps the reservation when the queue cannot accept the message", async () => {
     const agent = await enroll();
-    const assetId = await storedOnly(agent.credential, VALID_PNG, "image/png");
+    const assetId = await storedOnly(agent.credential, VALID_WEBP);
     const down = new Proxy(env, {
       get(target, property, receiver) {
         if (property === "ASSET_UPLOAD") return { send: async () => { throw new Error("queue down"); } };
@@ -362,35 +410,17 @@ describe("ready asset", () => {
     await expectSuccess(await complete(assetId, agent.credential, "queued"), 202);
   });
 
-  it("does not re-encode an asset rejected at put", async () => {
+  it("does not process an asset rejected at put", async () => {
     const agent = await enroll();
-    const reserved = await expectSuccess(await reserve(agent.credential, ANIMATED_PNG, "image/png"), 201);
-    await expectError(await put(String(reserved.asset_id), String(reserved.upload_token), ANIMATED_PNG), 422, "validation_failed");
-    const script = newScript();
-    script.infoError = true;
-    await settle(String(reserved.asset_id), queueEnv(script));
-    expect(script.infoCalls).toBe(0);
+    const reserved = await expectSuccess(await reserve(agent.credential, ANIMATED_WEBP, "image/webp"), 201);
+    await expectError(await put(String(reserved.asset_id), String(reserved.upload_token), ANIMATED_WEBP), 422, "validation_failed");
+    await settle(String(reserved.asset_id));
     expect((await expectSuccess(await assetStatus(String(reserved.asset_id), agent.credential))).reason_code).toBe("animated");
     await expectError(await call(`/v1/uploads/${reserved.asset_id}/complete`, {
       method: "POST",
       bearer: agent.credential,
       headers: { "idempotency-key": "late" },
     }), 409, "state_conflict");
-  });
-});
-
-describe("local Images binding", () => {
-  it("turns a fixture png into a ready asset", async () => {
-    const agent = await enroll();
-    const assetId = await uploaded(agent.credential, VALID_PNG, "image/png");
-    await settle(assetId);
-    const status = await expectSuccess(await assetStatus(assetId, agent.credential));
-    expect(status.state).toBe("ready");
-    expect(await storedCopies(VALID_PNG)).toBe(0);
-    expect(await objectCount()).toBe(2);
-    const display = await assetContent(assetId, agent.credential, "display");
-    expect(display.headers.get("content-type")).toContain("image/webp");
-    expect((await display.arrayBuffer()).byteLength).toBeGreaterThan(0);
   });
 });
 
@@ -477,16 +507,39 @@ function assetContent(assetId: string, credential: string, variant: string): Pro
   return call(`/v1/assets/${assetId}/content?variant=${variant}`, { bearer: credential });
 }
 
-async function storedOnly(credential: string, bytes: Uint8Array, contentType: string): Promise<string> {
-  const reserved = await expectSuccess(await reserve(credential, bytes, contentType), 201);
+async function thumbOf(bytes: Uint8Array): Promise<Record<string, unknown>> {
+  return { thumb: { byte_size: bytes.byteLength, sha256: await sha256HexBytes(bytes) } };
+}
+
+function putThumb(assetId: string, token: string, bytes: Uint8Array, key = crypto.randomUUID()): Promise<Response> {
+  return call(`/v1/uploads/${assetId}/thumb`, {
+    method: "PUT",
+    raw: bytes,
+    headers: { "idempotency-key": key, "upload-token": token },
+  });
+}
+
+async function storedOnly(credential: string, bytes: Uint8Array, thumb?: Uint8Array): Promise<string> {
+  const extra = thumb === undefined ? {} : await thumbOf(thumb);
+  const reserved = await expectSuccess(await reserve(credential, bytes, "image/webp", extra), 201);
   await expectSuccess(await put(String(reserved.asset_id), String(reserved.upload_token), bytes));
+  if (thumb !== undefined) await expectSuccess(await putThumb(String(reserved.asset_id), String(reserved.upload_token), thumb));
   return String(reserved.asset_id);
 }
 
-async function uploaded(credential: string, bytes: Uint8Array, contentType: string): Promise<string> {
-  const assetId = await storedOnly(credential, bytes, contentType);
+async function uploaded(credential: string, bytes: Uint8Array, thumb?: Uint8Array): Promise<string> {
+  const assetId = await storedOnly(credential, bytes, thumb);
   await expectSuccess(await complete(assetId, credential, crypto.randomUUID()), 202);
   return assetId;
+}
+
+// A lossless header that claims another size. The pipeline reads headers only, so the pixels never matter.
+function withLosslessSize(bytes: Uint8Array, width: number, height: number): Uint8Array {
+  const copy = bytes.slice();
+  const view = new DataView(copy.buffer);
+  const bits = view.getUint32(21, true);
+  view.setUint32(21, ((bits & 0x10000000) | (width - 1) | ((height - 1) << 14)) >>> 0, true);
+  return copy;
 }
 
 async function expectRejected(
@@ -517,84 +570,13 @@ async function settle(assetId: string, bindings: Env = env, queueName = "asset-u
   return getQueueResult(batch, ctx);
 }
 
-type Script = {
-  info?: ImageInfoResponse;
-  infoError: boolean;
-  outputError: boolean;
-  infoCalls: number;
-  inputCalls: number;
-  transforms: ImageTransform[];
-  outputs: ImageOutputOptions[];
-  payloads: Uint8Array[];
-};
-
-function newScript(): Script {
-  return {
-    infoError: false,
-    outputError: false,
-    infoCalls: 0,
-    inputCalls: 0,
-    transforms: [],
-    outputs: [],
-    payloads: [],
-  };
-}
-
-function queueEnv(script: Script, policy?: string): Env {
+function queueEnv(policy: string): Env {
   return new Proxy(env, {
     get(target, property, receiver) {
-      if (property === "IMAGES") return scriptedImages(script);
-      if (property === "POLICY" && policy !== undefined) return policy;
+      if (property === "POLICY") return policy;
       return Reflect.get(target, property, receiver);
     },
   }) as Env;
-}
-
-function scriptedImages(script: Script): ImagesBinding {
-  const handle: ImageTransformer = {
-    transform(options) {
-      script.transforms.push(options);
-      return handle;
-    },
-    draw() {
-      return handle;
-    },
-    async output(options) {
-      script.outputs.push(options);
-      if (script.outputError) throw new Error("output failed");
-      const payload = Uint8Array.from([0x52, 0x49, 0x46, 0x46, script.payloads.length + 1, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, script.payloads.length + 1]);
-      script.payloads.push(payload);
-      return {
-        contentType: () => "image/webp",
-        response: () => new Response(payload),
-        image: () => new ReadableStream({
-          start(controller) {
-            controller.enqueue(payload);
-            controller.close();
-          },
-        }),
-      };
-    },
-  };
-  return new Proxy(env.IMAGES, {
-    get(target, property, receiver) {
-      if (property === "info") {
-        return async () => {
-          script.infoCalls += 1;
-          if (script.infoError) throw new Error("info failed");
-          if (script.info) return script.info;
-          throw new Error("info was not scripted");
-        };
-      }
-      if (property === "input") {
-        return () => {
-          script.inputCalls += 1;
-          return handle;
-        };
-      }
-      return Reflect.get(target, property, receiver);
-    },
-  }) as ImagesBinding;
 }
 
 function policyJson(mutate: (policy: Record<string, unknown>) => void): string {
@@ -616,6 +598,11 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
 
 async function objectCount(): Promise<number> {
   const page = await env.MEDIA.list();
+  return page.objects.length;
+}
+
+async function stagedCount(): Promise<number> {
+  const page = await env.MEDIA.list({ prefix: "originals/" });
   return page.objects.length;
 }
 
