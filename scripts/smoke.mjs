@@ -2,7 +2,7 @@
 // Usage: node scripts/smoke.mjs <baseUrl>
 // Sends no credentials, no writes, and no uploads.
 
-import { SPEC_VERSION } from "../src/spec-version.ts";
+import { SPEC_VERSION } from "../src/spec-version.js";
 
 const HSTS = "max-age=31536000";
 
