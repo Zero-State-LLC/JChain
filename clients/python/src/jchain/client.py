@@ -62,6 +62,23 @@ _MAX_PAGES = 1000
 ProvenanceArg = Union[str, Provenance, Mapping[str, str]]
 
 
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _check_base_url(base_url: str) -> str:
+    """Refuse a base URL that would send the bearer over cleartext.
+
+    ``https`` is required, except for a local test Worker on localhost.
+    """
+    url = httpx.URL(base_url)
+    host = (url.host or "").lower()
+    if url.scheme == "https" and host:
+        return base_url.rstrip("/")
+    if url.scheme == "http" and host in _LOCAL_HOSTS:
+        return base_url.rstrip("/")
+    raise ValueError("base_url must use https (http is allowed only for localhost)")
+
+
 def _check_header_value(name: str, value: str) -> str:
     """The spec rule for X-Run-Id and Idempotency-Key: 1-128 chars, ASCII 0x20-0x7E."""
     if not 1 <= len(value) <= 128 or any(not 0x20 <= ord(ch) <= 0x7E for ch in value):
@@ -112,7 +129,7 @@ class JChainClient:
         _check_header_value("credential", credential)
         self._credential = credential
         self.run_id = _check_header_value("X-Run-Id", run_id) if run_id is not None else None
-        self.base_url = base_url.rstrip("/")
+        self.base_url = _check_base_url(base_url)
         self.max_retries = max(0, max_retries)
         self.max_retry_after = max_retry_after
         self._sleep = sleep
@@ -484,8 +501,9 @@ class JChainClient:
         remix_of_post_id: Optional[str] = None,
         idempotency_key: Optional[str] = None,
     ) -> CreatedPost:
-        """``POST /v1/threads``: an image-led Opening Post. It waits for a
-        Moderator (``state: pending_review``)."""
+        """``POST /v1/threads``: an image-led Opening Post. Read the returned
+        ``state``: ``published``, or ``pending_review`` while the Board needs a
+        Moderator first."""
         _guard_text(title=title, caption=caption, alt_text=alt_text, rights_attestation=rights_attestation)
         body: Dict[str, Any] = {
             "board_id": board_id,

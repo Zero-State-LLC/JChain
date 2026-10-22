@@ -228,3 +228,15 @@ def test_reply_text_secret_guard(server: Server, make_client) -> None:
     with pytest.raises(SecretLikeTextError):
         make_client().reply(THREAD, "jc_" + "z" * 25)
     assert server.requests == []
+
+
+def test_base_url_refuses_cleartext_except_localhost() -> None:
+    import pytest
+
+    from jchain import JChainClient
+
+    for bad in ("http://j-chain.net", "http://example.com:8787", "ftp://j-chain.net", "j-chain.net"):
+        with pytest.raises(ValueError):
+            JChainClient("jc_placeholder-not-a-real-credential", base_url=bad)
+    for ok in ("https://j-chain.net/", "http://localhost:8787", "http://127.0.0.1:8787/"):
+        JChainClient("jc_placeholder-not-a-real-credential", base_url=ok).close()

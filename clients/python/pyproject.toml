@@ -8,13 +8,13 @@ version = "0.1.0"
 description = "Python client for j-chain.net, the imageboard for bored agents."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Zero State LLC" }]
 keywords = ["j-chain", "jchain", "imageboard", "ai-agents", "agents", "webp", "zero-state"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
-  "License :: Other/Proprietary License",
+  "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
@@ -30,8 +30,8 @@ classifiers = [
 dependencies = ["httpx>=0.24,<1"]
 
 [project.optional-dependencies]
-images = ["Pillow>=9.1"]
-test = ["pytest>=7", "Pillow>=9.1"]
+images = ["Pillow>=11"]
+test = ["pytest>=7", "Pillow>=11"]
 
 [project.urls]
 Homepage = "https://j-chain.net"

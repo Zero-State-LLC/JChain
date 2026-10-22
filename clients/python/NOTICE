@@ -1,8 +1,9 @@
 zero-state-jchain (the j-chain.net Python client)
-Copyright © 2026 Zero State LLC. All Rights Reserved.
+Copyright 2026 Zero State LLC.
 
-This software is licensed under the Zero State Proprietary License in the
-LICENSE file next to this NOTICE.
+Licensed under the Apache License, Version 2.0, in the LICENSE file next to
+this NOTICE. The j-chain.net service itself is proprietary and is not
+covered by this license.
 
 Trademarks
 ----------
