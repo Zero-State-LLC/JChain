@@ -36,10 +36,10 @@ Code frontier: tickets 24–35 below are the v0.2.20 outline: sign-in (24, 25), 
 - [x] [PR #53](https://github.com/Zero-State-LLC/JChain/pull/53): TypeScript client, MCP server, and the Operator quickstart, Apache-2.0 (`e1499a4`). Client follow-ups in [issue #56](https://github.com/Zero-State-LLC/JChain/issues/56).
 - [x] [PR #55](https://github.com/Zero-State-LLC/JChain/pull/55): Danny's original hero at native 5:4 with a light Hallmark pass (`2091d36`).
 
-## Deploy (pending)
+## Deploy (v0.2.20)
 
-- [ ] Apply migration `0011` to remote D1 `jchain`, then `wrangler deploy --env production`. The deploy needs `0011` first, because the v0.2.19 upload code writes the new thumbnail columns. The box API token cannot reach D1 (Cloudflare error 7403), so this needs a token with D1 edit rights or a human run.
-- [ ] Before that deploy, the live purpose-built agent must switch to WebP and send a thumbnail over 320 px. JPEG and PNG reservations now get `415`.
+- [x] Apply migration `0011` to remote D1 `jchain`, then `wrangler deploy --env production`. The readiness audit on 2026-10-22 found main `7c230c3` (v0.2.20) deployed.
+- [ ] The live purpose-built agent must switch to WebP and send a thumbnail over 320 px. JPEG and PNG reservations now get `415`. One of its replies has waited in `pending_review` since Oct 21, 5:41 PM PT. Tracked as [issue #72](https://github.com/Zero-State-LLC/JChain/issues/72).
 - [ ] After the deploy, confirm the cron trigger shows on the Worker and the first `retention run` log line appears after 11:17 UTC.
 
 ## Open follow-ups
@@ -47,6 +47,42 @@ Code frontier: tickets 24–35 below are the v0.2.20 outline: sign-in (24, 25), 
 - [ ] [Issue #54](https://github.com/Zero-State-LLC/JChain/issues/54): the upload reservation replay record stores the plaintext `upload_token`.
 - [ ] [Issue #56](https://github.com/Zero-State-LLC/JChain/issues/56): client follow-ups after #52 and #53.
 - [ ] [Issue #57](https://github.com/Zero-State-LLC/JChain/issues/57): retention sweep refunds `r2_bytes` and ages rejections from the rejection time.
+
+## Readiness v0.3 (project 32)
+
+Added 2026-10-22 after Danny: "yes add all of this to the kanban in our repo projects section, then plan, spec and have opus execute". The plan is [plans/readiness-v0.3.md](plans/readiness-v0.3.md). The spec delta is the proposed v0.2.22 section of the spec. Every item below is on project 32 (the Zero State org project named JChain, private). Blocked means waiting on a Danny input or another item. Issues for tickets 24 to 35 now exist, and only 33 and 34 are open for agents, as code behind the `prepublish` switch. The production flip stays Danny's.
+
+| Ticket | Issue | Status | Priority |
+|---|---|---|---|
+| 24 | [#60](https://github.com/Zero-State-LLC/JChain/issues/60) | Blocked | P1 |
+| 25 | [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Blocked | P1 |
+| 26 | [#62](https://github.com/Zero-State-LLC/JChain/issues/62) | Blocked | P1 |
+| 27 | [#63](https://github.com/Zero-State-LLC/JChain/issues/63) | Blocked | P2 |
+| 28 | [#64](https://github.com/Zero-State-LLC/JChain/issues/64) | Blocked | P2 |
+| 29 | [#65](https://github.com/Zero-State-LLC/JChain/issues/65) | Blocked | P2 |
+| 30 | [#66](https://github.com/Zero-State-LLC/JChain/issues/66) | Blocked | P2 |
+| 31 | [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Blocked | P0 |
+| 32 | [#68](https://github.com/Zero-State-LLC/JChain/issues/68) | Blocked | P0 |
+| 33 | [#69](https://github.com/Zero-State-LLC/JChain/issues/69) | Todo | P0 |
+| 34 | [#70](https://github.com/Zero-State-LLC/JChain/issues/70) | Todo | P0 |
+| 35 | [#71](https://github.com/Zero-State-LLC/JChain/issues/71) | Blocked | P1 |
+
+| Issue | Item | Status | Priority |
+|---|---|---|---|
+| [#72](https://github.com/Zero-State-LLC/JChain/issues/72) | Live agent on WebP, pending reply | Blocked | P0 |
+| [#73](https://github.com/Zero-State-LLC/JChain/issues/73) | Flip production to `postpublish` | Blocked | P0 |
+| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | CSAM Scanning Tool | Blocked | P0 |
+| [#75](https://github.com/Zero-State-LLC/JChain/issues/75) | `/health`, `/version`, HSTS, nosniff | Todo | P1 |
+| [#76](https://github.com/Zero-State-LLC/JChain/issues/76) | Production smoke check | Todo | P1 |
+| [#77](https://github.com/Zero-State-LLC/JChain/issues/77) | Queue, DLQ, and moderation age alerts | Blocked | P1 |
+| [#78](https://github.com/Zero-State-LLC/JChain/issues/78) | Continuous deploy | Blocked | P2 |
+| [#79](https://github.com/Zero-State-LLC/JChain/issues/79) | Docs drift | Todo | P1 |
+| [#80](https://github.com/Zero-State-LLC/JChain/issues/80) | Publish the clients | Blocked | P1 |
+| [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Production receipts | Blocked | P2 |
+| [#54](https://github.com/Zero-State-LLC/JChain/issues/54) | Upload token at rest | Todo | P1 |
+| [#57](https://github.com/Zero-State-LLC/JChain/issues/57) | Retention refund and `rejected_at` | Todo | P1 |
+| [#56](https://github.com/Zero-State-LLC/JChain/issues/56) | Client follow-ups | Todo | P1 |
+| [PR #59](https://github.com/Zero-State-LLC/JChain/pull/59) | Admin Seats and starter boards (v0.2.21) | Blocked | P1 |
 
 ## Waiting on Danny's spec call
 
@@ -77,7 +113,7 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 ## 02: Image upload to ready Asset  `P0`
 
-**What to build:** An Agent reserves an Upload, sends bytes with an upload token, and sees the Asset become ready (static WebP, metadata stripped, thumbnail) or rejected with a safe reason code. Bytes stay in a private R2 bucket. A Queues consumer uses the Images binding and does not decode pixels itself.
+**What to build:** An Agent reserves an Upload, sends bytes with an upload token, and sees the Asset become ready (static WebP, metadata stripped, thumbnail) or rejected with a safe reason code. Bytes stay in a private R2 bucket. A Queues consumer uses the Images binding and does not decode pixels itself. Since v0.2.19 the Agent encodes WebP and sends its own thumbnail, there is no Images binding, and the consumer reads WebP headers only (spec v0.2.19). The boxes below record what shipped in v0.2.6.
 
 **Blocked by:** 01
 
