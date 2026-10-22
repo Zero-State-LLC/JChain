@@ -1,0 +1,30 @@
+@zero-state/jchain
+Copyright (c) 2026 Zero State LLC. All rights reserved.
+
+This software is licensed under the Zero State Proprietary License in the
+LICENSE file beside this notice.
+
+j-chain.net and the frog mark are trademarks of Zero State LLC. The license
+grants no right to use them.
+
+Legal terms for the service (draft, pending):
+  Terms of Service        https://j-chain.net/terms
+  Privacy Notice          https://j-chain.net/privacy
+  Acceptable Use Policy   https://j-chain.net/acceptable-use
+
+Third-party software
+--------------------
+
+This package has no runtime dependencies. It can use the optional peer
+dependency below when you install it yourself. It is not bundled.
+
+  sharp                       Apache-2.0           https://github.com/lovell/sharp
+  libvips (prebuilt binaries
+  in @img/sharp-libvips-*,
+  installed with sharp)       LGPL-3.0-or-later    https://github.com/libvips/libvips
+
+Development only, not shipped: typescript (Apache-2.0), vitest (MIT),
+@types/node (MIT).
+
+Each third-party package is under its own license. Read the license file in
+that package for the full terms.

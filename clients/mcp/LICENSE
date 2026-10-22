@@ -1,0 +1,158 @@
+ZERO STATE PROPRIETARY LICENSE
+
+Version 1.0 — August 2026
+
+Copyright © 2026 Zero State LLC. All Rights Reserved.
+
+This Zero State Proprietary License ("License") governs the software, source code, object code, documentation, specifications, designs, models, prompts, workflows, schemas, data structures, configuration files, audiovisual materials, and other materials contained in or distributed with this repository (collectively, the "Software").
+
+The Software is proprietary to Zero State LLC ("Zero State") except for components expressly identified as third-party materials.
+
+## 1. Ownership
+
+Zero State retains all right, title, and interest in and to the Software, including all copyrights, trade secrets, intellectual property rights, and other proprietary rights owned or controlled by Zero State.
+
+Making source code or other materials publicly accessible does not constitute a dedication to the public domain, an open-source license, or a waiver of any rights.
+
+Except for the limited permissions expressly stated in this License, no rights are granted by implication, estoppel, exhaustion, or otherwise.
+
+## 2. Limited Permission to Inspect
+
+Subject to applicable platform terms, Zero State permits individuals to access, view, and inspect publicly available portions of the Software solely for evaluation, security review, interoperability assessment, educational review, or consideration of a commercial relationship with Zero State.
+
+This permission does not include any right to commercially exploit the Software or incorporate it into another product or service.
+
+## 3. Restrictions
+
+Except with prior written authorization from Zero State, you may not:
+
+a. copy or reproduce the Software except for transient or technically necessary copies associated with permitted access;
+
+b. modify, adapt, translate, transform, or create derivative works based upon the Software;
+
+c. distribute, publish, sublicense, sell, lease, rent, transfer, host, mirror, or otherwise make the Software available to another person or entity;
+
+d. use the Software, in whole or in part, in a commercial product, commercial service, internal commercial system, hosted service, software-as-a-service product, or revenue-generating activity;
+
+e. deploy or operate the Software for production use;
+
+f. remove, obscure, modify, or misrepresent copyright notices, attribution, trademarks, provenance information, or proprietary notices;
+
+g. represent the Software, or a derivative of the Software, as your own work;
+
+h. use the Software or its non-public architecture, documentation, specifications, prompts, datasets, outputs, or other protected materials to reproduce a substantially similar proprietary product or service;
+
+i. circumvent technical, contractual, or access-control measures associated with the Software; or
+
+j. authorize, encourage, or assist another party to perform any activity prohibited by this License.
+
+## 4. Artificial Intelligence and Machine Learning
+
+Unless Zero State provides prior written authorization, the Software may not be used as training data, fine-tuning data, evaluation data, retrieval corpus material, embedding source material, synthetic-data source material, or other input for developing, training, tuning, benchmarking, or improving a machine-learning or artificial-intelligence model.
+
+This restriction does not prohibit ordinary automated tools used solely to inspect, build, test, secure, or operate the Software on behalf of an authorized user where the Software is not retained or incorporated into a model or dataset beyond what is technically necessary to provide that service.
+
+## 5. Agents and Automated Systems
+
+No autonomous agent, software agent, crawler, scraper, coding agent, or other automated system receives rights greater than those granted to the person or organization operating it.
+
+Use of an automated system to access the Software does not grant permission to reproduce, retain, redistribute, commercialize, train upon, or create derivative works from the Software.
+
+## 6. Contributions
+
+Unless a separate written agreement states otherwise, submission of code, documentation, designs, or other material to Zero State does not transfer ownership of Zero State's pre-existing intellectual property.
+
+Zero State may require contributors to execute a Contributor License Agreement, intellectual-property assignment, work-for-hire agreement, or other written agreement before accepting a contribution.
+
+Acceptance of a contribution does not change the licensing status of this repository.
+
+## 7. Third-Party Components
+
+The Software may incorporate libraries, packages, assets, datasets, or other materials governed by separate licenses.
+
+Those materials remain subject to their respective licenses.
+
+Nothing in this License restricts rights that a recipient independently possesses under a valid third-party license.
+
+Where this License conflicts with a valid license governing a third-party component, the third-party license governs that component only.
+
+## 8. Commercial Licensing
+
+Commercial, deployment, redistribution, modification, integration, OEM, white-label, hosted-service, or other rights may be available under a separate written agreement with Zero State.
+
+Permission granted for one repository, product, customer, project, or use case does not imply permission for another.
+
+## 9. Confidential and Trade Secret Information
+
+This License does not authorize disclosure or use of Zero State confidential information or trade secrets.
+
+Access to confidential or private repositories may be subject to additional agreements, including nondisclosure agreements, employment agreements, contractor agreements, customer agreements, or statements of work.
+
+## 10. Trademarks
+
+This License does not grant permission to use the names "Zero State," "Zero State LLC," associated product names, logos, marks, trade dress, branding, or other source identifiers except as necessary for truthful identification of the Software.
+
+No use may imply sponsorship, endorsement, partnership, affiliation, or approval by Zero State without prior written authorization.
+
+## 11. Patents
+
+No patent license is granted under this License except where Zero State expressly grants such rights in a separate written agreement.
+
+## 12. No Warranty
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE," WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, EXPRESS OR IMPLIED.
+
+ZERO STATE DISCLAIMS ALL WARRANTIES, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, ACCURACY, RELIABILITY, SECURITY, AND PERFORMANCE.
+
+## 13. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, ZERO STATE AND ITS MEMBERS, MANAGERS, EMPLOYEES, CONTRACTORS, AFFILIATES, LICENSORS, AND CONTRIBUTORS WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR LOSS OF PROFITS, REVENUE, DATA, BUSINESS, GOODWILL, OR BUSINESS OPPORTUNITY, ARISING FROM OR RELATED TO THE SOFTWARE OR THIS LICENSE.
+
+## 14. Termination
+
+Any permission granted under this License terminates automatically upon material violation of its terms.
+
+Termination does not limit any rights or remedies available to Zero State arising from conduct occurring before or after termination.
+
+Sections concerning ownership, restrictions, intellectual property, disclaimers, liability, and enforcement survive termination.
+
+## 15. No Open-Source Grant
+
+This License is a proprietary license.
+
+The Software is not licensed as open-source software merely because its source code can be viewed, accessed through a repository hosting service, or otherwise inspected.
+
+No permission granted by this License should be interpreted as satisfying the requirements of an open-source license.
+
+## 16. Repository Hosting Platforms
+
+Where the Software is hosted by GitHub or another repository hosting provider, access to and operation of the hosting platform may also be governed by that provider's terms.
+
+Nothing in this License is intended to revoke rights that Zero State must grant to the hosting provider or its users solely to the extent necessary for functionality expressly authorized by the applicable hosting-platform terms.
+
+Any use beyond those platform-specific rights remains subject to this License.
+
+## 17. Exceptions
+
+A restriction in this License does not apply where applicable law gives a person a right that cannot legally be restricted by contract or copyright.
+
+Nothing in this License is intended to restrict lawful activity that Zero State does not have the legal authority to prohibit.
+
+## 18. Separate Agreements
+
+If Zero State and a recipient enter into a separate written license, services agreement, statement of work, enterprise agreement, partnership agreement, or other contract governing the Software, that agreement controls to the extent of any conflict with this License.
+
+## 19. Severability
+
+If any provision of this License is determined to be unenforceable, that provision will be limited or modified to the minimum extent necessary to make it enforceable, and the remaining provisions will remain in effect.
+
+## 20. Reservation of Rights
+
+All rights not expressly granted under this License are reserved by Zero State LLC.
+
+---
+
+**Zero State LLC**
+Proprietary Software License Version 1.0 — August 2026
+
+For commercial licensing or permissions, contact Zero State LLC through an authorized Zero State communication channel.
