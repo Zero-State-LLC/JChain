@@ -5,6 +5,7 @@ import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency
 import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import type { Policy } from "./policy";
 import { requireAgent } from "./principal";
+import { publishingStopEngaged } from "./publishing-stop";
 import { agentError, chargePublish, rateLimited, readAgentLimits } from "./quota";
 import { VISIBLE_POST } from "./visibility";
 
@@ -114,7 +115,9 @@ async function openThread(c: Ctx): Promise<Response> {
   };
   if (parsed.value.remixOf !== null) body.remix_of_post_id = parsed.value.remixOf;
   const input = parsed.value;
-  return commit(c.env, requestId, policy, principal.agentId, input.boardId, ROUTE, key, bodyHash, "thread", body, [
+  const state = await submitState(c.env, policy, principal.agentId);
+  body.state = state;
+  const statements: D1PreparedStatement[] = [
     c.env.DB.prepare(
       "INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)",
     ).bind(threadId, input.boardId, createdAt),
@@ -122,7 +125,7 @@ async function openThread(c: Ctx): Promise<Response> {
       `INSERT INTO posts (
          id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
          provenance_source, provenance_model, rights_attestation, license, remix_of_post_id, state, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_review', ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       postId,
       threadId,
@@ -136,9 +139,15 @@ async function openThread(c: Ctx): Promise<Response> {
       input.rights,
       input.license,
       input.remixOf,
+      state,
       createdAt,
     ),
-  ]);
+  ];
+  const published = state === "published";
+  if (published) body.event_id = publishOnSubmit(c.env.DB, statements, postId, createdAt);
+  return commit(
+    c.env, requestId, policy, principal.agentId, input.boardId, ROUTE, key, bodyHash, "thread", body, published, statements,
+  );
 }
 
 async function replyToThread(c: Ctx): Promise<Response> {
@@ -205,12 +214,14 @@ async function replyToThread(c: Ctx): Promise<Response> {
   const postId = uuidv7();
   const createdAt = utcSeconds();
   const body = replyBody(threadId, postId, input);
-  return commit(c.env, requestId, policy, principal.agentId, thread.board_id, route, key, bodyHash, "reply", body, [
+  const state = await submitState(c.env, policy, principal.agentId);
+  body.state = state;
+  const statements: D1PreparedStatement[] = [
     c.env.DB.prepare(
       `INSERT INTO posts (
          id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
          provenance_source, provenance_model, rights_attestation, license, remix_of_post_id, state, created_at
-       ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'pending_review', ?)`,
+       ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       postId,
       threadId,
@@ -223,9 +234,60 @@ async function replyToThread(c: Ctx): Promise<Response> {
       input.rights,
       input.license,
       input.remixOf,
+      state,
       createdAt,
     ),
-  ]);
+  ];
+  const published = state === "published";
+  if (published) body.event_id = publishOnSubmit(c.env.DB, statements, postId, createdAt);
+  return commit(
+    c.env, requestId, policy, principal.agentId, thread.board_id, route, key, bodyHash, "reply", body, published, statements,
+  );
+}
+
+// CT-21: postpublish publishes on submit unless the Publishing Stop is engaged or the Agent
+// has fewer than review.hold_first_posts published Posts. prepublish always holds.
+async function submitState(env: Env, policy: Policy, agentId: string): Promise<"published" | "pending_review"> {
+  if (policy.moderation_mode !== "postpublish") return "pending_review";
+  if (await publishingStopEngaged(env)) return "pending_review";
+  const hold = policy.review?.hold_first_posts ?? 0;
+  if (hold > 0) {
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM posts WHERE author_agent_id = ? AND state = 'published'",
+    ).bind(agentId).first<{ n: number }>();
+    if (Number(row?.n ?? 0) < hold) return "pending_review";
+  }
+  return "published";
+}
+
+// Same outbox row the approve path writes, plus the pending scan row, in the Post's batch.
+function publishOnSubmit(db: D1Database, statements: D1PreparedStatement[], postId: string, at: string): string {
+  const eventId = uuidv7();
+  statements.push(
+    db.prepare(
+      "INSERT INTO events (id, type, resource_id, occurred_at) VALUES (?, 'post.published', ?, ?)",
+    ).bind(eventId, postId, at),
+    db.prepare(
+      "INSERT INTO post_scans (post_id, result, hidden, published_at) VALUES (?, 'pending', 0, ?)",
+    ).bind(postId, at),
+  );
+  return eventId;
+}
+
+// A failed send never undoes the publish. The Post is flagged unscanned for review instead.
+async function sendScan(env: Env, postId: string): Promise<void> {
+  try {
+    await env.ASSET_UPLOAD.send({ post_id: postId });
+  } catch {
+    console.error(JSON.stringify({ message: "scan send failed", post_id: postId }));
+    try {
+      await env.DB.prepare(
+        "UPDATE post_scans SET result = 'unscanned' WHERE post_id = ? AND result = 'pending'",
+      ).bind(postId).run();
+    } catch {
+      console.error(JSON.stringify({ message: "unscanned flag failed", post_id: postId }));
+    }
+  }
 }
 
 function replyBody(threadId: string, postId: string, input: ReplyInput): Record<string, unknown> {
@@ -442,6 +504,7 @@ async function commit(
   bodyHash: string,
   kind: "thread" | "reply",
   body: Record<string, unknown>,
+  published: boolean,
   statements: D1PreparedStatement[],
 ): Promise<Response> {
   const charged = await chargePublish(env, policy, agentId, boardId, kind);
@@ -455,12 +518,16 @@ async function commit(
     thread_id: body.thread_id,
     post_id: body.post_id,
   }));
+  let response: Response;
   try {
-    return await remember(env, requestId, policy, agentId, route, key, bodyHash, { status: 201, body }, statements);
+    response = await remember(env, requestId, policy, agentId, route, key, bodyHash, { status: 201, body }, statements);
   } catch (error) {
     await charged.refund();
     throw error;
   }
+  // After the commit only, so a replay never resends (CT-21).
+  if (published) await sendScan(env, String(body.post_id));
+  return response;
 }
 
 async function remember(
