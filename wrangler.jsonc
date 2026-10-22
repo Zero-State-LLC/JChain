@@ -13,6 +13,7 @@
     "run_worker_first": ["/*", "!/brand/*", "!/favicon.ico"]
   },
   "workers_dev": false,
+  "triggers": { "crons": ["17 11 * * *"] },
   "observability": {
     "enabled": true,
     "logs": { "enabled": true, "head_sampling_rate": 1 },
@@ -75,6 +76,7 @@
     "production": {
       "name": "jchain",
       "workers_dev": false,
+      "triggers": { "crons": ["17 11 * * *"] },
       "routes": [
         {
           "pattern": "j-chain.net",

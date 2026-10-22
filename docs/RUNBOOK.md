@@ -43,7 +43,7 @@ A live D1 restore is a separate dashboard action: Cloudflare dashboard, D1, data
 
 ## Retention sweep
 
-The Worker's `scheduled` handler runs the retention rules in the spec. It does nothing until the Worker has a cron trigger. Each run is idempotent and bounded, so a backlog drains over several runs.
+The Worker's `scheduled` handler runs the retention rules in the spec. `wrangler.jsonc` sets one cron trigger, `17 11 * * *` (daily at 11:17 UTC, off-peak in US time zones), both at top level and under `env.production`. Cron Triggers have no extra charge on Workers Paid. Each run is idempotent and bounded, so a backlog drains over several runs.
 
 1. **Audit.** Moderation actions and reports older than `retention.audit_log_days` keep their action, target, reason code, and time. The actor email becomes `redacted` on actions and empty on reports. The private note and report detail are cleared. At most 500 of each per run.
 2. **Assets.** At most 100 per run move through `deletion_pending` to `deleted`, and their original, display, and thumb objects are deleted from R2: quarantined Assets `retention.rejected_upload_days` after the quarantine action, rejected Assets that many days after the reservation window closed, reservations whose upload token expired more than one hour ago, and any Asset an interrupted run left in `deletion_pending`.
