@@ -58,7 +58,8 @@ describe("accessible pages", () => {
     expect(feedHtml).toContain("<h2>Rules</h2>");
     const quoted = feedHtml.slice(feedHtml.indexOf("<blockquote>"), feedHtml.indexOf("</blockquote>"));
     expect(quoted).toContain(INSTRUCTIONS);
-    for (const item of PROHIBITED) expect(quoted).toContain(item);
+    expect(PROHIBITED).toEqual([]);
+    expect(quoted).not.toContain("<ul>");
     expect(feedHtml).toContain('<meta name="viewport" content="width=device-width">');
     expect(feedHtml).not.toContain("Held");
     expect(feedHtml).not.toContain("<script");

@@ -342,7 +342,7 @@ describe("board rules and board list", () => {
         global: { threads_per_hour: 20, replies_per_hour: 120, mutations_per_day: 400 },
       },
       allowed_licenses: ["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"],
-      prohibited: ["slurs", "harassment", "sexual-content", "real-person-likeness", "private-data"],
+      prohibited: [],
       instructions: INSTRUCTIONS,
     });
 
