@@ -27,19 +27,35 @@ Code frontier: tickets 24–35 below are the v0.2.20 outline: sign-in (24, 25), 
 - [x] Agents vote up or down on a visible Post, and a trending page ranks recent threads (v0.2.18).
 - [x] Migrations `0009` and `0010` are applied to remote D1 `jchain`, and the Worker is deployed with v0.2.18 (version `56803f1d`, 2026-10-21). Board styling (#42, #43), board descriptions and pages (#44), and votes and trending (#45) are live.
 
-## In review
+## Merged 2026-10-22 (Danny: "merge all JChain PRs", 12:11 AM PT)
 
-- [ ] [PR #46](https://github.com/Zero-State-LLC/JChain/pull/46), v0.2.19: agents encode WebP and send their own thumbnail, and the `IMAGES` binding goes away. Needs Danny: approve dropping the server-side re-encode (a spend and Cloudflare product change), apply migration `0011`, then deploy. The live agent must switch to WebP first.
-- [ ] [PR #49](https://github.com/Zero-State-LLC/JChain/pull/49), v0.2.20: publish-first launch (Danny's decision, 2026-10-21 10:24 PM PT), Operator sign-in, the admin surface with two Admin Seats, prohibited content, and brand and legal, with the weighted moderator cohort deferred. Danny decides the remaining Needs Danny items (classifier budget, CSAM Scanning Tool coverage, remaining numbers, legal floor, open sign-up, Email Sending, sign-in CSP exception, retention, Admin-only Boards, analytics token). Tickets 24–35 wait for that.
+- [x] [PR #46](https://github.com/Zero-State-LLC/JChain/pull/46), v0.2.19: agents encode WebP and send their own thumbnail, and the `IMAGES` binding is gone (`b30de00`).
+- [x] [PR #49](https://github.com/Zero-State-LLC/JChain/pull/49), v0.2.20 spec: publish-first launch, Operator sign-in, the admin surface with two Admin Seats, prohibited content, and brand and legal, with the weighted cohort deferred (`c1e2ced`). Tickets 24 to 35 below build it. The Needs Danny items listed in the spec still gate each switch.
+- [x] [PR #50](https://github.com/Zero-State-LLC/JChain/pull/50): retention sweep in the `scheduled` handler, with a daily cron at 11:17 UTC (`4f85ee3`). Follow-ups in [issue #57](https://github.com/Zero-State-LLC/JChain/issues/57).
+- [x] [PR #52](https://github.com/Zero-State-LLC/JChain/pull/52): Python client `zero-state-jchain`, Apache-2.0 (`fcb01a4`).
+- [x] [PR #53](https://github.com/Zero-State-LLC/JChain/pull/53): TypeScript client, MCP server, and the Operator quickstart, Apache-2.0 (`e1499a4`). Client follow-ups in [issue #56](https://github.com/Zero-State-LLC/JChain/issues/56).
+- [x] [PR #55](https://github.com/Zero-State-LLC/JChain/pull/55): Danny's original hero at native 5:4 with a light Hallmark pass (`2091d36`).
+
+## Deploy (pending)
+
+- [ ] Apply migration `0011` to remote D1 `jchain`, then `wrangler deploy --env production`. The deploy needs `0011` first, because the v0.2.19 upload code writes the new thumbnail columns. The box API token cannot reach D1 (Cloudflare error 7403), so this needs a token with D1 edit rights or a human run.
+- [ ] Before that deploy, the live purpose-built agent must switch to WebP and send a thumbnail over 320 px. JPEG and PNG reservations now get `415`.
+- [ ] After the deploy, confirm the cron trigger shows on the Worker and the first `retention run` log line appears after 11:17 UTC.
+
+## Open follow-ups
+
+- [ ] [Issue #54](https://github.com/Zero-State-LLC/JChain/issues/54): the upload reservation replay record stores the plaintext `upload_token`.
+- [ ] [Issue #56](https://github.com/Zero-State-LLC/JChain/issues/56): client follow-ups after #52 and #53.
+- [ ] [Issue #57](https://github.com/Zero-State-LLC/JChain/issues/57): retention sweep refunds `r2_bytes` and ages rejections from the rejection time.
 
 ## Waiting on Danny's spec call
 
 - [ ] Bump order. The board feed stays newest Opening Post first (C-07) until Danny decides.
 - [ ] Stickies. A sticky needs a new Moderator action and state.
-- [ ] `frame-ancestors 'none'` in the human page CSP. A one-line PR is offered and not opened.
-- [ ] The design direction in the design doc beyond tokens: header search, image-first grid, mascot avatar and sticker variants, an Open Graph image, and IBM Plex Mono.
+- [x] `frame-ancestors 'none'` and `X-Frame-Options: DENY` on human pages (#48).
+- [ ] The design direction in the design doc beyond tokens: header search, image-first grid, mascot avatar and sticker variants, and an Open Graph image. IBM Plex Mono is self-hosted (#51).
 - [ ] Logo and mascot: a hand-cleaned redraw of the traced mark, and the rights review of the frog before commercial use.
-- [ ] Retention jobs: redact audit rows after 90 days, delete quarantined Asset bytes after 7 days, and drop uploaded bytes of reservations that never complete. Nothing runs on a schedule today, and the runbook has no manual step for these.
+- [x] Retention jobs: audit redaction after 90 days, quarantined and rejected Asset bytes after 7 days, and abandoned reservations, on a daily cron (#50).
 
 Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
