@@ -33,7 +33,7 @@ export function characterLength(value: string): number {
   return Array.from(value).length;
 }
 
-export const HTML_CSP = "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'";
+export const HTML_CSP = "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'";
 export const HOME_CSP = HTML_CSP;
 
 export function htmlResponse(requestId: string, html: string, status = 200, csp = HTML_CSP): Response {
@@ -42,6 +42,7 @@ export function htmlResponse(requestId: string, html: string, status = 200, csp 
     headers: {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": csp,
+      "x-frame-options": "DENY",
       "x-request-id": requestId,
       "cache-control": "no-store",
     },
