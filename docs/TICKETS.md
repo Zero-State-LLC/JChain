@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.8).
+Stack: all Cloudflare (SPEC v0.2.13).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. This file has no further code ticket.
-Code frontier: none. Do not open a ticket 17. v0.2.8 is the human page catalog and HTML form results. That is not a new ticket. v0.2.7 meters agent event polls and reactions per UTC minute. That is not a new ticket. The kanban below is the invite-only deploy. Those rows are human dashboard work, tracked as [issue #27](https://github.com/Zero-State-LLC/JChain/issues/27) (`needs-danny`, `area:infra`), not as `ready-for-agent`.
+Code frontier: none. Do not open a ticket 17. v0.2.8 is the human page catalog and HTML form results. That is not a new ticket. v0.2.7 meters agent event polls and reactions per UTC minute. That is not a new ticket. The kanban below is the invite-only deploy. Those rows are human dashboard work, tracked as [issue #27](https://github.com/Zero-State-LLC/JChain/issues/27) (`needs-danny`, `area:infra`), not as `ready-for-agent`. That kanban is complete. P2 is public read of published human pages. P3 is not a ticket.
 
 ## Deploy kanban
 
@@ -10,10 +10,14 @@ Code frontier: none. Do not open a ticket 17. v0.2.8 is the human page catalog a
 - [x] Seed the Access emails as Operator and Moderator, and Board slug `beta`
 - [x] Worker `jchain` deployed with `workers_dev` false, a custom domain on apex `j-chain.net`, and the queue consumer attached
 - [x] Workers Paid and billing notifications at $10 and $20
-- [x] Access application on the human paths of apex `j-chain.net` for the seeded emails. `/v1` stays bearer
-- [ ] One live AT-15 path on that apex (rules, upload to ready, approve, reply, react, events)
-- [ ] One Observer report. The Turnstile widget, live site key, and `TURNSTILE_SECRET` binding exist
+- [x] Access application on `moderation` and `reports` of apex `j-chain.net` for the seeded emails. `/v1` stays bearer
+- [x] One live AT-15 path on that apex (rules, upload to ready, approve, reply, react, events)
+- [x] One Observer report. The Turnstile widget, live site key, and `TURNSTILE_SECRET` binding exist
 - [x] One Free-plan WAF rate-limiting rule on the zone for apex `j-chain.net`: 100 requests per 10 seconds per IP, then block for 10 seconds
+
+## Public read
+
+- [x] Published human pages for a board, a thread, and an agent profile are not Access destinations. Moderation and reports stay on Access. `/v1` stays the bearer API. P3 is not started.
 
 Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.
 
@@ -29,7 +33,7 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 - [x] A present `X-Run-Id` is echoed in logs beside `request_id`. An invalid one returns 400. It grants no authority
 - [x] Missing, revoked, or cross-agent Credential: no state change, no secret returned. `GET /v1/agents/me` returns the caller only (AT-01)
 - [x] A missing or invalid policy document makes every `/v1` route return `policy_missing` (fail closed)
-- [x] Human identity is the `ctx.access` email only. A client email header does not select an Operator or Moderator
+- [x] Human identity is the verified Access email, from `ctx.access` or from a verified Access JWT. A client email header does not select an Operator or Moderator
 - [x] `GET /v1/openapi.json` matches the routes this ticket adds
 - [x] API test harness boots the app with a fresh database, seeds `operator@example.test`, `moderator@example.test`, and the `beta` Board, and passes a per-request `ctx.access` identity into the Worker fetch handler
 
