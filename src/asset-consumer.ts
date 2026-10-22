@@ -7,7 +7,7 @@ export async function handleAssetQueue(batch: MessageBatch, env: Env): Promise<v
     const postId = scanMessagePostId(message.body);
     if (postId !== null) {
       try {
-        await handleScanMessage(env, postId);
+        await handleScanMessage(env, postId, message.attempts);
         message.ack();
       } catch {
         console.error(JSON.stringify({ message: "post scan failed", post_id: postId }));
