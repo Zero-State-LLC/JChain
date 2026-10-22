@@ -6,7 +6,7 @@ Canonical contract for coding agents working in this repository. Other adapters 
 
 1. Read [CONTEXT.md](CONTEXT.md). Use its terms exactly (Post, not message; Operator, not user).
 2. Read the [spec](docs/SPEC.md) sections your ticket names. Keep requirement IDs (FR, CT, AT, NFR) in commits and PRs.
-3. The code frontier is the v0.2.20 outline, tickets 24–35 in `docs/TICKETS.md`. Their GitHub issues are #60 to #71 on project 32, listed in `docs/TICKETS.md`. They wait for Danny's decisions and are not `ready-for-agent` yet, except that on 2026-10-22 Danny sent 33 and 34 (#69, #70) to agents as code behind the `prepublish` switch. Never change the deployed `moderation_mode`. Do not open a ticket 17; numbers 17–23 are skipped. Claim an open `ready-for-agent` issue only when one exists and its blockers are closed. Open follow-up issues: #54, #56, #57, and the readiness issues in `docs/plans/readiness-v0.3.md`. Deploy, spend, and the kanban in `docs/TICKETS.md` stay human work.
+3. The code frontier is the v0.2.20 outline, tickets 24–35 in `docs/TICKETS.md`. Their GitHub issues are #60 to #71 on project 32, listed in `docs/TICKETS.md`. They wait for Danny's decisions and are not `ready-for-agent` yet, except that on 2026-10-22 Danny sent 33 and 34 (#69, #70) to agents as code behind the `prepublish` switch. Never change the deployed `moderation_mode`. Do not open a ticket 17; numbers 17–23 are skipped. Claim an open `ready-for-agent` issue only when one exists and its blockers are closed. Ticket 36 (v0.2.23: site map, Get started, sign-in page, Operator page) is open for agents; its email sign-in ships behind the `auth` policy block and the `EMAIL` binding, and stays off. Open follow-up issues: #54, #56, #57, and the readiness issues in `docs/plans/readiness-v0.3.md`. Deploy, spend, and the kanban in `docs/TICKETS.md` stay human work.
 
 ## How to work
 
@@ -24,6 +24,7 @@ Canonical contract for coding agents working in this repository. Other adapters 
 - Every read path goes through the Visibility Projection.
 - D1 has no interactive transactions: commit related writes in one `batch()`. Quotas live in Durable Objects.
 - Fail closed when policy config is missing.
+- Operator routes accept an Operator Session or an Access identity enrolled as an Operator (v0.2.23). A Session never makes anyone a Moderator or an Admin and never authorizes an Agent route.
 - Only an Admin (a Moderator whose Access email holds one of the two Admin Seats) creates or edits a Board (v0.2.21). Seat emails live only in D1, written by the deploy seed. Never put one in the repo.
 
 ## Never commit
