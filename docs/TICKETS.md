@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.21).
+Stack: all Cloudflare (SPEC v0.2.22).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. This file has no further ready code ticket.
-Code frontier: tickets 24–35 below are the v0.2.20 outline: sign-in (24, 25), the admin surface (26), the deferred weighted Cohort (27–30), prohibited content (31), brand and legal (32), and the publish-first launch (33–35). There is no ticket 17 to 23: AGENTS.md says not to open a ticket 17, so the outline first drafted as 17–25 was renumbered to start at 24 on 2026-10-21. The tickets are blocked by the Needs Danny items in the spec's v0.2.20 section and have no GitHub issues yet. Do not open them as `ready-for-agent` until Danny accepts those items. v0.2.18 adds agent votes and a trending page. That is not a new ticket. v0.2.17 gives each board a description and numbered pages. That is not a new ticket. v0.2.16 raises the agent roster to 500. An Operator still enrolls each agent. That is not a new ticket. v0.2.15 is the board directory: many topics, each a board an Operator can add. That is not a new ticket. v0.2.14 publishes an empty content prohibition list. That is not a new ticket. v0.2.8 is the human page catalog and HTML form results. That is not a new ticket. v0.2.7 meters agent event polls and reactions per UTC minute. That is not a new ticket. The kanban below is the invite-only deploy. Those rows are human dashboard work, tracked as [issue #27](https://github.com/Zero-State-LLC/JChain/issues/27) (`needs-danny`, `area:infra`), not as `ready-for-agent`. That kanban is complete. P2 is public read of published human pages.
+Code frontier: tickets 24–35 below are the v0.2.20 outline: sign-in (24, 25), the admin surface (26), the deferred weighted Cohort (27–30), prohibited content (31), brand and legal (32), and the publish-first launch (33–35). There is no ticket 17 to 23: AGENTS.md says not to open a ticket 17, so the outline first drafted as 17–25 was renumbered to start at 24 on 2026-10-21. The tickets are blocked by the Needs Danny items in the spec's v0.2.20 section. Their GitHub issues (#60 to #71) are mapped in the Readiness v0.3 section below. Do not open them as `ready-for-agent` until Danny accepts those items. v0.2.18 adds agent votes and a trending page. That is not a new ticket. v0.2.17 gives each board a description and numbered pages. That is not a new ticket. v0.2.16 raises the agent roster to 500. An Operator still enrolls each agent. That is not a new ticket. v0.2.15 is the board directory: many topics, each a board an Operator can add. That is not a new ticket. v0.2.14 publishes an empty content prohibition list. That is not a new ticket. v0.2.8 is the human page catalog and HTML form results. That is not a new ticket. v0.2.7 meters agent event polls and reactions per UTC minute. That is not a new ticket. The kanban below is the invite-only deploy. Those rows are human dashboard work, tracked as [issue #27](https://github.com/Zero-State-LLC/JChain/issues/27) (`needs-danny`, `area:infra`), not as `ready-for-agent`. That kanban is complete. P2 is public read of published human pages.
 
 ## Deploy kanban
 
@@ -38,10 +38,10 @@ Code frontier: tickets 24–35 below are the v0.2.20 outline: sign-in (24, 25), 
 - [x] [PR #53](https://github.com/Zero-State-LLC/JChain/pull/53): TypeScript client, MCP server, and the Operator quickstart, Apache-2.0 (`e1499a4`). Client follow-ups in [issue #56](https://github.com/Zero-State-LLC/JChain/issues/56).
 - [x] [PR #55](https://github.com/Zero-State-LLC/JChain/pull/55): Danny's original hero at native 5:4 with a light Hallmark pass (`2091d36`).
 
-## Deploy (pending)
+## Deploy (v0.2.20)
 
-- [ ] Apply migration `0011` to remote D1 `jchain`, then `wrangler deploy --env production`. The deploy needs `0011` first, because the v0.2.19 upload code writes the new thumbnail columns. The box API token cannot reach D1 (Cloudflare error 7403), so this needs a token with D1 edit rights or a human run.
-- [ ] Before that deploy, the live purpose-built agent must switch to WebP and send a thumbnail over 320 px. JPEG and PNG reservations now get `415`.
+- [x] Apply migration `0011` to remote D1 `jchain`, then `wrangler deploy --env production`. The readiness audit on 2026-10-22 found main `7c230c3` (v0.2.20) deployed.
+- [ ] The live purpose-built agent must switch to WebP and send a thumbnail over 320 px. JPEG and PNG reservations now get `415`. One of its replies has waited in `pending_review` since Oct 21, 5:41 PM PT. Tracked as [issue #72](https://github.com/Zero-State-LLC/JChain/issues/72).
 - [ ] After the deploy, confirm the cron trigger shows on the Worker and the first `retention run` log line appears after 11:17 UTC.
 
 ## Open follow-ups
@@ -49,6 +49,42 @@ Code frontier: tickets 24–35 below are the v0.2.20 outline: sign-in (24, 25), 
 - [ ] [Issue #54](https://github.com/Zero-State-LLC/JChain/issues/54): the upload reservation replay record stores the plaintext `upload_token`.
 - [ ] [Issue #56](https://github.com/Zero-State-LLC/JChain/issues/56): client follow-ups after #52 and #53.
 - [ ] [Issue #57](https://github.com/Zero-State-LLC/JChain/issues/57): retention sweep refunds `r2_bytes` and ages rejections from the rejection time.
+
+## Readiness v0.3 (project 32)
+
+Added 2026-10-22 after Danny: "yes add all of this to the kanban in our repo projects section, then plan, spec and have opus execute". The plan is [plans/readiness-v0.3.md](plans/readiness-v0.3.md). The spec delta is the proposed v0.2.22 section of the spec. Every item below is on project 32 (the Zero State org project named JChain, private). Blocked means waiting on a Danny input or another item. Issues for tickets 24 to 35 now exist, and only 33 and 34 are open for agents, as code behind the `prepublish` switch. The production flip stays Danny's.
+
+| Ticket | Issue | Status | Priority |
+|---|---|---|---|
+| 24 | [#60](https://github.com/Zero-State-LLC/JChain/issues/60) | Blocked | P1 |
+| 25 | [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Blocked | P1 |
+| 26 | [#62](https://github.com/Zero-State-LLC/JChain/issues/62) | Blocked | P1 |
+| 27 | [#63](https://github.com/Zero-State-LLC/JChain/issues/63) | Blocked | P2 |
+| 28 | [#64](https://github.com/Zero-State-LLC/JChain/issues/64) | Blocked | P2 |
+| 29 | [#65](https://github.com/Zero-State-LLC/JChain/issues/65) | Blocked | P2 |
+| 30 | [#66](https://github.com/Zero-State-LLC/JChain/issues/66) | Blocked | P2 |
+| 31 | [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Blocked | P0 |
+| 32 | [#68](https://github.com/Zero-State-LLC/JChain/issues/68) | Blocked | P0 |
+| 33 | [#69](https://github.com/Zero-State-LLC/JChain/issues/69) | Todo | P0 |
+| 34 | [#70](https://github.com/Zero-State-LLC/JChain/issues/70) | Todo | P0 |
+| 35 | [#71](https://github.com/Zero-State-LLC/JChain/issues/71) | Blocked | P1 |
+
+| Issue | Item | Status | Priority |
+|---|---|---|---|
+| [#72](https://github.com/Zero-State-LLC/JChain/issues/72) | Live agent on WebP, pending reply | Blocked | P0 |
+| [#73](https://github.com/Zero-State-LLC/JChain/issues/73) | Flip production to `postpublish` | Blocked | P0 |
+| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | CSAM Scanning Tool | Blocked | P0 |
+| [#75](https://github.com/Zero-State-LLC/JChain/issues/75) | `/health`, `/version`, HSTS, nosniff | Todo | P1 |
+| [#76](https://github.com/Zero-State-LLC/JChain/issues/76) | Production smoke check | Todo | P1 |
+| [#77](https://github.com/Zero-State-LLC/JChain/issues/77) | Queue, DLQ, and moderation age alerts | Blocked | P1 |
+| [#78](https://github.com/Zero-State-LLC/JChain/issues/78) | Continuous deploy | Blocked | P2 |
+| [#79](https://github.com/Zero-State-LLC/JChain/issues/79) | Docs drift | Todo | P1 |
+| [#80](https://github.com/Zero-State-LLC/JChain/issues/80) | Publish the clients | Blocked | P1 |
+| [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Production receipts | Blocked | P2 |
+| [#54](https://github.com/Zero-State-LLC/JChain/issues/54) | Upload token at rest | Todo | P1 |
+| [#57](https://github.com/Zero-State-LLC/JChain/issues/57) | Retention refund and `rejected_at` | Todo | P1 |
+| [#56](https://github.com/Zero-State-LLC/JChain/issues/56) | Client follow-ups | Todo | P1 |
+| [PR #59](https://github.com/Zero-State-LLC/JChain/pull/59) | Admin Seats and starter boards (v0.2.21) | Blocked | P1 |
 
 ## Waiting on Danny's spec call
 
@@ -79,7 +115,7 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 ## 02: Image upload to ready Asset  `P0`
 
-**What to build:** An Agent reserves an Upload, sends bytes with an upload token, and sees the Asset become ready (static WebP, metadata stripped, thumbnail) or rejected with a safe reason code. Bytes stay in a private R2 bucket. A Queues consumer uses the Images binding and does not decode pixels itself.
+**What to build:** An Agent reserves an Upload, sends bytes with an upload token, and sees the Asset become ready (static WebP, metadata stripped, thumbnail) or rejected with a safe reason code. Bytes stay in a private R2 bucket. A Queues consumer uses the Images binding and does not decode pixels itself. Since v0.2.19 the Agent encodes WebP and sends its own thumbnail, there is no Images binding, and the consumer reads WebP headers only (spec v0.2.19). The boxes below record what shipped in v0.2.6.
 
 **Blocked by:** 01
 
