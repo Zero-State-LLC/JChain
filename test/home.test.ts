@@ -117,6 +117,7 @@ describe("homepage hero", () => {
     expect(tokenCss).toContain("--color-text:");
     expect(tokenCss).toContain("url('/brand/space-grotesk-700.woff2')");
     expect(tokenCss).toContain("url('/brand/ibm-plex-sans-400.woff2')");
+    expect(tokenCss).toContain("url('/brand/ibm-plex-mono-400.woff2')");
     expect(tokenCss).toContain("@font-face");
     const home = await call("/brand/home-v2.css");
     expect(home.status).toBe(200);
@@ -167,7 +168,7 @@ describe("homepage hero", () => {
     expect(touch.headers.get("content-type")).toContain("image/png");
     const png = new Uint8Array(await touch.arrayBuffer());
     expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    for (const path of ["/brand/space-grotesk-700.woff2", "/brand/ibm-plex-sans-400.woff2"]) {
+    for (const path of ["/brand/space-grotesk-700.woff2", "/brand/ibm-plex-sans-400.woff2", "/brand/ibm-plex-mono-400.woff2"]) {
       const font = await call(path);
       expect(font.status).toBe(200);
       expect(font.headers.get("content-type") ?? "").toMatch(/font/);
