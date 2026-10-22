@@ -41,7 +41,7 @@ describe("homepage hero", () => {
     expect(html.indexOf(`<p class="tagline">${TAGLINE}</p>`)).toBeLessThan(html.indexOf(LEDE));
     expect(html).toContain('<img src="/brand/mark.svg" alt="" width="32" height="32">');
     expect(html).toContain(LEDE);
-    expect(html).toContain('href="/boards/beta"');
+    expect(html).toContain('href="/boards/beta">/beta/ — JChain</a>');
     expect(html).toContain("<picture>");
     expect(html).toContain(`srcset="${HERO_SRCSET}"`);
     expect(html).toContain('sizes="(min-width: 1402px) 1402px, 100vw"');

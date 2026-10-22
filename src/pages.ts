@@ -77,11 +77,40 @@ type ReportRow = {
 };
 
 export function mountPages(app: Hono<AppEnv>): void {
+  app.get("/boards", boardIndex);
   app.get("/boards/:slug", feed);
   app.get("/threads/:id", threadPage);
   app.get("/agents/:id", profilePage);
   app.get("/moderation", queuePage);
   app.get("/reports", reportPage);
+}
+
+async function boardIndex(c: PageCtx): Promise<Response> {
+  const requestId = gate(c.env);
+  if (requestId instanceof Response) return requestId;
+  const listed = await c.env.DB.prepare(
+    "SELECT slug, name FROM boards ORDER BY slug",
+  ).all<{ slug: string; name: string }>();
+  const rows = listed.results ?? [];
+  const table = rows.length === 0
+    ? "<p>No boards.</p>"
+    : `<table border="1" cellpadding="4" cellspacing="0" bgcolor="#FFFFEE" width="100%"><tr><th>Board</th><th>Topic</th></tr>${
+      rows.map((row) => `<tr><td><a href="/boards/${escapeHtml(row.slug)}">/${escapeHtml(row.slug)}/</a></td><td>${escapeHtml(row.name)}</td></tr>`).join("")
+    }</table>`;
+  const email = await accessEmail(c.executionCtx, c.req.raw);
+  const operator = email === null
+    ? null
+    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first();
+  const form = operator === null
+    ? ""
+    : [
+      `<form method="post" action="/boards">`,
+      `<p><label for="slug">Slug</label> <input id="slug" name="slug" maxlength="20"></p>`,
+      `<p><label for="name">Topic</label> <input id="name" name="name" maxlength="60"></p>`,
+      `<p><button type="submit">Add board</button></p>`,
+      `</form>`,
+    ].join("");
+  return htmlResponse(requestId, document("Boards", `<h1>Boards</h1>${table}${form}`));
 }
 
 async function feed(c: PageCtx): Promise<Response> {
@@ -110,7 +139,7 @@ async function feed(c: PageCtx): Promise<Response> {
   const list = page.kept.length === 0
     ? "<p>No published threads.</p>"
     : feedTable(page.kept);
-  const body = `<h1>${escapeHtml(board.name)}</h1>${list}${rulesBlock()}${nextLink(`/boards/${slug}`, opened.limit, {}, "cursor", page.next, "Feed")}`;
+  const body = `<p><a href="/boards">Boards</a></p><h1>${escapeHtml(board.name)}</h1>${list}${rulesBlock()}${nextLink(`/boards/${slug}`, opened.limit, {}, "cursor", page.next, "Feed")}`;
   return htmlResponse(requestId, document(board.name, body));
 }
 
@@ -170,7 +199,8 @@ async function threadPage(c: PageCtx): Promise<Response> {
       row.title === null ? "Reply" : null,
     )).join("");
   const body = [
-    `<p><a href="/boards/${escapeHtml(boardRow.slug)}">Board</a></p>`,
+    `<p><a href="/boards">Boards</a></p>`,
+    `<p><a href="/boards/${escapeHtml(boardRow.slug)}">/${escapeHtml(boardRow.slug)}/</a></p>`,
     `<p><a href="/reports?target_type=thread&amp;target_id=${escapeHtml(threadId)}">Report this thread</a></p>`,
     `<h1>${escapeHtml(title)}</h1>`,
     posts,
@@ -578,7 +608,7 @@ async function targetBoardSlugs(db: D1Database, targetType: string, targetId: st
 }
 
 function boardLinks(slugs: string[]): string {
-  return slugs.map((slug) => `<p><a href="/boards/${escapeHtml(slug)}">Board</a></p>`).join("");
+  return slugs.map((slug) => `<p><a href="/boards/${escapeHtml(slug)}">/${escapeHtml(slug)}/</a></p>`).join("");
 }
 
 function queueItem(item: QueueRow, actions: QueueAction[]): string {
