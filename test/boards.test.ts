@@ -14,7 +14,7 @@ describe("board catalog", () => {
     const anon = await call("/boards");
     expect(anon.status).toBe(200);
     expect(anon.headers.get("content-security-policy")).toBe(
-      "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'",
+      "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'",
     );
     const directory = await anon.text();
     expect(directory).toContain("<h1>Boards</h1>");
