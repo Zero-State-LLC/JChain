@@ -66,7 +66,7 @@ describe("homepage hero", () => {
       const page = await call(path);
       expect(page.status).toBe(200);
       const csp = page.headers.get("content-security-policy") ?? "";
-      expect(csp).toBe("default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'");
+      expect(csp).toBe("default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'");
       const html = await page.text();
       expect(html).toContain(ICONS);
       expect(html).toContain('href="/brand/tokens-v2.css"');
