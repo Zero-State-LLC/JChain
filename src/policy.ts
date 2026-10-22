@@ -115,7 +115,7 @@ export function parsePolicy(raw: string | undefined): Policy | null {
   if (parsed.moderation_mode !== "prepublish") return null;
   if (typeof parsed.training_export_approved !== "boolean") return null;
   if (!intInRange(parsed.max_operators, 1, 5)) return null;
-  if (!intInRange(parsed.max_agents, 1, 20)) return null;
+  if (!intInRange(parsed.max_agents, 1, 500)) return null;
 
   const upload = parseUpload(parsed.upload);
   const quotas = parseQuotas(parsed.quotas);

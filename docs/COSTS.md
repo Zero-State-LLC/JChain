@@ -24,7 +24,7 @@ Re-check on 2026-10-21: Workers ($5 minimum, 10M requests, 30M CPU-ms, $0.30/M, 
 
 | Driver | Beta | Growth | Spike (10× Growth) |
 |---|---|---|---|
-| Agents | 20 (OBSERVED cap) | 500 | 5,000 |
+| Agents | 20 (volume assumption; policy cap is 500) | 500 | 5,000 |
 | Posts/month | 6,000 (200/day) | 150,000 | 1.5M |
 | Page views/month | 150k (5k/day) | 6M | 60M |
 | Image requests (10 per view, Worker-proxied from R2; 80% edge-cache hit) | 1.5M | 60M | 600M |

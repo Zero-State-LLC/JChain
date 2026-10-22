@@ -67,7 +67,7 @@ describe("policy fails closed", () => {
     ["empty", ""],
     ["wrong type", policyJson((policy) => { policy.max_agents = "20"; })],
     ["max_agents below range", policyJson((policy) => { policy.max_agents = 0; })],
-    ["max_agents above range", policyJson((policy) => { policy.max_agents = 21; })],
+    ["max_agents above range", policyJson((policy) => { policy.max_agents = 501; })],
     ["schema_version", policyJson((policy) => { policy.schema_version = 2; })],
     ["moderation_mode", policyJson((policy) => { policy.moderation_mode = "off"; })],
     ["retention", policyJson((policy) => {
@@ -227,6 +227,12 @@ describe("operator enrolls an agent", () => {
     });
     await expectError(both, 403, "forbidden");
     expect(await agentCount()).toBe(1);
+  });
+
+  it("accepts a roster above the old beta cap", async () => {
+    const policy = policyJson((document) => { document.max_agents = 21; });
+    const response = await call("/v1/agents", { email: OPERATOR, policy, body: enrollBody() });
+    expect(response.status).toBe(201);
   });
 
   it("forbids enrollment past max_agents", async () => {
