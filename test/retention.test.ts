@@ -155,10 +155,13 @@ describe("retention sweep", () => {
     const open = await seedAsset("reserved", at(-1 * HOUR), at(23 * HOUR), ["original"]);
     const uploaded = await seedAsset("uploaded", at(-26 * HOUR), at(-2 * HOUR), ["original"]);
 
+    await env.MEDIA.put(`${originalKey(abandoned)}/thumb`, new Uint8Array([1]));
+
     await runScheduled();
 
     expect(await assetState(abandoned)).toBe("deleted");
     expect(await stored(abandoned)).toBe(0);
+    expect(await env.MEDIA.head(`${originalKey(abandoned)}/thumb`)).toBeNull();
     const token = await env.DB.prepare("SELECT COUNT(*) AS n FROM upload_tokens WHERE asset_id = ?").bind(abandoned).first<{ n: number }>();
     expect(Number(token?.n)).toBe(0);
     expect(await assetState(inGrace)).toBe("reserved");

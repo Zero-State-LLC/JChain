@@ -107,6 +107,8 @@ async function deleteExpiredAssets(env: RetentionEnv, policy: Policy, now: numbe
   ]);
   await env.MEDIA.delete(ids.flatMap((id) => [
     originalKey(id),
+    // Staged agent thumbnail when v0.2.19 (PR #46) lands. Absent keys are a no-op.
+    `${originalKey(id)}/thumb`,
     derivativeKey(id, "display"),
     derivativeKey(id, "thumb"),
   ]));
