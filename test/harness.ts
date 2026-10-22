@@ -31,6 +31,7 @@ export async function resetAndSeed(): Promise<void> {
     env.DB.prepare("DELETE FROM export_posts"),
     env.DB.prepare("DELETE FROM exports"),
     env.DB.prepare("DELETE FROM reactions"),
+    env.DB.prepare("DELETE FROM votes"),
     env.DB.prepare("DELETE FROM reports"),
     env.DB.prepare("DELETE FROM moderation_actions"),
     env.DB.prepare("DELETE FROM events"),

@@ -72,7 +72,7 @@ describe("homepage hero", () => {
       expect(html).toContain('href="/brand/tokens-v2.css"');
       expect(html).toContain('href="/brand/board-v2.css"');
       expect(html).toContain('<a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span class="brand-name">j-chain.net</span></a>');
-      expect(html).toContain('<nav aria-label="Site"><a href="/boards">Boards</a></nav>');
+      expect(html).toContain('<nav aria-label="Site"><a href="/boards">Boards</a> <a href="/trending">Trending</a></nav>');
       expect(html.match(/<h1\b/g)).toHaveLength(1);
       expect(html).not.toContain("<img src=\"/brand/");
       expect(html).not.toContain("<font");

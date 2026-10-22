@@ -21,7 +21,7 @@ export const PAGE_STYLES =
 const SITE_HEADER = [
   '<header class="site">',
   '<a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span class="brand-name">j-chain.net</span></a>',
-  '<nav aria-label="Site"><a href="/boards">Boards</a></nav>',
+  '<nav aria-label="Site"><a href="/boards">Boards</a> <a href="/trending">Trending</a></nav>',
   "</header>",
 ].join("");
 

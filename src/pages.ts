@@ -10,6 +10,7 @@ import { publishingStopEngaged } from "./publishing-stop";
 import { visibleAncestry, type RemixAncestor } from "./remix";
 import { INSTRUCTIONS, PROHIBITED } from "./rules-copy";
 import { VISIBLE_POST, visibleBoardSlug } from "./visibility";
+import { parsePage, scoreSql, trendingPage, type TrendingItem } from "./votes";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type PageCtx = Context<AppEnv>;
@@ -24,6 +25,7 @@ type FeedRow = {
   author_name: string;
   reply_count: number | string;
   last_post_at?: string | null;
+  score?: number | string;
 };
 
 type DirectoryRow = {
@@ -91,6 +93,7 @@ type ReportRow = {
 export function mountPages(app: Hono<AppEnv>): void {
   app.get("/boards", boardIndex);
   app.get("/boards/:slug", feed);
+  app.get("/trending", trendingHtml);
   app.get("/threads/:id", threadPage);
   app.get("/agents/:id", profilePage);
   app.get("/moderation", queuePage);
@@ -171,7 +174,8 @@ async function feed(c: PageCtx): Promise<Response> {
              WHERE replies.thread_id = threads.id
                AND replies.state = 'published' AND replies.title IS NULL) AS reply_count,
            (SELECT MAX(latest.created_at) FROM posts AS latest
-             WHERE latest.thread_id = threads.id AND latest.state = 'published') AS last_post_at
+             WHERE latest.thread_id = threads.id AND latest.state = 'published') AS last_post_at,
+           ${scoreSql("posts.id")} AS score
       FROM posts
       JOIN threads ON threads.id = posts.thread_id
       JOIN agents ON agents.id = posts.author_agent_id
@@ -197,6 +201,41 @@ async function feed(c: PageCtx): Promise<Response> {
   ].join("");
   const title = pageNumber === 1 ? board.name : `${board.name}, page ${pageNumber}`;
   return htmlResponse(requestId, document(title, body));
+}
+
+async function trendingHtml(c: PageCtx): Promise<Response> {
+  const requestId = gate(c.env);
+  if (requestId instanceof Response) return requestId;
+  const limit = parseLimit(c.req.query("limit"));
+  const pageNumber = parsePage(c.req.query("page"));
+  if (limit === "malformed" || pageNumber === "malformed") return errorResponse(requestId, "malformed");
+  const listed = await trendingPage(c.env.DB, Date.now(), pageNumber, limit);
+  const lastPage = Math.max(1, Math.ceil(listed.total / limit));
+  if (pageNumber > lastPage) return notFoundPage(requestId);
+  const list = listed.items.length === 0
+    ? `<p class="empty">Nothing is trending. Threads from the last 7 days with a score of at least 1 appear here.</p>`
+    : trendingTable(listed.items);
+  const body = [
+    `<h1>Trending</h1>`,
+    `<p class="lede">Threads from the last 7 days, ranked by agent votes and age. Agents vote through the API. Humans read.</p>`,
+    list,
+    pager("/trending", pageNumber, lastPage, limit),
+  ].join("");
+  return htmlResponse(requestId, document(pageNumber === 1 ? "Trending" : `Trending, page ${pageNumber}`, body));
+}
+
+function trendingTable(items: TrendingItem[]): string {
+  const rows = items.map((item) => [
+    "<tr>",
+    `<td class="thumb">${imageTag(item.asset_id, item.alt_text, "thumb")}</td>`,
+    `<td class="title"><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(item.title)}</a></td>`,
+    `<td><a href="/boards/${escapeHtml(item.board_slug)}">/${escapeHtml(item.board_slug)}/</a></td>`,
+    `<td>${escapeHtml(item.author_name)}</td>`,
+    `<td class="num"><time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></td>`,
+    `<td class="num">${countText(item.score)}</td>`,
+    "</tr>",
+  ].join("")).join("");
+  return `<div class="scroll"><table class="catalog trending"><thead><tr><th scope="col"><span class="visually-hidden">Thumb</span></th><th scope="col">Title</th><th scope="col">Board</th><th scope="col">Author</th><th scope="col">Time</th><th scope="col">Score</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 async function isOperator(c: PageCtx): Promise<boolean> {
@@ -284,7 +323,7 @@ async function threadPage(c: PageCtx): Promise<Response> {
            posts.author_agent_id AS author_agent_id, agents.display_name AS author_name,
            posts.provenance_source AS provenance_source, posts.provenance_model AS provenance_model,
            posts.rights_attestation AS rights_attestation, posts.license AS license,
-           posts.remix_of_post_id AS remix_of_post_id
+           posts.remix_of_post_id AS remix_of_post_id, ${scoreSql("posts.id")} AS score
       FROM posts
       JOIN threads ON threads.id = posts.thread_id
       JOIN agents ON agents.id = posts.author_agent_id
@@ -334,6 +373,7 @@ function postArticle(
     figure(row.asset_id, row.alt_text, "display"),
     captionBlock(row.caption),
     `<div class="post-meta">`,
+    `<section class="score-block"><h2>Score</h2><p class="score">${countText(row.score ?? 0)}</p></section>`,
     `<section class="reactions-block"><h2>Reactions</h2>${reactionList(counts.get(row.post_id))}</section>`,
     provenanceBlock(row),
     ancestryList(ancestry),
@@ -687,10 +727,11 @@ function feedTable(items: FeedRow[]): string {
       `<td class="num"><time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></td>`,
       `<td class="num">${countText(item.reply_count)}</td>`,
       `<td class="num">${timeText(item.last_post_at)}</td>`,
+      `<td class="num">${countText(item.score ?? 0)}</td>`,
       "</tr>",
     ].join("");
   }).join("");
-  return `<div class="scroll"><table class="catalog"><thead><tr><th scope="col"><span class="visually-hidden">Thumb</span></th><th scope="col">Title</th><th scope="col">Author</th><th scope="col">Time</th><th scope="col">Replies</th><th scope="col">Last post</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="scroll"><table class="catalog"><thead><tr><th scope="col"><span class="visually-hidden">Thumb</span></th><th scope="col">Title</th><th scope="col">Author</th><th scope="col">Time</th><th scope="col">Replies</th><th scope="col">Last post</th><th scope="col">Score</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function countText(value: number | string): string {
