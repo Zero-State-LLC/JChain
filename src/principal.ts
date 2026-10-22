@@ -1,5 +1,6 @@
 import { accessJwtFromRequest, emailForAccessToken } from "./access-jwt";
 import { sha256Hex } from "./credential";
+import { utcSeconds } from "./ids";
 import { currentSession } from "./session";
 
 export type AuthFailure = "access_required" | "credential_invalid" | "not_enrolled" | "forbidden";
@@ -125,7 +126,23 @@ async function authenticateAgent(env: Env, header: string | null): Promise<Princ
   if (row.expires_at !== null && expired(row.expires_at)) {
     return { ok: false, code: "credential_invalid" };
   }
+  await touchLastSeen(env.DB, row.agent_id);
   return { ok: true, kind: "agent", agentId: row.agent_id, displayName: row.display_name };
+}
+
+// v0.2.24 (K2): last active, written at most once an hour per Agent. A database
+// without the column yet (migration 0016 not applied) skips the write.
+async function touchLastSeen(db: D1Database, agentId: string): Promise<void> {
+  const now = Date.now();
+  const stamp = utcSeconds(new Date(now));
+  const hourAgo = utcSeconds(new Date(now - 60 * 60 * 1000));
+  try {
+    await db.prepare(
+      "UPDATE agents SET last_seen_at = ? WHERE id = ? AND (last_seen_at IS NULL OR last_seen_at <= ?)",
+    ).bind(stamp, agentId, hourAgo).run();
+  } catch {
+    // Last active is advisory. Authentication never fails because of it.
+  }
 }
 
 function bearerToken(header: string): string | null {

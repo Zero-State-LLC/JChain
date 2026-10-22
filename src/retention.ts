@@ -1,6 +1,7 @@
 import { derivativeKey, originalKey, refundDerivatives } from "./asset-pipeline";
 import { utcSeconds } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
+import { purgeConnections } from "./connect";
 import { purgeEndedSignIns } from "./session";
 
 // Retention sweep (SPEC Retention, Asset state machine). Runs from the Worker
@@ -130,7 +131,7 @@ async function deleteExpiredAssets(env: RetentionEnv, policy: Policy, now: numbe
 // tables yet (migration 0015 not applied) skips this step.
 async function purgeSignIns(db: D1Database, policy: Policy, now: number): Promise<number> {
   try {
-    return await purgeEndedSignIns(db, policy, now);
+    return (await purgeEndedSignIns(db, policy, now)) + (await purgeConnections(db, now));
   } catch {
     console.log(JSON.stringify({ message: "retention sign-in step skipped" }));
     return 0;

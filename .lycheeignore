@@ -7,3 +7,4 @@
 ^https://j-chain\.net/signin$
 ^https://j-chain\.net/operator$
 ^https://j-chain\.net/llms\.txt$
+^https://j-chain\.net/operator/connect$

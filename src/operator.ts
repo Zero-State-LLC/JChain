@@ -1,5 +1,8 @@
 import { Hono, type Context } from "hono";
 import {
+  connectCodePage,
+  connectConfirmPage,
+  connectDonePage,
   credentialPage,
   operatorOnly,
   operatorPage,
@@ -17,6 +20,7 @@ import {
   type AdminFailure,
   type Caller,
 } from "./agent-admin";
+import { answerConnection, displayUserCode, findPending, normalizeUserCode } from "./connect";
 import { readForm } from "./forms";
 import { htmlResult, type PageOptions } from "./html";
 import { ERRORS, htmlResponse } from "./http";
@@ -45,6 +49,8 @@ export function mountOperator(app: Hono<AppEnv>): void {
   app.post("/operator/agents/:id/suspend", (c) => change(c, "suspend"));
   app.post("/operator/agents/:id/resume", (c) => change(c, "resume"));
   app.post("/operator/agents/:id/retire", (c) => change(c, "retire"));
+  app.get("/operator/connect", connectForm);
+  app.post("/operator/connect", connectAnswer);
 }
 
 async function open(c: Ctx, write: boolean): Promise<Opened | Response> {
@@ -72,7 +78,7 @@ async function page(c: Ctx): Promise<Response> {
   if (opened instanceof Response) return opened;
   const listed = await c.env.DB.prepare(
     `SELECT agents.id AS id, agents.display_name AS display_name, agents.declared_model AS declared_model,
-            agents.state AS state, agents.created_at AS created_at
+            agents.state AS state, agents.created_at AS created_at, agents.last_seen_at AS last_seen_at
        FROM agents
        JOIN operators ON operators.id = agents.operator_id
       WHERE operators.email = ?
@@ -161,4 +167,34 @@ function failure(requestId: string, code: keyof typeof ERRORS, message?: string)
   const error = ERRORS[code];
   const text = message ?? (code === "state_conflict" ? "The agent is not in a state that allows this." : error.message);
   return htmlResult(requestId, "Your agents", text, BACK, BACK_LABEL, error.status, SIGNED_IN);
+}
+
+// CT-28: the Operator approves or denies a code their agent printed.
+async function connectForm(c: Ctx): Promise<Response> {
+  const opened = await open(c, false);
+  if (opened instanceof Response) return opened;
+  const raw = c.req.query("code") ?? "";
+  return htmlResponse(opened.requestId, connectCodePage(raw.slice(0, 20)));
+}
+
+async function connectAnswer(c: Ctx): Promise<Response> {
+  const opened = await open(c, true);
+  if (opened instanceof Response) return opened;
+  const form = await readForm(c.req.raw);
+  if (!form.ok) return failure(opened.requestId, "malformed");
+  const code = normalizeUserCode(form.value.code ?? "");
+  const pending = code === null ? null : await findPending(c.env.DB, code);
+  if (code === null || pending === null) {
+    return htmlResponse(opened.requestId, connectCodePage(form.value.code ?? "", true), 404);
+  }
+  const decision = form.value.decision;
+  if (decision !== "approve" && decision !== "deny") {
+    return htmlResponse(opened.requestId, connectConfirmPage(displayUserCode(code), pending.display_name, pending.declared_model));
+  }
+  const operator = await c.env.DB.prepare("SELECT id FROM operators WHERE email = ?")
+    .bind(opened.caller.email).first<{ id: string | null }>();
+  if (!operator?.id) return failure(opened.requestId, "forbidden");
+  const answered = await answerConnection(c.env.DB, code, operator.id, decision);
+  if (!answered) return htmlResponse(opened.requestId, connectCodePage(form.value.code ?? "", true), 404);
+  return htmlResponse(opened.requestId, connectDonePage(decision === "approve", pending.display_name));
 }

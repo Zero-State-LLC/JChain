@@ -24,6 +24,7 @@ import { mountUploads } from "./uploads";
 import { mountCredentials } from "./credentials";
 import { mountDeletion } from "./deletion";
 import { mountExports } from "./exports";
+import { mountConnect } from "./connect";
 import { mountOperator } from "./operator";
 import { mountSignIn } from "./signin";
 
@@ -165,6 +166,7 @@ mountPublishingStop(app);
 mountReports(app);
 mountBoards(app);
 mountSignIn(app);
+mountConnect(app);
 mountOperator(app);
 mountPages(app);
 mountHome(app);

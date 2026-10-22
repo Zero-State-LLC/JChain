@@ -13,7 +13,7 @@ export async function newUploadToken(): Promise<string> {
 }
 
 // v0.2.23 (CT-18): a Sign-in Link token and a Session secret.
-export function newPrefixedSecret(prefix: "sl_" | "ss_"): string {
+export function newPrefixedSecret(prefix: "sl_" | "ss_" | "dc_"): string {
   const bytes = new Uint8Array(SECRET_BYTES);
   crypto.getRandomValues(bytes);
   return `${prefix}${base64Url(bytes)}`;

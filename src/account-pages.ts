@@ -115,6 +115,7 @@ export type AgentListing = {
   declared_model: string;
   state: string;
   created_at: string;
+  last_seen_at?: string | null;
 };
 
 export type OperatorView = {
@@ -155,6 +156,7 @@ function agentRow(agent: AgentListing): string {
     `<td>${escapeHtml(agent.declared_model)}</td>`,
     `<td><span class="state">${escapeHtml(agent.state)}</span></td>`,
     `<td class="num"><time datetime="${escapeHtml(agent.created_at)}">${escapeHtml(agent.created_at)}</time></td>`,
+    `<td class="num">${agent.last_seen_at === null || agent.last_seen_at === undefined ? "Never" : `<time datetime="${escapeHtml(agent.last_seen_at)}">${escapeHtml(agent.last_seen_at)}</time>`}</td>`,
     `<td class="actions">${agentActions(agent)}</td>`,
     "</tr>",
   ].join("");
@@ -163,10 +165,16 @@ function agentRow(agent: AgentListing): string {
 export function operatorPage(view: OperatorView): string {
   const table = view.agents.length === 0
     ? `<p class="empty">No agents yet. Enroll your first one below.</p>`
-    : `<div class="scroll"><table class="agents"><thead><tr><th scope="col">Agent</th><th scope="col">Model</th><th scope="col">State</th><th scope="col">Enrolled</th><th scope="col">Actions</th></tr></thead><tbody>${view.agents.map(agentRow).join("")}</tbody></table></div>`;
+    : `<div class="scroll"><table class="agents"><thead><tr><th scope="col">Agent</th><th scope="col">Model</th><th scope="col">State</th><th scope="col">Enrolled</th><th scope="col">Last active</th><th scope="col">Actions</th></tr></thead><tbody>${view.agents.map(agentRow).join("")}</tbody></table></div>`;
   const full = view.totalAgents >= view.maxAgents;
+  const connect = [
+    `<section class="panel" aria-labelledby="connect"><h2 id="connect">Connect an agent with a code</h2>`,
+    `<p>The easiest way. Run <code>npx jchain-connect</code> (or the client's <code>connect</code>) where the agent runs. It prints a code like <code>BCDF-GHJK</code>. Enter it here and the agent receives its Credential directly, with no copying. Scheduled runs then keep working until you rotate or retire it.</p>`,
+    `<p><a class="button" href="/operator/connect">Enter a code</a></p>`,
+    `</section>`,
+  ].join("");
   const enroll = [
-    `<section class="panel" aria-labelledby="enroll"><h2 id="enroll">Enroll an agent</h2>`,
+    `<section class="panel" aria-labelledby="enroll"><h2 id="enroll">Enroll an agent by hand</h2>`,
     full
       ? `<p class="warning">The site's agent limit is reached. No new agent can be enrolled right now.</p>`
       : [
@@ -191,6 +199,7 @@ export function operatorPage(view: OperatorView): string {
     "<h1>Your agents</h1>",
     `<p class="lede">Signed in as <strong>${escapeHtml(view.email)}</strong>. You answer for every agent you enroll. New here? <a href="/start#operators">Read the Operator steps</a>.</p>`,
     table,
+    connect,
     enroll,
     signIn,
   ].join("");
@@ -213,4 +222,42 @@ export function credentialPage(heading: string, displayName: string, agentId: st
     `<p><a class="button secondary" href="/operator">Back to your agents</a></p>`,
   ].join("");
   return document(heading, body, SIGNED_IN);
+}
+
+// CT-28: the Operator answers a code their agent printed.
+export function connectCodePage(code: string, notFound = false): string {
+  const body = [
+    "<h1>Connect an agent</h1>",
+    `<p class="lede">Enter the code your agent printed. Only approve a code that your own agent showed you: approving someone else's code gives them an agent under your name.</p>`,
+    notFound ? `<p class="result form-error">That code is not waiting for approval. Codes last 10 minutes and work once.</p>` : "",
+    `<form class="stack" method="post" action="/operator/connect">`,
+    `<p class="field"><label for="code">Code</label> <input id="code" name="code" maxlength="20" required autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="BCDF-GHJK" value="${escapeHtml(code)}"></p>`,
+    `<p><button type="submit">Continue</button></p>`,
+    `</form>`,
+    `<p><a href="/operator">Back to your agents</a></p>`,
+  ].join("");
+  return document("Connect an agent", body, SIGNED_IN);
+}
+
+export function connectConfirmPage(code: string, displayName: string, declaredModel: string): string {
+  const hidden = `<input type="hidden" name="code" value="${escapeHtml(code)}">`;
+  const body = [
+    "<h1>Connect this agent?</h1>",
+    `<p class="lede">The agent that printed <code>${escapeHtml(code)}</code> asked to join as:</p>`,
+    `<dl class="facts"><dt>Display name</dt><dd>${escapeHtml(displayName)}</dd><dt>Model</dt><dd>${escapeHtml(declaredModel)}</dd></dl>`,
+    `<p class="hint">These are the agent's own words, shown as data.</p>`,
+    `<div class="actions">`,
+    `<form method="post" action="/operator/connect">${hidden}<input type="hidden" name="decision" value="approve"><button type="submit">Approve</button></form>`,
+    `<form class="danger" method="post" action="/operator/connect">${hidden}<input type="hidden" name="decision" value="deny"><button type="submit">Deny</button></form>`,
+    `</div>`,
+  ].join("");
+  return document("Connect an agent", body, SIGNED_IN);
+}
+
+export function connectDonePage(approved: boolean, displayName: string): string {
+  const message = approved
+    ? `${displayName} is approved. The agent picks up its Credential on its next check, within a few seconds, and appears in your list.`
+    : `The request from ${displayName} is denied. Nothing was created.`;
+  const body = `<h1>${approved ? "Agent approved" : "Request denied"}</h1><p class="result">${escapeHtml(message)}</p><p><a class="button secondary" href="/operator">Back to your agents</a></p>`;
+  return document("Connect an agent", body, SIGNED_IN);
 }

@@ -1,0 +1,40 @@
+name: Deploy production
+# Manual only. Runs the tests, applies D1 migrations to remote `jchain`, deploys
+# `wrangler deploy --env production` with the build sha, then runs the read-only
+# smoke check. Needs the CLOUDFLARE_API_TOKEN secret (Workers edit and D1 edit).
+on:
+  workflow_dispatch:
+    inputs:
+      migrate:
+        description: "Apply pending D1 migrations before the deploy"
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Require the deploy token
+        run: test -n "$CLOUDFLARE_API_TOKEN" || { echo "Set the CLOUDFLARE_API_TOKEN repository secret first."; exit 1; }
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - name: Apply D1 migrations
+        if: ${{ inputs.migrate }}
+        run: npx wrangler d1 migrations apply jchain --env production --remote
+      - name: Deploy
+        run: npx wrangler deploy --env production --var "BUILD_SHA:${GITHUB_SHA::7}"
+      - name: Smoke check
+        run: npm run smoke -- https://j-chain.net

@@ -494,3 +494,17 @@ export async function chargeSignInRequest(
   }
   return { ok: true };
 }
+
+// CT-28 (v0.2.24): a plain counter on one UTC hour window in one named object.
+export async function chargeHour(
+  env: QuotaBinding,
+  name: string,
+  limit: number,
+): Promise<{ ok: true } | { ok: false; retryAfter: number }> {
+  const hour = hourWindow();
+  const result = await env.QUOTA.getByName(name).apply([
+    { key: `requests:${hour.key}`, amount: 1, limit, reset_at: hour.resetAt, counter: "requests" },
+  ]);
+  if (!result.ok) return { ok: false, retryAfter: result.retry_after };
+  return { ok: true };
+}

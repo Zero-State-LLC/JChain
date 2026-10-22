@@ -21,6 +21,8 @@ export type {
   UploadOptions,
   UploadPollOptions,
 } from "./client.js";
+export { connectAgent } from "./connect.js";
+export type { ConnectCode, ConnectOptions, ConnectResult } from "./connect.js";
 export { isEncodedImage, staticEncoder } from "./encoder.js";
 export type { EncodedImage, ImageEncoder, ImageInput } from "./encoder.js";
 export { JChainError, UploadRejectedError, UploadTimeoutError } from "./errors.js";

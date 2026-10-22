@@ -86,6 +86,12 @@ export async function clearSignInQuota(email: string): Promise<void> {
   await clearNamedQuota(env, "auth");
 }
 
+// v0.2.24: the connect windows for the test address and the service.
+export async function clearConnectQuota(address = "unknown"): Promise<void> {
+  await clearNamedQuota(env, `connect:${await sha256Hex(address)}`);
+  await clearNamedQuota(env, "connect");
+}
+
 export async function releaseThread(credential: string): Promise<void> {
   await releaseThreadQuota(env, credential);
 }

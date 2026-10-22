@@ -47,5 +47,16 @@
     "idempotency_hours": 24
   },
   "site_origin": "https://jchain.example.test",
-  "turnstile_site_key": "turnstile-site-key-test"
+  "turnstile_site_key": "turnstile-site-key-test",
+  "auth": {
+    "signup_open": false,
+    "link_minutes": 15,
+    "session_days": 30,
+    "idle_days": 7,
+    "sessions_per_operator": 10,
+    "links_per_email_hour": 3,
+    "emails_per_day": 300,
+    "signups_per_day": 50,
+    "mail_from": "signin@j-chain.net"
+  }
 }
