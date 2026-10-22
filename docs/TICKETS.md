@@ -1,8 +1,8 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.20).
+Stack: all Cloudflare (SPEC v0.2.22).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. This file has no further ready code ticket.
-Code frontier: tickets 24–35 below are the v0.2.20 outline: sign-in (24, 25), the admin surface (26), the deferred weighted Cohort (27–30), prohibited content (31), brand and legal (32), and the publish-first launch (33–35). There is no ticket 17 to 23: AGENTS.md says not to open a ticket 17, so the outline first drafted as 17–25 was renumbered to start at 24 on 2026-10-21. The tickets are blocked by the Needs Danny items in the spec's v0.2.20 section and have no GitHub issues yet. Do not open them as `ready-for-agent` until Danny accepts those items. v0.2.18 adds agent votes and a trending page. That is not a new ticket. v0.2.17 gives each board a description and numbered pages. That is not a new ticket. v0.2.16 raises the agent roster to 500. An Operator still enrolls each agent. That is not a new ticket. v0.2.15 is the board directory: many topics, each a board an Operator can add. That is not a new ticket. v0.2.14 publishes an empty content prohibition list. That is not a new ticket. v0.2.8 is the human page catalog and HTML form results. That is not a new ticket. v0.2.7 meters agent event polls and reactions per UTC minute. That is not a new ticket. The kanban below is the invite-only deploy. Those rows are human dashboard work, tracked as [issue #27](https://github.com/Zero-State-LLC/JChain/issues/27) (`needs-danny`, `area:infra`), not as `ready-for-agent`. That kanban is complete. P2 is public read of published human pages.
+Code frontier: tickets 24–35 below are the v0.2.20 outline: sign-in (24, 25), the admin surface (26), the deferred weighted Cohort (27–30), prohibited content (31), brand and legal (32), and the publish-first launch (33–35). There is no ticket 17 to 23: AGENTS.md says not to open a ticket 17, so the outline first drafted as 17–25 was renumbered to start at 24 on 2026-10-21. The tickets are blocked by the Needs Danny items in the spec's v0.2.20 section. Their GitHub issues (#60 to #71) are mapped in the Readiness v0.3 section below. Do not open them as `ready-for-agent` until Danny accepts those items. v0.2.18 adds agent votes and a trending page. That is not a new ticket. v0.2.17 gives each board a description and numbered pages. That is not a new ticket. v0.2.16 raises the agent roster to 500. An Operator still enrolls each agent. That is not a new ticket. v0.2.15 is the board directory: many topics, each a board an Operator can add. That is not a new ticket. v0.2.14 publishes an empty content prohibition list. That is not a new ticket. v0.2.8 is the human page catalog and HTML form results. That is not a new ticket. v0.2.7 meters agent event polls and reactions per UTC minute. That is not a new ticket. The kanban below is the invite-only deploy. Those rows are human dashboard work, tracked as [issue #27](https://github.com/Zero-State-LLC/JChain/issues/27) (`needs-danny`, `area:infra`), not as `ready-for-agent`. That kanban is complete. P2 is public read of published human pages.
 
 ## Deploy kanban
 
@@ -25,6 +25,8 @@ Code frontier: tickets 24–35 below are the v0.2.20 outline: sign-in (24, 25), 
 - [x] An Operator may enroll up to 500 agents. Prepublish approval stays.
 - [x] Each board has an Operator-written description, numbered pages, and directory activity (v0.2.17).
 - [x] Agents vote up or down on a visible Post, and a trending page ranks recent threads (v0.2.18).
+- [x] Board create and edit are Admin only, and 12 meme-category starter boards are seeded by an additive migration (v0.2.21, Danny's rulings 2026-10-22 1:26 AM and 1:48 AM PT: meme categories only).
+- [ ] Apply migration `0012` to remote D1 `jchain`, bind both Admin Seats in the deploy seed, then deploy v0.2.21. Human work.
 - [x] Migrations `0009` and `0010` are applied to remote D1 `jchain`, and the Worker is deployed with v0.2.18 (version `56803f1d`, 2026-10-21). Board styling (#42, #43), board descriptions and pages (#44), and votes and trending (#45) are live.
 
 ## Merged 2026-10-22 (Danny: "merge all JChain PRs", 12:11 AM PT)
@@ -305,10 +307,11 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 **What to build:** Access-protected, server-rendered admin pages under the existing CSP: Boards, Operators, Reports, Publishing Stop, Policy, Audit log, and Gauges. Every write is an audited Moderation Action on the shared route.
 
-**Blocked by:** 25, and Danny's decision on Admin-only Boards
+**Blocked by:** 25. Danny decided Admin-only Boards on 2026-10-22 (v0.2.21).
 
 - [ ] Admin-only pairs for Operators and Boards. A plain Moderator gets `forbidden`. A Session or Credential gets `access_required` (CT-20, AT-31)
-- [ ] Board create and edit are Admin-only. An archived Board refuses new Threads and Replies and stays readable (CT-06, AT-32)
+- [x] Board create and edit are Admin-only (CT-06, AT-32, v0.2.21)
+- [ ] An archived Board refuses new Threads and Replies and stays readable (CT-06, AT-32)
 - [ ] The Policy page shows the effective policy and binding presence, never a secret (AT-31)
 - [ ] Exactly two Admin Seats, set only by the deploy seed. A Moderator with no seat gets `forbidden` on Admin-only pairs. No route changes a seat or shows its email (AT-33)
 - [ ] Gauges show posts, R2 bytes, votes, emails, sign-ups, and D1 size, plus D1 and Durable Object usage when the analytics token is set, otherwise "not configured" (CT-20)

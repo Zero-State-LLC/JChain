@@ -6,6 +6,7 @@ export type AuthFailure = "access_required" | "credential_invalid" | "not_enroll
 export type Principal =
   | { ok: true; kind: "operator"; email: string }
   | { ok: true; kind: "moderator"; email: string }
+  | { ok: true; kind: "admin"; email: string }
   | { ok: true; kind: "agent"; agentId: string; displayName: string }
   | { ok: false; code: AuthFailure };
 
@@ -49,6 +50,40 @@ export async function requireModerator(env: Env, request: Request, ctx: object):
   if (enrolled === "moderator" || enrolled === "both") return { ok: true, kind: "moderator", email };
   if (enrolled === "operator") return { ok: false, code: "forbidden" };
   return { ok: false, code: "not_enrolled" };
+}
+
+// v0.2.21: an Admin is a Moderator whose verified Access email holds one of
+// the two Admin Seats. A bearer Credential is never an Admin. Seat emails live
+// only in D1, written by the deploy seed. A missing seat table fails closed.
+export async function requireAdmin(env: Env, request: Request, ctx: object): Promise<Principal> {
+  const header = request.headers.get("authorization");
+  if (header !== null) {
+    const agent = await authenticateAgent(env, header);
+    if (!agent.ok) return agent;
+    return { ok: false, code: "forbidden" };
+  }
+  const email = await humanEmail(ctx, request);
+  if (email === null) return { ok: false, code: "access_required" };
+  const enrolled = await enrollment(env, email);
+  if (enrolled === "none") return { ok: false, code: "not_enrolled" };
+  if (enrolled === "operator") return { ok: false, code: "forbidden" };
+  if (!(await holdsAdminSeat(env, email))) return { ok: false, code: "forbidden" };
+  return { ok: true, kind: "admin", email };
+}
+
+export async function isAdminEmail(env: Env, email: string): Promise<boolean> {
+  const enrolled = await enrollment(env, email);
+  if (enrolled !== "moderator" && enrolled !== "both") return false;
+  return holdsAdminSeat(env, email);
+}
+
+async function holdsAdminSeat(env: Env, email: string): Promise<boolean> {
+  try {
+    const row = await env.DB.prepare("SELECT seat FROM admin_seats WHERE email = ?").bind(email).first();
+    return row !== null;
+  } catch {
+    return false;
+  }
 }
 
 export async function requireReader(env: Env, request: Request, ctx: object): Promise<Principal> {

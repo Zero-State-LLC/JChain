@@ -1,7 +1,7 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, resetAndSeed } from "./harness";
+import { ADMIN, ADMIN2, BOARD_ID, OPERATOR, STAFF, UUID_V7, call, resetAndSeed } from "./harness";
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
@@ -10,7 +10,7 @@ beforeAll(async () => {
 beforeEach(resetAndSeed);
 
 describe("board catalog", () => {
-  it("lists distinct topics and lets an operator add a board", async () => {
+  it("lists distinct topics and lets only an admin add a board", async () => {
     const anon = await call("/boards");
     expect(anon.status).toBe(200);
     expect(anon.headers.get("content-security-policy")).toBe(
@@ -25,15 +25,24 @@ describe("board catalog", () => {
     expect(directory).not.toContain("<style");
     expect(directory).not.toContain(" style=");
 
+    const adminPage = await text("/boards", ADMIN);
+    expect(adminPage).toContain('action="/boards"');
+    expect(adminPage).toContain('for="slug"');
+    expect(adminPage).toContain('for="name"');
+    expect(adminPage).toContain(">Add board</button>");
+    expect(await text("/boards", ADMIN2)).toContain(">Add board</button>");
     const operatorPage = await text("/boards", OPERATOR);
-    expect(operatorPage).toContain('action="/boards"');
-    expect(operatorPage).toContain('for="slug"');
-    expect(operatorPage).toContain('for="name"');
-    expect(operatorPage).toContain(">Add board</button>");
-    expect(await text("/boards", MODERATOR)).not.toContain("<form");
+    expect(operatorPage).not.toContain("<form");
+    expect(operatorPage).not.toContain("Add a board");
+    expect(await text("/boards", STAFF)).not.toContain("<form");
+
+    await expectError(await call("/v1/boards", {
+      email: OPERATOR,
+      body: { slug: "tech", name: "Technology" },
+    }), 403, "forbidden");
 
     const created = await expectSuccess(await call("/v1/boards", {
-      email: OPERATOR,
+      email: ADMIN,
       body: { slug: "tech", name: "  Technology  " },
     }), 201);
     expect(created.id).toMatch(UUID_V7);
@@ -71,28 +80,28 @@ describe("board catalog", () => {
     expect(rules.prohibited).toEqual([]);
 
     const duplicate = await expectError(await call("/v1/boards", {
-      email: OPERATOR,
+      email: ADMIN,
       body: { slug: "tech", name: "Other technology" },
     }), 409, "state_conflict");
     expect(duplicate.error.message).toBe("A board with this slug already exists.");
     await expectError(await call("/v1/boards", {
-      email: OPERATOR,
+      email: ADMIN,
       body: { slug: "Tech", name: "Technology" },
     }), 422, "validation_failed");
     await expectError(await call("/v1/boards", {
-      email: OPERATOR,
+      email: ADMIN,
       body: { slug: "a".repeat(21), name: "Too long" },
     }), 422, "validation_failed");
     await expectError(await call("/v1/boards", {
-      email: OPERATOR,
+      email: ADMIN,
       body: { slug: "meta", name: "   " },
     }), 422, "validation_failed");
     await expectError(await call("/v1/boards", {
-      email: OPERATOR,
+      email: ADMIN,
       body: { slug: "meta", name: "bad\nname" },
     }), 422, "validation_failed");
     await expectError(await call("/v1/boards", {
-      email: OPERATOR,
+      email: ADMIN,
       body: { slug: "meta", name: "Meta", extra: true },
     }), 400, "malformed");
 
@@ -105,22 +114,35 @@ describe("board catalog", () => {
       body: { slug: "art", name: "Art" },
     }), 403, "forbidden");
     await expectError(await call("/v1/boards", {
-      email: MODERATOR,
+      email: STAFF,
       body: { slug: "art", name: "Art" },
     }), 403, "forbidden");
+    await expectError(await call("/v1/boards", {
+      email: "stranger@example.test",
+      body: { slug: "art", name: "Art" },
+    }), 403, "not_enrolled");
     await expectError(await call("/v1/boards", {
       body: { slug: "art", name: "Art" },
     }), 401, "access_required");
     await expectError(await call("/v1/boards", {
-      email: OPERATOR,
+      email: ADMIN,
       sameOrigin: false,
       body: { slug: "games", name: "Games" },
     }), 403, "forbidden");
 
+    const htmlRefused = await call("/boards", {
+      method: "POST",
+      email: OPERATOR,
+      raw: new TextEncoder().encode(new URLSearchParams({ slug: "art", name: "Art" }).toString()),
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+    });
+    expect(htmlRefused.status).toBe(403);
+    expect(htmlRefused.headers.get("content-type")).toContain("text/html");
+
     const form = new URLSearchParams({ slug: "art", name: "Art & <games>" });
     const htmlAdd = await call("/boards", {
       method: "POST",
-      email: OPERATOR,
+      email: ADMIN,
       raw: new TextEncoder().encode(form.toString()),
       headers: { "content-type": "application/x-www-form-urlencoded" },
     });
@@ -134,7 +156,7 @@ describe("board catalog", () => {
 
     const htmlDup = await call("/boards", {
       method: "POST",
-      email: OPERATOR,
+      email: ADMIN,
       raw: new TextEncoder().encode(new URLSearchParams({ slug: "art", name: "Again" }).toString()),
       headers: { "content-type": "application/x-www-form-urlencoded" },
     });
@@ -156,6 +178,102 @@ describe("board catalog", () => {
     expect(slugs).toEqual(["art", "beta", "tech"]);
   });
 });
+
+describe("admin-only boards (v0.2.21)", () => {
+  it("audits each admin board write and drops the power when the seat is cleared", async () => {
+    const created = await expectSuccess(await call("/v1/boards", {
+      email: ADMIN2,
+      body: { slug: "tech", name: "Technology" },
+    }), 201);
+    const patched = await call(`/v1/boards/${String(created.id)}`, {
+      method: "PATCH",
+      email: ADMIN,
+      body: { description: "Wires." },
+    });
+    expect(patched.status).toBe(200);
+    const audit = await env.DB.prepare(
+      "SELECT actor_email, target_type, target_id, action FROM moderation_actions WHERE target_type = 'board' ORDER BY action",
+    ).all<{ actor_email: string; target_type: string; target_id: string; action: string }>();
+    expect(audit.results).toEqual([
+      { actor_email: ADMIN2, target_type: "board", target_id: created.id, action: "create_board" },
+      { actor_email: ADMIN, target_type: "board", target_id: created.id, action: "edit_board" },
+    ]);
+
+    await env.DB.prepare("UPDATE admin_seats SET email = NULL WHERE seat = 2").run();
+    await expectError(await call("/v1/boards", {
+      email: ADMIN2,
+      body: { slug: "art", name: "Art" },
+    }), 403, "forbidden");
+    expect(await text("/boards", ADMIN2)).not.toContain("<form");
+
+    await env.DB.prepare("DELETE FROM moderators WHERE email = ?").bind(ADMIN).run();
+    await expectError(await call("/v1/boards", {
+      email: ADMIN,
+      body: { slug: "art", name: "Art" },
+    }), 403, "not_enrolled");
+  });
+
+  it("has exactly two admin seats and refuses a third or a mixed-case email", async () => {
+    const seats = await env.DB.prepare("SELECT seat FROM admin_seats ORDER BY seat").all<{ seat: number }>();
+    expect(seats.results.map((row) => row.seat)).toEqual([1, 2]);
+    await expect(env.DB.prepare("INSERT INTO admin_seats (seat, email) VALUES (3, NULL)").run()).rejects.toThrow();
+    await expect(env.DB.prepare("UPDATE admin_seats SET email = 'Admin@Example.test' WHERE seat = 2").run())
+      .rejects.toThrow();
+    await expect(env.DB.prepare("UPDATE admin_seats SET email = ? WHERE seat = 2").bind(ADMIN).run())
+      .rejects.toThrow();
+  });
+});
+
+describe("starter boards (v0.2.21)", () => {
+  const STARTER = [
+    "absurd", "agents", "animals", "caps", "cursed", "found", "fried", "macros", "oc", "reaction", "remix", "wholesome",
+  ];
+
+  it("seeds the starter boards idempotently and never changes an existing board", async () => {
+    await env.DB.prepare("UPDATE boards SET name = ?, description = ? WHERE id = ?")
+      .bind("JChain", "Kept as is.", BOARD_ID).run();
+    await env.DB.prepare("INSERT INTO boards (id, slug, name, description) VALUES (?, ?, ?, ?)")
+      .bind("01900000-0000-7000-8000-0000000000c1", "found", "Local found", "Already here.").run();
+    await applySeed();
+    await applySeed();
+    const rows = await env.DB.prepare("SELECT id, slug, name, description FROM boards ORDER BY slug")
+      .all<{ id: string; slug: string; name: string; description: string }>();
+    expect(rows.results.map((row) => row.slug)).toEqual([...STARTER, "beta"].sort());
+    expect(rows.results.find((row) => row.slug === "beta")).toEqual({
+      id: BOARD_ID, slug: "beta", name: "JChain", description: "Kept as is.",
+    });
+    expect(rows.results.find((row) => row.slug === "found")).toEqual({
+      id: "01900000-0000-7000-8000-0000000000c1", slug: "found", name: "Local found", description: "Already here.",
+    });
+    for (const row of rows.results) {
+      expect(row.slug).toMatch(/^[a-z][a-z0-9]{0,19}$/);
+      expect(row.id).toMatch(UUID_V7);
+      expect([...row.name].length).toBeGreaterThan(0);
+      expect([...row.name].length).toBeLessThanOrEqual(60);
+      expect([...row.description].length).toBeLessThanOrEqual(500);
+      expect(row.description).not.toMatch(/[\u2013\u2014]/);
+    }
+    const seats = await env.DB.prepare("SELECT seat, email FROM admin_seats ORDER BY seat").all();
+    expect(seats.results).toHaveLength(2);
+
+    const listed = await expectSuccess(await call("/v1/boards", { email: OPERATOR }));
+    expect((listed.items as Array<{ slug: string }>).map((item) => item.slug)).toEqual([...STARTER, "beta"].sort());
+    const directory = await text("/boards");
+    expect(directory).toContain('<a href="/boards/reaction">/reaction/</a>');
+    expect(directory).toContain("<td>Reaction Images</td>");
+  });
+});
+
+// Runs the starter-board migration's statements again. The migration has
+// already run once in beforeAll, and resetAndSeed cleared its boards.
+async function applySeed(): Promise<void> {
+  const migrations = env.TEST_MIGRATIONS as Array<{ name: string; queries: string[] }>;
+  const seed = migrations.find((migration) => migration.name.startsWith("0012_"));
+  expect(seed).toBeDefined();
+  for (const query of seed?.queries ?? []) {
+    await env.DB.prepare(query).run();
+  }
+}
 
 async function text(pathname: string, email?: string): Promise<string> {
   const response = await call(pathname, email === undefined ? {} : { email });

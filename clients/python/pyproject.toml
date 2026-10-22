@@ -50,5 +50,6 @@ markers = ["integration: runs against a local `npx wrangler dev` (set JCHAIN_INT
 
 [tool.mypy]
 strict = true
-python_version = "3.9"
+# Oldest target current mypy accepts without a warning. requires-python still allows 3.9 at runtime.
+python_version = "3.10"
 files = ["src/jchain"]

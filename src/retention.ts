@@ -1,4 +1,4 @@
-import { derivativeKey, originalKey } from "./asset-pipeline";
+import { derivativeKey, originalKey, refundDerivatives } from "./asset-pipeline";
 import { utcSeconds } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
 
@@ -16,7 +16,7 @@ export const RESERVATION_GRACE_HOURS = 1;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
-type RetentionEnv = Pick<Env, "DB" | "MEDIA" | "POLICY">;
+type RetentionEnv = Pick<Env, "DB" | "MEDIA" | "POLICY" | "QUOTA">;
 
 export type RetentionResult = {
   ran: boolean;
@@ -73,28 +73,32 @@ async function redactAudit(
 // Moves expired Assets through deletion_pending to deleted and removes their
 // bytes from R2:
 // - quarantined, retention.rejected_upload_days after the quarantine action;
-// - rejected, retention.rejected_upload_days after the reservation closed
-//   (created_at + reservation_hours bounds the rejection time from above);
+// - rejected, retention.rejected_upload_days after rejected_at; rows rejected
+//   before rejected_at existed (NULL) keep the old bound, rejected_upload_days
+//   after created_at + reservation_hours;
 // - reserved and never completed, RESERVATION_GRACE_HOURS after expires_at
 //   (reservation_hours after reserve);
 // - deletion_pending left by an interrupted run, at any age.
+// Stored derivative bytes are refunded to the global r2_bytes counter once per
+// Asset, before the R2 delete, so a repeated run neither loses nor doubles it.
 async function deleteExpiredAssets(env: RetentionEnv, policy: Policy, now: number): Promise<number> {
   const keep = policy.retention.rejected_upload_days * DAY_MS;
-  const quarantineCutoff = utcSeconds(new Date(now - keep));
-  const rejectedCutoff = utcSeconds(new Date(now - keep - policy.retention.reservation_hours * HOUR_MS));
+  const keepCutoff = utcSeconds(new Date(now - keep));
+  const legacyRejectedCutoff = utcSeconds(new Date(now - keep - policy.retention.reservation_hours * HOUR_MS));
   const reservationCutoff = utcSeconds(new Date(now - RESERVATION_GRACE_HOURS * HOUR_MS));
   const listed = await env.DB.prepare(
     `SELECT id FROM assets
       WHERE state = 'deletion_pending'
          OR (state = 'reserved' AND expires_at < ?)
-         OR (state = 'rejected' AND created_at < ?)
+         OR (state = 'rejected' AND rejected_at IS NOT NULL AND rejected_at < ?)
+         OR (state = 'rejected' AND rejected_at IS NULL AND created_at < ?)
          OR (state = 'quarantined' AND COALESCE(
               (SELECT MAX(created_at) FROM moderation_actions
                 WHERE target_type = 'asset' AND target_id = assets.id AND action = 'quarantine_asset'),
               assets.created_at) < ?)
       ORDER BY created_at, id
       LIMIT ?`,
-  ).bind(reservationCutoff, rejectedCutoff, quarantineCutoff, RETENTION_BATCH).all<{ id: string }>();
+  ).bind(reservationCutoff, keepCutoff, legacyRejectedCutoff, keepCutoff, RETENTION_BATCH).all<{ id: string }>();
   const ids = (listed.results ?? []).map((row) => row.id);
   if (ids.length === 0) return 0;
   const placeholders = ids.map(() => "?").join(", ");
@@ -105,6 +109,7 @@ async function deleteExpiredAssets(env: RetentionEnv, policy: Policy, now: numbe
     ).bind(...ids),
     env.DB.prepare(`DELETE FROM upload_tokens WHERE asset_id IN (${placeholders})`).bind(...ids),
   ]);
+  for (const id of ids) await refundDerivatives(env, id);
   await env.MEDIA.delete(ids.flatMap((id) => [
     originalKey(id),
     // Staged agent thumbnail when v0.2.19 (PR #46) lands. Absent keys are a no-op.

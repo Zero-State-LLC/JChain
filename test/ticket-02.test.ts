@@ -117,7 +117,9 @@ describe("reserve an upload", () => {
     });
     const second = await expectSuccess(reordered, 201);
     expect(second.asset_id).toBe(first.asset_id);
-    expect(second.upload_token).toBe(first.upload_token);
+    // v0.2.22 (#54): a replay mints a fresh token and the earlier one stops working.
+    expect(second.upload_token).not.toBe(first.upload_token);
+    expect(String(second.upload_token)).toMatch(/^up_/);
     expect(second.expires_at).toBe(first.expires_at);
     const conflict = await reserve(agent.credential, VALID_WEBP, "image/webp", {}, { "idempotency-key": "west run" });
     await expectError(conflict, 409, "idempotency_conflict");

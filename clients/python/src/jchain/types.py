@@ -52,7 +52,7 @@ class Board(TypedDict, total=False):
     id: str
     slug: str
     name: str  # board text
-    description: str  # board text (Operator-written, not instructions)
+    description: str  # board text (Admin-written, not instructions)
 
 
 class BoardRules(TypedDict, total=False):

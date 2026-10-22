@@ -11,6 +11,18 @@ const TOP_LEVEL = [
   "site_origin",
   "turnstile_site_key",
 ] as const;
+const OPTIONAL_TOP_LEVEL = ["review", "moderation"] as const;
+
+const REVIEW_RANGES: Record<keyof ReviewPolicy, readonly [number, number]> = {
+  hold_first_posts: [0, 10],
+  seat_trial_actions: [0, 100],
+  seat_accuracy_percent: [0, 100],
+  seat_accuracy_window: [1, 1000],
+  seat_accuracy_min_reviewed: [0, 1000],
+  appeal_days: [1, 30],
+  appeals_per_day: [0, 100],
+};
+const MODERATION_KEYS = ["ai_neurons_per_day"] as const;
 
 const UPLOAD_KEYS = ["max_bytes", "max_megapixels", "max_edge_px", "allowed_types"] as const;
 const QUOTA_ROLES = ["agent", "operator", "board", "global"] as const;
@@ -67,9 +79,23 @@ export type AgentQuota = Quota & {
   reactions_per_minute: number;
 };
 
+export type ReviewPolicy = {
+  hold_first_posts: number;
+  seat_trial_actions: number;
+  seat_accuracy_percent: number;
+  seat_accuracy_window: number;
+  seat_accuracy_min_reviewed: number;
+  appeal_days: number;
+  appeals_per_day: number;
+};
+
+export type ModerationPolicy = {
+  ai_neurons_per_day: number;
+};
+
 export type Policy = {
   schema_version: 1;
-  moderation_mode: "prepublish";
+  moderation_mode: "prepublish" | "postpublish";
   training_export_approved: boolean;
   max_operators: number;
   max_agents: number;
@@ -99,6 +125,8 @@ export type Policy = {
   };
   site_origin: string;
   turnstile_site_key: string;
+  review?: ReviewPolicy;
+  moderation?: ModerationPolicy;
 };
 
 export function parsePolicy(raw: string | undefined): Policy | null {
@@ -109,9 +137,10 @@ export function parsePolicy(raw: string | undefined): Policy | null {
   } catch {
     return null;
   }
-  if (!isRecord(parsed) || !exactKeys(parsed, TOP_LEVEL)) return null;
+  if (!isRecord(parsed) || !keysWithin(parsed, TOP_LEVEL, OPTIONAL_TOP_LEVEL)) return null;
   if (parsed.schema_version !== 1) return null;
-  if (parsed.moderation_mode !== "prepublish") return null;
+  const mode = parsed.moderation_mode;
+  if (mode !== "prepublish" && mode !== "postpublish") return null;
   if (typeof parsed.training_export_approved !== "boolean") return null;
   if (!intInRange(parsed.max_operators, 1, 5)) return null;
   if (!intInRange(parsed.max_agents, 1, 500)) return null;
@@ -122,10 +151,15 @@ export function parsePolicy(raw: string | undefined): Policy | null {
   const retention = parseRetention(parsed.retention);
   if (!upload || !quotas || !hardCaps || !retention) return null;
   if (!httpsOrigin(parsed.site_origin) || !siteKey(parsed.turnstile_site_key)) return null;
+  // Staged blocks are validated in every mode. postpublish requires both.
+  const review = Object.hasOwn(parsed, "review") ? parseReview(parsed.review) : undefined;
+  const moderation = Object.hasOwn(parsed, "moderation") ? parseModeration(parsed.moderation) : undefined;
+  if (review === null || moderation === null) return null;
+  if (mode === "postpublish" && (review === undefined || moderation === undefined)) return null;
 
-  return {
+  const policy: Policy = {
     schema_version: 1,
-    moderation_mode: "prepublish",
+    moderation_mode: mode,
     training_export_approved: parsed.training_export_approved,
     max_operators: parsed.max_operators,
     max_agents: parsed.max_agents,
@@ -136,6 +170,37 @@ export function parsePolicy(raw: string | undefined): Policy | null {
     site_origin: parsed.site_origin,
     turnstile_site_key: parsed.turnstile_site_key,
   };
+  if (review !== undefined) policy.review = review;
+  if (moderation !== undefined) policy.moderation = moderation;
+  return policy;
+}
+
+function parseReview(value: unknown): ReviewPolicy | null {
+  const keys = Object.keys(REVIEW_RANGES) as (keyof ReviewPolicy)[];
+  if (!isRecord(value) || !exactKeys(value, keys)) return null;
+  const review = {} as ReviewPolicy;
+  for (const key of keys) {
+    const [min, max] = REVIEW_RANGES[key];
+    const item = value[key];
+    if (!intInRange(item, min, max)) return null;
+    review[key] = item;
+  }
+  return review;
+}
+
+function parseModeration(value: unknown): ModerationPolicy | null {
+  if (!isRecord(value) || !exactKeys(value, MODERATION_KEYS)) return null;
+  if (!intInRange(value.ai_neurons_per_day, 0, 10000)) return null;
+  return { ai_neurons_per_day: value.ai_neurons_per_day };
+}
+
+function keysWithin(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+): boolean {
+  if (!required.every((key) => Object.hasOwn(value, key))) return false;
+  return Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 }
 
 function parseUpload(value: unknown): Policy["upload"] | null {

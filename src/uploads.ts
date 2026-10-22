@@ -73,7 +73,12 @@ async function reserve(c: Ctx): Promise<Response> {
   if (!parsedBody.ok) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
   const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
   const prior = await readIdempotency(c.env.DB, principal.agentId, RESERVE_ROUTE, key, bodyHash);
-  if (prior.action === "replay") return jsonResponse(requestId, prior.body, prior.status);
+  if (prior.action === "replay") {
+    if (prior.status === 201 && typeof prior.body.asset_id === "string") {
+      return reissueToken(c.env, requestId, policy, principal.agentId, prior.body.asset_id, prior.body);
+    }
+    return jsonResponse(requestId, prior.body, prior.status);
+  }
   if (prior.action === "conflict") {
     return agentError(c.env, policy, requestId, principal.agentId, "idempotency_conflict");
   }
@@ -108,7 +113,8 @@ async function reserve(c: Ctx): Promise<Response> {
   const token = await newUploadToken();
   const createdAt = utcSeconds();
   const expiresAt = hoursAhead(policy.retention.reservation_hours);
-  const outcome = { status: 201, body: { asset_id: assetId, upload_token: token, expires_at: expiresAt } };
+  // The replay record never holds the token; a replay mints a new one (reissueToken).
+  const outcome = { status: 201, body: { asset_id: assetId, expires_at: expiresAt } };
   return remember(c.env, requestId, policy, principal.agentId, RESERVE_ROUTE, key, bodyHash, outcome, [
     c.env.DB.prepare(
       `INSERT INTO assets
@@ -129,7 +135,26 @@ async function reserve(c: Ctx): Promise<Response> {
     c.env.DB.prepare(
       "INSERT INTO upload_tokens (asset_id, token_hash, expires_at) VALUES (?, ?, ?)",
     ).bind(assetId, await sha256Hex(token), expiresAt),
-  ]);
+  ], { upload_token: token });
+}
+
+// Replaces the stored token hash so the earlier token stops working. Only a live reservation is reissued.
+async function reissueToken(
+  env: Env,
+  requestId: string,
+  policy: Policy,
+  agentId: string,
+  assetId: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const token = await newUploadToken();
+  const rotated = await env.DB.prepare(
+    `UPDATE upload_tokens SET token_hash = ?
+      WHERE asset_id = ? AND expires_at > ?
+        AND EXISTS (SELECT 1 FROM assets WHERE id = ? AND agent_id = ? AND state = 'reserved')`,
+  ).bind(await sha256Hex(token), assetId, utcSeconds(), assetId, agentId).run();
+  if (Number(rotated.meta.changes ?? 0) !== 1) return agentError(env, policy, requestId, agentId, "state_conflict");
+  return jsonResponse(requestId, { ...body, upload_token: token }, 201);
 }
 
 async function putPart(c: Ctx, part: Part): Promise<Response> {
@@ -275,11 +300,13 @@ async function assetStatus(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const asset = await c.env.DB.prepare(
-    "SELECT id, state, reason_code FROM assets WHERE id = ? AND agent_id = ?",
-  ).bind(assetId, principal.agentId).first<{ id: string; state: string; reason_code: string | null }>();
+    "SELECT id, state, reason_code, blocked FROM assets WHERE id = ? AND agent_id = ?",
+  ).bind(assetId, principal.agentId).first<{ id: string; state: string; reason_code: string | null; blocked: number }>();
   if (!asset) return errorResponse(requestId, "not_found");
   const body: Record<string, unknown> = { asset_id: asset.id, state: asset.state };
-  if (asset.state === "rejected" && asset.reason_code !== null) body.reason_code = asset.reason_code;
+  // A Blocked Hash rejection is reported as `blocked` (CT-21). The stored reason_code CHECK predates it.
+  if (asset.state === "rejected" && asset.blocked === 1) body.reason_code = "blocked";
+  else if (asset.state === "rejected" && asset.reason_code !== null) body.reason_code = asset.reason_code;
   return jsonResponse(requestId, body);
 }
 
@@ -394,6 +421,7 @@ async function remember(
   bodyHash: string,
   outcome: Outcome,
   statements: D1PreparedStatement[],
+  reveal: Record<string, unknown> = {},
 ): Promise<Response> {
   if (outcome.body.limits === undefined) outcome.body.limits = await readAgentLimits(env, policy, agentId);
   statements.push(idempotencyInsert(
@@ -407,7 +435,7 @@ async function remember(
     hoursAhead(policy.retention.idempotency_hours),
   ));
   await env.DB.batch(statements);
-  return jsonResponse(requestId, outcome.body, outcome.status);
+  return jsonResponse(requestId, { ...outcome.body, ...reveal }, outcome.status);
 }
 
 async function rejectUpload(
@@ -427,15 +455,15 @@ async function rejectUpload(
   const outcome = failure(code);
   return remember(c.env, requestId, c.get("policy"), agentId, route, key, bodyHash, outcome, [
     c.env.DB.prepare(
-      `UPDATE assets SET state = 'rejected', reason_code = ?, ${part.storedColumn} = 1 WHERE id = ? AND state = 'reserved'`,
-    ).bind(reason, assetId),
+      `UPDATE assets SET state = 'rejected', reason_code = ?, rejected_at = ?, ${part.storedColumn} = 1 WHERE id = ? AND state = 'reserved'`,
+    ).bind(reason, utcSeconds(), assetId),
   ]);
 }
 
 async function rejectStored(env: Env, assetId: string, reason: ReasonCode): Promise<void> {
   await env.DB.prepare(
-    "UPDATE assets SET state = 'rejected', reason_code = ? WHERE id = ? AND state = 'reserved'",
-  ).bind(reason, assetId).run();
+    "UPDATE assets SET state = 'rejected', reason_code = ?, rejected_at = ? WHERE id = ? AND state = 'reserved'",
+  ).bind(reason, utcSeconds(), assetId).run();
   console.log(JSON.stringify({ message: "asset rejected", asset_id: assetId, reason_code: reason }));
 }
 

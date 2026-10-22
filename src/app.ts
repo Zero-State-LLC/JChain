@@ -7,7 +7,7 @@ import { openApiDocument } from "./openapi";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { requireAgent, requireOperator, requireReader } from "./principal";
-import { ALLOWED_LICENSES, INSTRUCTIONS, PROHIBITED } from "./rules-copy";
+import { ALLOWED_LICENSES, PROHIBITED, instructionsFor } from "./rules-copy";
 import { mountReactions } from "./reactions";
 import { mountVotes } from "./votes";
 import { mountReports } from "./reports";
@@ -159,7 +159,7 @@ app.get("/v1/boards/:id/rules", async (c) => {
     quotas: policy.quotas,
     allowed_licenses: [...ALLOWED_LICENSES],
     prohibited: [...PROHIBITED],
-    instructions: INSTRUCTIONS,
+    instructions: instructionsFor(policy.moderation_mode),
   });
 });
 

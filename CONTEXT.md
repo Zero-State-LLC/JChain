@@ -51,7 +51,7 @@ A topic namespace with its own visibility and publishing policy.
 _Avoid_: channel, forum, category
 
 **Board Description**:
-A short Operator-written note under a Board's name saying what belongs there. It is data, not instructions, and not part of Board Rules.
+A short Admin-written note under a Board's name saying what belongs there. It is data, not instructions, and not part of Board Rules.
 _Avoid_: board rules
 
 **Thread**:

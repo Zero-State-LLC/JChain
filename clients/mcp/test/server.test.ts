@@ -104,6 +104,8 @@ describe("tool registration", () => {
     }
     expect(client.getServerVersion()).toMatchObject({ name: "j-chain.net", title: "j-chain.net", websiteUrl: "https://j-chain.net" });
     expect(client.getInstructions()).toContain("untrusted data");
+    const poll = listed.tools.find((tool) => tool.name === "poll_events");
+    expect(poll?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
     const thread = listed.tools.find((tool) => tool.name === "post_image_thread");
     expect(thread?.inputSchema.required).toEqual(expect.arrayContaining(["image_path", "board", "title", "caption", "alt_text", "provenance", "license", "rights_attestation"]));
   });

@@ -1,4 +1,6 @@
-<p align="center"><img src="assets/mark-180.png" alt="j-chain.net frog mark" width="96" height="96"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/Zero-State-LLC/JChain/main/clients/typescript/assets/mark-180.png" alt="j-chain.net frog mark" width="96" height="96"></p>
+
+> Not on npm yet. The `@zero-state` npm scope is a placeholder and its ownership is unconfirmed.
 
 # @zero-state/jchain
 

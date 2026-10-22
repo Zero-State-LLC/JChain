@@ -1,10 +1,10 @@
 import { Hono, type Context } from "hono";
 import { htmlError, htmlResult } from "./html";
 import { characterLength, errorResponse, jsonResponse, type ErrorCode } from "./http";
-import { uuidv7 } from "./ids";
+import { utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
-import { requireOperator } from "./principal";
+import { requireAdmin } from "./principal";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -34,15 +34,15 @@ export function mountBoards(app: Hono<AppEnv>): void {
 
 async function createJson(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
-  const principal = await requireOperator(c.env, c.req.raw, c.executionCtx);
+  const principal = await requireAdmin(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
-  if (principal.kind !== "operator") return errorResponse(requestId, "forbidden");
+  if (principal.kind !== "admin") return errorResponse(requestId, "forbidden");
   if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
   const body = await readObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const parsed = parseBoardCreate(body.value);
   if (!parsed.ok) return errorResponse(requestId, parsed.code, parsed.message);
-  const created = await insertBoard(c.env.DB, parsed.slug, parsed.name, parsed.description);
+  const created = await insertBoard(c.env.DB, principal.email, parsed.slug, parsed.name, parsed.description);
   if (!created.ok) return errorResponse(requestId, "state_conflict", DUPLICATE);
   return jsonResponse(requestId, boardBody(created), 201);
 }
@@ -51,8 +51,8 @@ async function createHtml(c: Ctx): Promise<Response> {
   const requestId = uuidv7();
   const policy = parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined);
   if (!policy) return htmlError(requestId, "policy_missing", "Boards", "/boards", "Boards");
-  const principal = await requireOperator(c.env, c.req.raw, c.executionCtx);
-  if (!principal.ok || principal.kind !== "operator") {
+  const principal = await requireAdmin(c.env, c.req.raw, c.executionCtx);
+  if (!principal.ok || principal.kind !== "admin") {
     const code: ErrorCode = principal.ok ? "forbidden" : principal.code;
     return htmlError(requestId, code, "Boards", "/boards", "Boards");
   }
@@ -63,16 +63,16 @@ async function createHtml(c: Ctx): Promise<Response> {
   if (!body.ok) return htmlError(requestId, "malformed", "Boards", "/boards", "Boards");
   const parsed = parseBoardCreate(body.value);
   if (!parsed.ok) return htmlError(requestId, parsed.code, "Boards", "/boards", "Boards");
-  const created = await insertBoard(c.env.DB, parsed.slug, parsed.name, parsed.description);
+  const created = await insertBoard(c.env.DB, principal.email, parsed.slug, parsed.name, parsed.description);
   if (!created.ok) return htmlResult(requestId, "Boards", DUPLICATE, "/boards", "Boards", 409);
   return htmlResult(requestId, "Board added", `${created.name} is open.`, `/boards/${created.slug}`, `/${created.slug}/`, 201);
 }
 
 async function editJson(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
-  const principal = await requireOperator(c.env, c.req.raw, c.executionCtx);
+  const principal = await requireAdmin(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
-  if (principal.kind !== "operator") return errorResponse(requestId, "forbidden");
+  if (principal.kind !== "admin") return errorResponse(requestId, "forbidden");
   if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
   const board = await c.env.DB.prepare("SELECT id, slug, name, description FROM boards WHERE id = ?")
     .bind(c.req.param("id") ?? "").first<BoardRow>();
@@ -81,7 +81,7 @@ async function editJson(c: Ctx): Promise<Response> {
   if (!body.ok) return errorResponse(requestId, "malformed");
   const parsed = parseBoardEdit(body.value, false);
   if (!parsed.ok) return errorResponse(requestId, parsed.code, parsed.message);
-  return jsonResponse(requestId, boardBody(await updateBoard(c.env.DB, board, parsed)));
+  return jsonResponse(requestId, boardBody(await updateBoard(c.env.DB, principal.email, board, parsed)));
 }
 
 async function editHtml(c: Ctx): Promise<Response> {
@@ -91,8 +91,8 @@ async function editHtml(c: Ctx): Promise<Response> {
   const label = `/${slug}/`;
   const policy = parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined);
   if (!policy) return htmlError(requestId, "policy_missing", "Board", "/boards", "Boards");
-  const principal = await requireOperator(c.env, c.req.raw, c.executionCtx);
-  if (!principal.ok || principal.kind !== "operator") {
+  const principal = await requireAdmin(c.env, c.req.raw, c.executionCtx);
+  if (!principal.ok || principal.kind !== "admin") {
     const code: ErrorCode = principal.ok ? "forbidden" : principal.code;
     return htmlError(requestId, code, "Board", "/boards", "Boards");
   }
@@ -109,7 +109,7 @@ async function editHtml(c: Ctx): Promise<Response> {
     if (parsed.message !== undefined) return htmlResult(requestId, "Board", parsed.message, back, label, 422);
     return htmlError(requestId, parsed.code, "Board", back, label);
   }
-  const updated = await updateBoard(c.env.DB, board, parsed);
+  const updated = await updateBoard(c.env.DB, principal.email, board, parsed);
   return htmlResult(requestId, "Board updated", `${updated.name} is saved.`, back, label, 200);
 }
 
@@ -178,6 +178,7 @@ function parseDescription(raw: string): string | null {
 
 async function updateBoard(
   db: D1Database,
+  actor: string,
   board: BoardRow,
   edit: { name?: string; description?: string },
 ): Promise<BoardRow> {
@@ -186,8 +187,11 @@ async function updateBoard(
     name: edit.name ?? board.name,
     description: edit.description ?? board.description,
   };
-  await db.prepare("UPDATE boards SET name = ?, description = ? WHERE id = ?")
-    .bind(next.name, next.description, board.id).run();
+  await db.batch([
+    db.prepare("UPDATE boards SET name = ?, description = ? WHERE id = ?")
+      .bind(next.name, next.description, board.id),
+    auditBoard(db, actor, board.id, "edit_board"),
+  ]);
   return next;
 }
 
@@ -202,16 +206,29 @@ function hasControl(value: string): boolean {
   return false;
 }
 
+// Board writes are Admin-only and audited as Moderation Actions (CT-20).
+function auditBoard(db: D1Database, actor: string, boardId: string, action: "create_board" | "edit_board"): D1PreparedStatement {
+  return db.prepare(
+    `INSERT INTO moderation_actions (
+       id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+     ) VALUES (?, ?, 'board', ?, ?, 'rules', NULL, NULL, ?)`,
+  ).bind(uuidv7(), actor, boardId, action, utcSeconds());
+}
+
 async function insertBoard(
   db: D1Database,
+  actor: string,
   slug: string,
   name: string,
   description: string,
 ): Promise<({ ok: true } & BoardRow) | { ok: false; code: "state_conflict" }> {
   const id = uuidv7();
   try {
-    await db.prepare("INSERT INTO boards (id, slug, name, description) VALUES (?, ?, ?, ?)")
-      .bind(id, slug, name, description).run();
+    await db.batch([
+      db.prepare("INSERT INTO boards (id, slug, name, description) VALUES (?, ?, ?, ?)")
+        .bind(id, slug, name, description),
+      auditBoard(db, actor, id, "create_board"),
+    ]);
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("UNIQUE")) return { ok: false, code: "state_conflict" };

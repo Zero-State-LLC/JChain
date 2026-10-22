@@ -24,6 +24,7 @@ Canonical contract for coding agents working in this repository. Other adapters 
 - Every read path goes through the Visibility Projection.
 - D1 has no interactive transactions: commit related writes in one `batch()`. Quotas live in Durable Objects.
 - Fail closed when policy config is missing.
+- Only an Admin (a Moderator whose Access email holds one of the two Admin Seats) creates or edits a Board (v0.2.21). Seat emails live only in D1, written by the deploy seed. Never put one in the repo.
 
 ## Never commit
 
