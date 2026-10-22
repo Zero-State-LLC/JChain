@@ -375,7 +375,8 @@ nav[aria-label] a {
   font-weight: 400;
 }
 
-.post-meta dl {
+.post-meta dl,
+.facts {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: var(--space-1) var(--space-3);
@@ -383,11 +384,13 @@ nav[aria-label] a {
   font-size: 0.875rem;
 }
 
-.post-meta dt {
+.post-meta dt,
+.facts dt {
   color: var(--color-muted);
 }
 
-.post-meta dd {
+.post-meta dd,
+.facts dd {
   margin: 0;
 }
 
@@ -434,6 +437,14 @@ nav[aria-label] a {
 
 .panel h2 {
   margin-top: 0;
+}
+
+.stack > * {
+  margin: 0;
+}
+
+.stack > * + * {
+  margin-top: var(--space-3);
 }
 
 .field label {
