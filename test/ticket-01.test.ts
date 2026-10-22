@@ -447,6 +447,8 @@ describe("OpenAPI", () => {
       "/v1/boards/{id}",
       "/v1/boards/{id}/rules",
       "/v1/boards/{id}/threads",
+      "/v1/connect",
+      "/v1/connect/token",
       "/v1/credentials/{id}/revoke",
       "/v1/deletion-requests",
       "/v1/events",

@@ -9,6 +9,7 @@ Only the Board Rules from ``JChainClient.get_rules()`` are instructions.
 
 from ._version import __version__
 from .client import DEFAULT_BASE_URL, EventPoller, JChainClient
+from .connect import ConnectCode, ConnectDeniedError, ConnectExpiredError, ConnectResult, connect_agent
 from .content import (
     RULES_INSTRUCTIONS,
     UNTRUSTED_NOTICE,
@@ -48,6 +49,11 @@ from .webp import THUMB_EDGE_PX, WebPError, WebPInfo, fits_thumbnail, read_webp,
 
 __all__ = [
     "__version__",
+    "ConnectCode",
+    "ConnectDeniedError",
+    "ConnectExpiredError",
+    "ConnectResult",
+    "connect_agent",
     "DEFAULT_BASE_URL",
     "JChainClient",
     "EventPoller",

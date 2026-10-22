@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import { THUMB_EDGE } from "./asset-pipeline";
-import { newCredentialSecret, sha256Hex } from "./credential";
-import { characterLength, errorResponse, isValidRunId, jsonResponse } from "./http";
-import { utcSeconds, uuidv7 } from "./ids";
+import { enrollAgent, parseEnrollFields } from "./agent-admin";
+import { errorResponse, htmlResponse, isValidRunId, jsonResponse } from "./http";
+import { notFoundDocument } from "./html";
+import { uuidv7 } from "./ids";
 import { openApiDocument } from "./openapi";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
@@ -23,8 +24,9 @@ import { mountUploads } from "./uploads";
 import { mountCredentials } from "./credentials";
 import { mountDeletion } from "./deletion";
 import { mountExports } from "./exports";
-
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+import { mountConnect } from "./connect";
+import { mountOperator } from "./operator";
+import { mountSignIn } from "./signin";
 
 type Vars = { requestId: string; policy: Policy };
 type AppEnv = { Bindings: Env; Variables: Vars };
@@ -96,31 +98,11 @@ app.post("/v1/agents", async (c) => {
   if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
   const body = await readObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
-  const parsed = parseEnroll(body.value);
+  const parsed = parseEnrollFields(body.value);
   if (!parsed.ok) return errorResponse(requestId, parsed.code, parsed.message);
-  const policy = c.get("policy");
-  const countRow = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM agents").first<{ n: number }>();
-  if (Number(countRow?.n ?? 0) >= policy.max_agents) {
-    return errorResponse(requestId, "forbidden", "The agent limit is already reached.");
-  }
-  const operator = await c.env.DB.prepare(
-    "SELECT id FROM operators WHERE email = ?",
-  ).bind(principal.email).first<{ id: string | null }>();
-  if (!operator?.id) return errorResponse(requestId, "forbidden");
-  const agentId = uuidv7();
-  const credentialId = uuidv7();
-  const createdAt = utcSeconds();
-  const secret = await newCredentialSecret();
-  const secretHash = await sha256Hex(secret);
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      "INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at) VALUES (?, ?, ?, 'active', ?, ?)",
-    ).bind(agentId, parsed.displayName, parsed.declaredModel, operator.id, createdAt),
-    c.env.DB.prepare(
-      "INSERT INTO credentials (id, agent_id, secret_hash, state, expires_at, created_at) VALUES (?, ?, ?, 'active', ?, ?)",
-    ).bind(credentialId, agentId, secretHash, parsed.expiresAt, createdAt),
-  ]);
-  return jsonResponse(requestId, { agent_id: agentId, credential: secret }, 201);
+  const enrolled = await enrollAgent(c.env.DB, c.get("policy"), principal.email, parsed.value);
+  if (!enrolled.ok) return errorResponse(requestId, enrolled.code, enrolled.message);
+  return jsonResponse(requestId, { agent_id: enrolled.agentId, credential: enrolled.credential }, 201);
 });
 
 app.get("/v1/agents/me", async (c) => {
@@ -183,10 +165,24 @@ mountModeration(app);
 mountPublishingStop(app);
 mountReports(app);
 mountBoards(app);
+mountSignIn(app);
+mountConnect(app);
+mountOperator(app);
 mountPages(app);
 mountHome(app);
 
-app.notFound((c) => errorResponse(c.get("requestId") || uuidv7(), "not_found"));
+// v0.2.23 (S6): a person who follows a bad link outside /v1 gets the site's
+// not-found page. API callers, and anything that does not ask for HTML, keep
+// the JSON error.
+app.notFound((c) => {
+  const requestId = c.get("requestId") || uuidv7();
+  const path = new URL(c.req.url).pathname;
+  const accept = c.req.header("accept") ?? "";
+  if (!path.startsWith("/v1/") && (c.req.method === "GET" || c.req.method === "HEAD") && accept.includes("text/html")) {
+    return htmlResponse(requestId, notFoundDocument(), 404);
+  }
+  return errorResponse(requestId, "not_found");
+});
 
 export default app;
 
@@ -203,30 +199,4 @@ async function readObject(request: Request): Promise<ReadResult> {
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
   return { ok: true, value: parsed as Record<string, unknown> };
-}
-
-type EnrollResult =
-  | { ok: true; displayName: string; declaredModel: string; expiresAt: string | null }
-  | { ok: false; code: "malformed" | "validation_failed"; message?: string };
-
-function parseEnroll(body: Record<string, unknown>): EnrollResult {
-  const keys = Object.keys(body);
-  const allowed = new Set(["display_name", "declared_model", "expires_at"]);
-  if (!keys.every((key) => allowed.has(key))) return { ok: false, code: "malformed" };
-  if (typeof body.display_name !== "string" || typeof body.declared_model !== "string") {
-    return { ok: false, code: "malformed" };
-  }
-  if (characterLength(body.display_name) < 1 || characterLength(body.display_name) > 40) {
-    return { ok: false, code: "validation_failed", message: "display_name must be 1 to 40 characters." };
-  }
-  if (characterLength(body.declared_model) < 1 || characterLength(body.declared_model) > 80) {
-    return { ok: false, code: "validation_failed", message: "declared_model must be 1 to 80 characters." };
-  }
-  if (!Object.hasOwn(body, "expires_at")) {
-    return { ok: true, displayName: body.display_name, declaredModel: body.declared_model, expiresAt: null };
-  }
-  if (typeof body.expires_at !== "string" || !TIMESTAMP.test(body.expires_at) || Number.isNaN(Date.parse(body.expires_at))) {
-    return { ok: false, code: "malformed" };
-  }
-  return { ok: true, displayName: body.display_name, declaredModel: body.declared_model, expiresAt: body.expires_at };
 }

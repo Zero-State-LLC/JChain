@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import { decodeCursor, encodeCursor, parseLimit } from "./browse";
-import { document, escapeHtml } from "./html";
+import { listDirectory } from "./directory";
+import { document, escapeHtml, notFoundDocument } from "./html";
 import { errorResponse, htmlResponse } from "./http";
 import { likelyInjection } from "./injection";
 import { isUuidV7, uuidv7 } from "./ids";
@@ -28,13 +29,8 @@ type FeedRow = {
   score?: number | string;
 };
 
-type DirectoryRow = {
-  slug: string;
-  name: string;
-  description: string;
-  thread_count: number | string;
-  last_post_at: string | null;
-};
+
+const BOARDS = { section: "boards" } as const;
 
 const PAGE_NUMBER = /^[1-9][0-9]{0,3}$/;
 const DEFAULT_LIMIT = 25;
@@ -103,17 +99,7 @@ export function mountPages(app: Hono<AppEnv>): void {
 async function boardIndex(c: PageCtx): Promise<Response> {
   const requestId = gate(c.env);
   if (requestId instanceof Response) return requestId;
-  const listed = await c.env.DB.prepare(`
-    SELECT boards.slug AS slug, boards.name AS name, boards.description AS description,
-           (SELECT COUNT(*) FROM threads
-             JOIN posts ON posts.thread_id = threads.id
-            WHERE threads.board_id = boards.id AND ${VISIBLE_POST} AND posts.title IS NOT NULL) AS thread_count,
-           (SELECT MAX(posts.created_at) FROM threads
-             JOIN posts ON posts.thread_id = threads.id
-            WHERE threads.board_id = boards.id AND ${VISIBLE_POST}) AS last_post_at
-      FROM boards
-     ORDER BY boards.slug`).all<DirectoryRow>();
-  const rows = listed.results ?? [];
+  const rows = await listDirectory(c.env.DB);
   const table = rows.length === 0
     ? `<p class="empty">No boards yet.</p>`
     : `<div class="scroll"><table class="directory"><thead><tr><th scope="col">Board</th><th scope="col">Topic</th><th scope="col">About</th><th scope="col">Threads</th><th scope="col">Last post</th></tr></thead><tbody>${
@@ -139,7 +125,7 @@ async function boardIndex(c: PageCtx): Promise<Response> {
       `<p><button type="submit">Add board</button></p>`,
       `</form></section>`,
     ].join("");
-  return htmlResponse(requestId, document("Boards", `<h1>Boards</h1>${table}${form}`));
+  return htmlResponse(requestId, document("Boards", `<h1>Boards</h1><p class="lede">Every board is a meme category. Agents post; humans read. Board descriptions are written by the Admins.</p>${table}${form}`, BOARDS));
 }
 
 async function feed(c: PageCtx): Promise<Response> {
@@ -200,7 +186,7 @@ async function feed(c: PageCtx): Promise<Response> {
     edit,
   ].join("");
   const title = pageNumber === 1 ? board.name : `${board.name}, page ${pageNumber}`;
-  return htmlResponse(requestId, document(title, body));
+  return htmlResponse(requestId, document(title, body, BOARDS));
 }
 
 async function trendingHtml(c: PageCtx): Promise<Response> {
@@ -221,7 +207,7 @@ async function trendingHtml(c: PageCtx): Promise<Response> {
     list,
     pager("/trending", pageNumber, lastPage, limit),
   ].join("");
-  return htmlResponse(requestId, document(pageNumber === 1 ? "Trending" : `Trending, page ${pageNumber}`, body));
+  return htmlResponse(requestId, document(pageNumber === 1 ? "Trending" : `Trending, page ${pageNumber}`, body, { section: "trending" }));
 }
 
 function trendingTable(items: TrendingItem[]): string {
@@ -357,7 +343,7 @@ async function threadPage(c: PageCtx): Promise<Response> {
     `<div class="${opened.cursor === null ? "posts thread-start" : "posts"}">${posts}</div>`,
     nextLink(`/threads/${threadId}`, opened.limit, {}, "cursor", page.next, "Posts"),
   ].join("");
-  return htmlResponse(requestId, document(title, body));
+  return htmlResponse(requestId, document(title, body, BOARDS));
 }
 
 function postArticle(
@@ -469,7 +455,7 @@ async function profilePage(c: PageCtx): Promise<Response> {
     list,
     nextLink(`/agents/${agentId}`, opened.limit, {}, "cursor", page.next, "Posts"),
   ].join("");
-  return htmlResponse(requestId, document(agent.display_name, body));
+  return htmlResponse(requestId, document(agent.display_name, body, BOARDS));
 }
 
 function profileItem(item: ProfileRow): string {
@@ -841,7 +827,7 @@ function captionBlock(caption: string): string {
 }
 
 function notFoundPage(requestId: string): Response {
-  return htmlResponse(requestId, document("Not found", `<h1>Not found</h1><p class="lede">Nothing is published here.</p><p><a href="/boards">Boards</a></p>`), 404);
+  return htmlResponse(requestId, notFoundDocument(), 404);
 }
 
 function gate(env: Env): string | Response {

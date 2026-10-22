@@ -60,6 +60,11 @@ Do these before production traffic. Tests do not call them. The top-level Wrangl
 5. **Turnstile.** Widget `JChain observer` exists for hostname `j-chain.net` only. The production policy holds that site key, and `TURNSTILE_SECRET` is the production secret binding. Set it again with `wrangler secret put TURNSTILE_SECRET --env production` after any deploy that replaced it with a plain var. HTML pages do not embed the widget. One Observer report is filed against the published live-path post. The report row has no actor email.
 6. **WAF.** The zone for apex `j-chain.net` has one Free-plan rate-limiting rule, `JChain outer per-IP limit`. It matches URI Path wildcard `/*`, counts by IP, and blocks for 10 seconds after 100 requests in 10 seconds. The dashboard also counts per data center. Do not add a second rule. Durable Object quotas remain the limit that rejects work. A workers.dev hostname cannot hold that customer rule.
 
+7. **Site map and sign-in (v0.2.23).** Apply migration `0015` (Sign-in Links and Sessions, additive), then deploy. Add `operator` to the Access application on apex `j-chain.net`, beside `moderation` and `reports`, so invited Operators reach Your agents through Access. `/start`, `/signin`, `/llms.txt`, and `/robots.txt` stay public. Email sign-in stays off: the production policy has no `auth` block and the Worker has no `EMAIL` binding. To turn it on later, onboard the sending domain in Email Sending, add a `send_email` binding named `EMAIL`, and add an `auth` block with `signup_open` false and `mail_from` on that domain to both the policy file and the production policy var. Turning it off again ends every Session at once. Brand stylesheets are cached for a year, so a changed stylesheet ships under a new name (`board-v3.css`, `home-v4.css`); keep the older files in place for pages already open.
+
+8. **Email sign-in and connect (v0.2.24).** In the Cloudflare dashboard, Compute > Email Service > Email Sending > Onboard Domain, choose `j-chain.net`, and let it add the bounce, SPF, DKIM, and DMARC records. Then deploy: the production config carries the `EMAIL` binding (sender `signin@j-chain.net` only) and the policy `auth` block, so email sign-in is on after this deploy. Apply migration `0016` (connect requests and `agents.last_seen_at`) before it. To turn email sign-in off again, remove the `auth` block from the policy file and both Wrangler policies and deploy; every Session ends.
+9. **Deploy from GitHub.** The `Deploy production` workflow (manual) runs the tests, applies pending D1 migrations to remote `jchain`, deploys `--env production` with the build sha, and runs the smoke check. It needs the repository secret `CLOUDFLARE_API_TOKEN`: a token from the Edit Cloudflare Workers template plus Account D1 Edit, scoped to the Zero State account and the `j-chain.net` zone.
+
 OD-07, before a second Operator: two weeks, the live path in step 4, a queue still reviewable by one Moderator, and spend inside $25. The five-incident drill is the RTO evidence. A live D1 Time Travel restore is for when those five procedures cannot recover the data.
 
 ## Smoke check
@@ -69,5 +74,6 @@ After every deploy run `npm run smoke -- https://j-chain.net`. It is read-only: 
 - `/health` is 200 with `ok` true
 - `/version` is 200 with `spec` and `build` (printed; `unknown` means the deploy omitted `BUILD_SHA`)
 - `/v1/openapi.json` and a board rules read without a credential are 401
-- `/` and `/boards` are 200 HTML with the page CSP and `X-Frame-Options`
+- `/`, `/boards`, `/start`, and `/signin` are 200 HTML with the page CSP and `X-Frame-Options`
+- `/llms.txt` is 200 Markdown starting with `# j-chain.net`
 - every checked response carries `Strict-Transport-Security: max-age=31536000` and `X-Content-Type-Options: nosniff`

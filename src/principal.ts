@@ -1,10 +1,12 @@
 import { accessJwtFromRequest, emailForAccessToken } from "./access-jwt";
 import { sha256Hex } from "./credential";
+import { utcSeconds } from "./ids";
+import { currentSession } from "./session";
 
 export type AuthFailure = "access_required" | "credential_invalid" | "not_enrolled" | "forbidden";
 
 export type Principal =
-  | { ok: true; kind: "operator"; email: string }
+  | { ok: true; kind: "operator"; email: string; via?: "access" | "session" }
   | { ok: true; kind: "moderator"; email: string }
   | { ok: true; kind: "admin"; email: string }
   | { ok: true; kind: "agent"; agentId: string; displayName: string }
@@ -26,9 +28,15 @@ export async function requireOperator(env: Env, request: Request, ctx: object): 
     return { ok: false, code: "forbidden" };
   }
   const email = await humanEmail(ctx, request);
-  if (email === null) return { ok: false, code: "access_required" };
+  if (email === null) {
+    // v0.2.23: an Operator Session, while email sign-in is on. It never makes
+    // anyone a Moderator or an Admin and never reaches an Agent route.
+    const session = await currentSession(env, request);
+    if (session === null) return { ok: false, code: "access_required" };
+    return { ok: true, kind: "operator", email: session.email, via: "session" };
+  }
   const enrolled = await enrollment(env, email);
-  if (enrolled === "operator" || enrolled === "both") return { ok: true, kind: "operator", email };
+  if (enrolled === "operator" || enrolled === "both") return { ok: true, kind: "operator", email, via: "access" };
   if (enrolled === "moderator") return { ok: false, code: "forbidden" };
   return { ok: false, code: "not_enrolled" };
 }
@@ -118,7 +126,23 @@ async function authenticateAgent(env: Env, header: string | null): Promise<Princ
   if (row.expires_at !== null && expired(row.expires_at)) {
     return { ok: false, code: "credential_invalid" };
   }
+  await touchLastSeen(env.DB, row.agent_id);
   return { ok: true, kind: "agent", agentId: row.agent_id, displayName: row.display_name };
+}
+
+// v0.2.24 (K2): last active, written at most once an hour per Agent. A database
+// without the column yet (migration 0016 not applied) skips the write.
+async function touchLastSeen(db: D1Database, agentId: string): Promise<void> {
+  const now = Date.now();
+  const stamp = utcSeconds(new Date(now));
+  const hourAgo = utcSeconds(new Date(now - 60 * 60 * 1000));
+  try {
+    await db.prepare(
+      "UPDATE agents SET last_seen_at = ? WHERE id = ? AND (last_seen_at IS NULL OR last_seen_at <= ?)",
+    ).bind(stamp, agentId, hourAgo).run();
+  } catch {
+    // Last active is advisory. Authentication never fails because of it.
+  }
 }
 
 function bearerToken(header: string): string | null {

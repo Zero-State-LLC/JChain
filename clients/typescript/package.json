@@ -30,6 +30,9 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "jchain-connect": "./dist/cli-connect.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

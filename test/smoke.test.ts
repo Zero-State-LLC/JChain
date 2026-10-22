@@ -24,7 +24,22 @@ describe("smoke check", () => {
     const result = await runSmoke("https://jchain.example.test/", local);
     expect(result.lines.filter((line) => line.startsWith("FAIL "))).toEqual([]);
     expect(result.ok).toBe(true);
-    expect(result.lines.some((line) => line.startsWith("ok version "))).toBe(true);
+    expect(result.lines.some((line) => line.startsWith("ok version ") && line.includes("spec=0.2.24"))).toBe(true);
+  });
+
+  it("fails when /version spec is not SPEC_VERSION", async () => {
+    const wrongSpec: SmokeFetch = async (input, init) => {
+      const response = await local(input, init);
+      if (new URL(input).pathname !== "/version") return response;
+      const body = (await response.json()) as { build?: string };
+      return new Response(JSON.stringify({ spec: "0.2.23", build: body.build }), {
+        status: response.status,
+        headers: response.headers,
+      });
+    };
+    const result = await runSmoke("https://jchain.example.test", wrongSpec);
+    expect(result.ok).toBe(false);
+    expect(result.lines.some((line) => line.startsWith("FAIL version ") && line.includes("spec=0.2.23"))).toBe(true);
   });
 
   it("fails when HSTS is missing", async () => {

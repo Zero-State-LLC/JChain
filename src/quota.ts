@@ -468,3 +468,43 @@ function secondsUntil(resetAt: string | null, now = Date.now()): number {
   if (!Number.isFinite(seconds) || seconds < 1) return 1;
   return seconds;
 }
+
+// CT-18 (v0.2.23): sign-in request limits. Every valid request counts, whether
+// or not the address belongs to an Operator, so the answer never depends on it.
+// Over the service-wide day window is a 429. Over one address's hour window
+// sends nothing and shows the same page.
+export async function chargeSignInRequest(
+  env: QuotaBinding,
+  emailHash: string,
+  perAddressHour: number,
+  perDay: number,
+): Promise<{ ok: true } | { ok: false; scope: "address" } | { ok: false; scope: "daily"; retryAfter: number }> {
+  const hour = hourWindow();
+  const day = dayWindow();
+  const daily = env.QUOTA.getByName("auth");
+  const dailyCharge = [{ key: `emails:${day.key}`, amount: 1, limit: perDay, reset_at: day.resetAt, counter: "emails" }];
+  const spent = await daily.apply(dailyCharge);
+  if (!spent.ok) return { ok: false, scope: "daily", retryAfter: spent.retry_after };
+  const address = env.QUOTA.getByName(`email:${emailHash}`);
+  const addressCharge = [{ key: `links:${hour.key}`, amount: 1, limit: perAddressHour, reset_at: hour.resetAt, counter: "links" }];
+  const linked = await address.apply(addressCharge);
+  if (!linked.ok) {
+    await daily.refund(dailyCharge);
+    return { ok: false, scope: "address" };
+  }
+  return { ok: true };
+}
+
+// CT-28 (v0.2.24): a plain counter on one UTC hour window in one named object.
+export async function chargeHour(
+  env: QuotaBinding,
+  name: string,
+  limit: number,
+): Promise<{ ok: true } | { ok: false; retryAfter: number }> {
+  const hour = hourWindow();
+  const result = await env.QUOTA.getByName(name).apply([
+    { key: `requests:${hour.key}`, amount: 1, limit, reset_at: hour.resetAt, counter: "requests" },
+  ]);
+  if (!result.ok) return { ok: false, retryAfter: result.retry_after };
+  return { ok: true };
+}

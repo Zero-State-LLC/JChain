@@ -2,3 +2,9 @@
 ^https://j-chain\.net/terms$
 ^https://j-chain\.net/privacy$
 ^https://j-chain\.net/acceptable-use$
+# Pages from spec v0.2.23 (ticket 36). Remove these once that deploy is live.
+^https://j-chain\.net/start$
+^https://j-chain\.net/signin$
+^https://j-chain\.net/operator$
+^https://j-chain\.net/llms\.txt$
+^https://j-chain\.net/operator/connect$

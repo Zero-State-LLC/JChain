@@ -58,8 +58,8 @@ describe("board catalog", () => {
     ]);
 
     const home = await text("/");
-    expect(home).toContain('href="/boards/beta">/beta/ — JChain</a>');
-    expect(home).toContain('href="/boards/tech">/tech/ — Technology</a>');
+    expect(home).toContain('href="/boards/beta"><span class="slug">/beta/</span><span class="name">JChain</span>');
+    expect(home).toContain('href="/boards/tech"><span class="slug">/tech/</span><span class="name">Technology</span>');
     expect(home).not.toContain(">Board</a>");
 
     const again = await text("/boards");

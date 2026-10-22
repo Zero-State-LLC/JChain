@@ -61,7 +61,7 @@ describe("accessible pages", () => {
     expect(quoted).toContain(INSTRUCTIONS);
     expect(PROHIBITED).toEqual([]);
     expect(quoted).not.toContain("<ul>");
-    expect(feedHtml).toContain('<meta name="viewport" content="width=device-width">');
+    expect(feedHtml).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
     expect(feedHtml).not.toContain("Held");
     expect(feedHtml).not.toContain("<script");
     expect(feedHtml).not.toContain("<style");

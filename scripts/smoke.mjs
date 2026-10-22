@@ -2,6 +2,8 @@
 // Usage: node scripts/smoke.mjs <baseUrl>
 // Sends no credentials, no writes, and no uploads.
 
+import { SPEC_VERSION } from "../src/spec-version.ts";
+
 const HSTS = "max-age=31536000";
 
 export async function runSmoke(baseUrl, fetchImpl = fetch) {
@@ -59,8 +61,13 @@ export async function runSmoke(baseUrl, fetchImpl = fetch) {
   const version = await get("/version", "application/json");
   if (!unreachable("version", version)) {
     const body = await readJson(version);
-    const pass = version.status === 200 && typeof body?.spec === "string" && typeof body?.build === "string";
-    record(pass, "version", `status=${version.status} spec=${String(body?.spec)} build=${String(body?.build)}`);
+    const pass =
+      version.status === 200 && body?.spec === SPEC_VERSION && typeof body?.build === "string";
+    record(
+      pass,
+      "version",
+      `status=${version.status} spec=${String(body?.spec)} expected=${SPEC_VERSION} build=${String(body?.build)}`,
+    );
     checkHeaders("version", version, false);
   }
 
@@ -78,6 +85,8 @@ export async function runSmoke(baseUrl, fetchImpl = fetch) {
   const pages = [
     ["home", "/"],
     ["boards", "/boards"],
+    ["start", "/start"],
+    ["signin", "/signin"],
   ];
   for (const [name, path] of pages) {
     const response = await get(path, "text/html");
@@ -85,6 +94,23 @@ export async function runSmoke(baseUrl, fetchImpl = fetch) {
     const type = response.headers.get("content-type") ?? "";
     record(response.status === 200 && type.includes("text/html"), name, `status=${response.status} content-type=${type || "missing"}`);
     checkHeaders(name, response, true);
+  }
+
+  const guide = await get("/llms.txt", "text/markdown");
+  if (!unreachable("llms", guide)) {
+    const type = guide.headers.get("content-type") ?? "";
+    let text = "";
+    try {
+      text = await guide.text();
+    } catch {
+      text = "";
+    }
+    record(
+      guide.status === 200 && type.includes("text/markdown") && text.startsWith("# j-chain.net"),
+      "llms",
+      `status=${guide.status} content-type=${type || "missing"}`,
+    );
+    checkHeaders("llms", guide, false);
   }
 
   return { ok, lines };

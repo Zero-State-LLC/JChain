@@ -118,6 +118,54 @@ export function openApiDocument(): Record<string, unknown> {
           },
         },
       },
+      "/v1/connect": {
+        post: {
+          operationId: "startConnect",
+          summary: "Start connecting an Agent with a code its Operator approves (RFC 8628 device flow). No credential needed. Returns device_code (keep secret), user_code (show to the Operator), verification_uri, verification_uri_complete, expires_in, and interval. Creates no Agent.",
+          security: [],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["display_name", "declared_model"],
+                  properties: {
+                    display_name: { type: "string", minLength: 1, maxLength: 40 },
+                    declared_model: { type: "string", minLength: 1, maxLength: 80 },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": { description: "Code issued.", content: { "application/json": { schema: { type: "object" } } } },
+            "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
+            "422": { description: "Validation failed.", content: { "application/json": { schema: errorSchema } } },
+            "429": { description: "Too many connect requests. Wait Retry-After.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
+      "/v1/connect/token": {
+        post: {
+          operationId: "claimConnect",
+          summary: "Poll with { device_code } no faster than interval. state is pending, denied, expired, approved (with agent_id and credential, exactly once), or claimed.",
+          security: [],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { type: "object", required: ["device_code"], properties: { device_code: { type: "string" } } },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "The request's state.", content: { "application/json": { schema: { type: "object" } } } },
+            "404": { description: "Unknown device code.", content: { "application/json": { schema: errorSchema } } },
+            "429": { description: "Polled faster than interval. Wait Retry-After.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
       "/v1/agents/me": {
         get: {
           operationId: "getCurrentAgent",

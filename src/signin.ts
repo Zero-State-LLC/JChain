@@ -1,0 +1,165 @@
+import { Hono, type Context } from "hono";
+import {
+  badLinkPage,
+  confirmLinkPage,
+  linkSentPage,
+  signInPage,
+  signedOutPage,
+} from "./account-pages";
+import { sha256Hex } from "./credential";
+import { readForm } from "./forms";
+import { htmlError } from "./html";
+import { htmlResponse } from "./http";
+import { uuidv7 } from "./ids";
+import { sameOrigin } from "./origin";
+import { mailbox, type Policy } from "./policy";
+import { chargeSignInRequest } from "./quota";
+import {
+  CLEAR_SESSION_COOKIE,
+  consumeLink,
+  currentSession,
+  emailSignIn,
+  issueLink,
+  isLinkToken,
+  policyOf,
+  readSessionCookie,
+  revokeOperatorSessions,
+  revokeSession,
+  sessionCookie,
+  signInEmail,
+} from "./session";
+
+// CT-18 as amended in v0.2.23. The sign-in page always renders. The email form
+// and every write route work only while email sign-in is on.
+
+type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
+type Ctx = Context<AppEnv>;
+
+const ACCOUNT = { section: "account" } as const;
+
+export function mountSignIn(app: Hono<AppEnv>): void {
+  app.get("/signin", signInForm);
+  app.post("/signin", requestLink);
+  app.get("/signin/:token", confirmLink);
+  app.post("/signin/:token", useLink);
+  app.post("/signout", signOut);
+  app.post("/signout/all", signOutEverywhere);
+}
+
+async function signInForm(c: Ctx): Promise<Response> {
+  const requestId = uuidv7();
+  const enabled = emailSignIn(c.env, policyOf(c.env));
+  const session = enabled === null ? null : await currentSession(c.env, c.req.raw);
+  return htmlResponse(requestId, signInPage({
+    emailOn: enabled !== null,
+    linkMinutes: enabled?.auth.link_minutes,
+    signedInAs: session?.email,
+  }));
+}
+
+async function requestLink(c: Ctx): Promise<Response> {
+  const requestId = uuidv7();
+  const policy = policyOf(c.env);
+  const enabled = emailSignIn(c.env, policy);
+  if (policy === null || enabled === null) return htmlError(requestId, "policy_missing", "Sign in", "/signin", "Sign in", ACCOUNT);
+  if (!sameOrigin(c.req.raw, policy.site_origin)) return htmlError(requestId, "forbidden", "Sign in", "/signin", "Sign in", ACCOUNT);
+  const form = await readForm(c.req.raw);
+  const raw = form.ok ? form.value.email : undefined;
+  const email = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (!form.ok || !mailbox(email)) {
+    return htmlResponse(requestId, signInPage({
+      emailOn: true,
+      linkMinutes: enabled.auth.link_minutes,
+      error: "Enter a whole email address, like name@example.com.",
+      email: typeof raw === "string" ? raw.slice(0, 254) : undefined,
+    }), 422);
+  }
+  const { auth, mailer } = enabled;
+  const limited = await chargeSignInRequest(c.env, await sha256Hex(email), auth.links_per_email_hour, auth.emails_per_day);
+  if (!limited.ok && limited.scope === "daily") {
+    const response = htmlError(requestId, "rate_limited", "Sign in", "/signin", "Sign in", ACCOUNT);
+    response.headers.set("retry-after", String(limited.retryAfter));
+    return response;
+  }
+  if (limited.ok) {
+    const operator = await c.env.DB.prepare(
+      "SELECT id FROM operators WHERE email = ?",
+    ).bind(email).first<{ id: string | null }>();
+    // Sign-up (ticket 25) is closed, so only an existing Operator gets a link.
+    if (operator?.id) {
+      const token = await issueLink(c.env.DB, operator.id, auth);
+      try {
+        await mailer.send(signInEmail(auth, email, `${policy.site_origin}/signin/${token}`));
+      } catch {
+        console.error(JSON.stringify({ message: "sign-in email failed", request_id: requestId }));
+      }
+    }
+  }
+  return htmlResponse(requestId, linkSentPage());
+}
+
+// GET consumes nothing, so a mail scanner that follows the link signs no one in.
+function confirmLink(c: Ctx): Response {
+  const requestId = uuidv7();
+  const token = c.req.param("token") ?? "";
+  const response = isLinkToken(token)
+    ? htmlResponse(requestId, confirmLinkPage(token))
+    : htmlResponse(requestId, badLinkPage(), 400);
+  response.headers.set("referrer-policy", "no-referrer");
+  return response;
+}
+
+async function useLink(c: Ctx): Promise<Response> {
+  const requestId = uuidv7();
+  const policy = policyOf(c.env);
+  const enabled = emailSignIn(c.env, policy);
+  if (policy === null || enabled === null) return htmlError(requestId, "policy_missing", "Sign in", "/signin", "Sign in", ACCOUNT);
+  if (!sameOrigin(c.req.raw, policy.site_origin)) return htmlError(requestId, "forbidden", "Sign in", "/signin", "Sign in", ACCOUNT);
+  const started = await consumeLink(c.env.DB, c.req.param("token") ?? "", enabled.auth);
+  if (started === null) {
+    const response = htmlResponse(requestId, badLinkPage(), 400);
+    response.headers.set("referrer-policy", "no-referrer");
+    return response;
+  }
+  return redirect(requestId, "/operator", sessionCookie(started.secret, started.maxAge));
+}
+
+async function signOut(c: Ctx): Promise<Response> {
+  const requestId = uuidv7();
+  const policy = policyOf(c.env);
+  if (policy === null) return htmlError(requestId, "policy_missing", "Sign out", "/signin", "Sign in", ACCOUNT);
+  if (!sameOrigin(c.req.raw, policy.site_origin)) return htmlError(requestId, "forbidden", "Sign out", "/signin", "Sign in", ACCOUNT);
+  const secret = readSessionCookie(c.req.raw);
+  if (secret !== null) await revokeSession(c.env.DB, secret);
+  return redirect(requestId, "/signin", CLEAR_SESSION_COOKIE);
+}
+
+async function signOutEverywhere(c: Ctx): Promise<Response> {
+  const requestId = uuidv7();
+  const policy = policyOf(c.env);
+  if (policy === null) return htmlError(requestId, "policy_missing", "Sign out", "/signin", "Sign in", ACCOUNT);
+  if (!sameOrigin(c.req.raw, policy.site_origin)) return htmlError(requestId, "forbidden", "Sign out", "/signin", "Sign in", ACCOUNT);
+  const session = await currentSession(c.env, c.req.raw);
+  if (session === null) {
+    const response = htmlResponse(requestId, signedOutPage(false), 401);
+    response.headers.append("set-cookie", CLEAR_SESSION_COOKIE);
+    return response;
+  }
+  await revokeOperatorSessions(c.env.DB, session.operatorId);
+  const response = htmlResponse(requestId, signedOutPage(true));
+  response.headers.append("set-cookie", CLEAR_SESSION_COOKIE);
+  return response;
+}
+
+function redirect(requestId: string, location: string, cookie: string): Response {
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location,
+      "set-cookie": cookie,
+      "cache-control": "no-store",
+      "x-request-id": requestId,
+      "referrer-policy": "no-referrer",
+    },
+  });
+}
