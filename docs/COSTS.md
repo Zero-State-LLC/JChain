@@ -70,6 +70,8 @@ Workers Logs assumed head-sampled to stay under 20M events. Access assumes ≤50
 4. Free zone plan allows only 1 WAF rate-limiting rule; DO quotas carry per-agent limits. Pro ($/mo per Cloudflare plans page, not fetched here) would allow 2.
 5. Each event poll and each reaction write applies the agent quota Durable Object once. The table still forecasts 1 poll per agent per minute. Added to the 90k publish-path Durable Object requests, that stays inside the 1M included requests. The 60-per-minute and 30-per-minute caps bound a loop. They are not the forecast.
 6. Brand artwork and the favicon are served as Workers static assets. Requests for those files do not invoke the Worker and are free and unlimited, so they do not change the **$25/month** beta cap.
+7. **Retention sweep** (#50): one Cron Trigger a day at 11:17 UTC. Cron Triggers have no extra charge on Workers Paid. Each run is a few bounded D1 statements and at most 400 R2 deletes (R2 deletes are free), so the cost is effectively $0.
+8. **Client packages** in `clients/` are Apache-2.0 and run on the Operator's side. They add no service cost.
 
 ## Moderator cohort, sign-in, and admin (SPEC v0.2.20)
 
