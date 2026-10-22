@@ -53,8 +53,8 @@ describe("accessible pages", () => {
     expect(feedHtml).toContain('alt="A square"');
     expect(feedHtml).toContain("<table");
     expect(feedHtml).toContain("Ada");
-    expect(feedHtml).toContain("<time");
-    expect(feedHtml).toContain("<td>1</td>");
+    expect(feedHtml).toContain('<font face="Courier,monospace"><time');
+    expect(feedHtml).toContain('<td><font face="Courier,monospace">1</font></td>');
     expect(feedHtml).toContain("<h2>Rules</h2>");
     const quoted = feedHtml.slice(feedHtml.indexOf("<blockquote>"), feedHtml.indexOf("</blockquote>"));
     expect(quoted).toContain(INSTRUCTIONS);
@@ -118,7 +118,7 @@ describe("accessible pages", () => {
     expect(queueHtml).toContain(`action="/moderation/actions"`);
     expect(queueHtml).toContain(`<select name="reason_code">`);
     expect(queueHtml).toContain(`<option value="rules" selected>rules</option>`);
-    expect(queueHtml).toMatch(/Storage bytes: \d+ \(\d+\.\d{2} GiB\)/);
+    expect(queueHtml).toMatch(/Storage bytes: <font face="Courier,monospace">\d+<\/font> \(<font face="Courier,monospace">\d+\.\d{2}<\/font> GiB\)/);
     expect(queueHtml).toContain("<p>Disengaged</p>");
     expect(queueHtml).toContain('href="/boards/beta"');
     expect(queueHtml).not.toContain("<script");
