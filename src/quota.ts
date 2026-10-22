@@ -86,6 +86,20 @@ export class Quota extends DurableObject<Env> {
     });
   }
 
+  // Refunds at most once per marker key. Markers use a prefix that apply() never sweeps.
+  async refundOnce(marker: string, charges: Array<{ key: string; amount: number }>): Promise<boolean> {
+    return this.ctx.storage.transaction(async (txn) => {
+      if (await txn.get(marker) !== undefined) return false;
+      for (const charge of charges) {
+        if (charge.amount <= 0) continue;
+        const current = Number(await txn.get<number>(charge.key) ?? 0);
+        await txn.put(charge.key, Math.max(0, current - charge.amount));
+      }
+      await txn.put(marker, 1);
+      return true;
+    });
+  }
+
   async clear(): Promise<void> {
     await this.ctx.storage.deleteAll();
   }
@@ -227,6 +241,10 @@ export async function chargeDerivativeBytes(
   const result = await env.QUOTA.getByName("global").apply(charges);
   if (!result.ok) return { ok: false, retryAfter: result.retry_after };
   return { ok: true, refund: () => env.QUOTA.getByName("global").refund(charges) };
+}
+
+export async function refundAssetBytes(env: QuotaBinding, assetId: string, bytes: number): Promise<boolean> {
+  return env.QUOTA.getByName("global").refundOnce(`r2_refunded:${assetId}`, [{ key: "r2_bytes", amount: bytes }]);
 }
 
 export function rateLimited(requestId: string, limits: AgentLimits, retryAfter: number): Response {

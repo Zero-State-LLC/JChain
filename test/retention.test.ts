@@ -2,10 +2,11 @@ import { applyD1Migrations, createExecutionContext, createScheduledController, w
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import worker from "../src/index";
-import { derivativeKey, originalKey } from "../src/asset-pipeline";
+import { derivativeKey, originalKey, rejectInFlight } from "../src/asset-pipeline";
 import { uuidv7 } from "../src/ids";
+import { refundAssetBytes } from "../src/quota";
 import { REDACTED_EMAIL, RETENTION_BATCH, runRetention } from "../src/retention";
-import { MODERATOR, OPERATOR, OPERATOR_ID, resetAndSeed } from "./harness";
+import { MODERATOR, OPERATOR, OPERATOR_ID, call, resetAndSeed } from "./harness";
 
 const NOW = Date.parse("2026-10-21T12:00:00Z");
 const HOUR = 60 * 60 * 1000;
@@ -30,22 +31,42 @@ beforeEach(async () => {
   ).bind(agentId, OPERATOR_ID, at(-60 * DAY)).run();
 });
 
-async function seedAsset(state: string, createdAt: string, expiresAt: string, keys: string[] = []): Promise<string> {
+type SeedOptions = {
+  rejectedAt?: string | null;
+  sizes?: Partial<Record<"display" | "thumb", number>>;
+};
+
+async function seedAsset(
+  state: string,
+  createdAt: string,
+  expiresAt: string,
+  keys: string[] = [],
+  options: SeedOptions = {},
+): Promise<string> {
   const id = uuidv7();
   await env.DB.prepare(
-    `INSERT INTO assets (id, agent_id, state, content_type, byte_size, sha256, reason_code, original_stored, created_at, expires_at)
-     VALUES (?, ?, ?, 'image/webp', 4, ?, ?, ?, ?, ?)`,
+    `INSERT INTO assets (id, agent_id, state, content_type, byte_size, sha256, reason_code, original_stored, created_at, expires_at, rejected_at)
+     VALUES (?, ?, ?, 'image/webp', 4, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     id, agentId, state, SHA,
     state === "rejected" ? "invalid_image" : null,
     keys.includes("original") ? 1 : 0,
     createdAt, expiresAt,
+    options.rejectedAt ?? null,
   ).run();
-  for (const key of keys) {
-    const name = key === "original" ? originalKey(id) : derivativeKey(id, key as "display" | "thumb");
-    await env.MEDIA.put(name, new Uint8Array([1, 2, 3, 4]));
-  }
+  await putObjects(id, keys, options.sizes);
   return id;
+}
+
+async function putObjects(id: string, keys: string[], sizes: SeedOptions["sizes"] = {}): Promise<void> {
+  for (const key of keys) {
+    if (key === "original") {
+      await env.MEDIA.put(originalKey(id), new Uint8Array([1, 2, 3, 4]));
+      continue;
+    }
+    const variant = key as "display" | "thumb";
+    await env.MEDIA.put(derivativeKey(id, variant), new Uint8Array(sizes[variant] ?? 4).fill(1));
+  }
 }
 
 async function quarantineAction(assetId: string, createdAt: string): Promise<void> {
@@ -199,5 +220,107 @@ describe("retention sweep", () => {
     expect(await runRetention(noPolicy, NOW)).toEqual({ ran: false, audit_redacted: 0, reports_redacted: 0, assets_deleted: 0 });
     expect(await assetState(abandoned)).toBe("reserved");
     expect(await stored(abandoned)).toBe(1);
+  });
+});
+
+const BIG = 1_000_000_000_000_000;
+
+async function r2Used(): Promise<number> {
+  const result = await env.QUOTA.getByName("global").apply([
+    { key: "r2_bytes", amount: 0, limit: BIG, reset_at: null, counter: "r2_bytes" },
+  ]);
+  return BIG - Number(result.remaining.r2_bytes ?? 0);
+}
+
+async function seedR2Used(bytes: number): Promise<void> {
+  const result = await env.QUOTA.getByName("global").apply([
+    { key: "r2_bytes", amount: bytes, limit: BIG, reset_at: null, counter: "r2_bytes" },
+  ]);
+  expect(result.ok).toBe(true);
+}
+
+describe("AT-46 rejected_at and r2_bytes refunds", () => {
+  it("ages rejected Assets from rejected_at, falling back to created_at when it is NULL", async () => {
+    const late = await seedAsset("rejected", at(-30 * DAY), at(-29 * DAY), ["original"], { rejectedAt: at(-2 * DAY) });
+    const settled = await seedAsset("rejected", at(-30 * DAY), at(-29 * DAY), ["original"], { rejectedAt: at(-8 * DAY) });
+    const legacyOld = await seedAsset("rejected", at(-9 * DAY), at(-8 * DAY), ["original"]);
+    const legacyYoung = await seedAsset("rejected", at(-7 * DAY - 12 * HOUR), at(-6 * DAY - 12 * HOUR), ["original"]);
+
+    await runScheduled();
+
+    expect(await assetState(late)).toBe("rejected");
+    expect(await stored(late)).toBe(1);
+    expect(await assetState(settled)).toBe("deleted");
+    expect(await stored(settled)).toBe(0);
+    expect(await assetState(legacyOld)).toBe("deleted");
+    expect(await assetState(legacyYoung)).toBe("rejected");
+
+    await env.DB.prepare("UPDATE assets SET rejected_at = ? WHERE id = ?").bind(at(-7 * DAY - 1000), late).run();
+    await runScheduled();
+    expect(await assetState(late)).toBe("deleted");
+    expect(await stored(late)).toBe(0);
+  });
+
+  it("records rejected_at when the pipeline rejects an in-flight Asset", async () => {
+    const id = await seedAsset("uploaded", at(-1 * HOUR), at(23 * HOUR), ["original"]);
+    await rejectInFlight(env.DB, id);
+    const row = await env.DB.prepare("SELECT state, rejected_at FROM assets WHERE id = ?")
+      .bind(id).first<{ state: string; rejected_at: string | null }>();
+    expect(row?.state).toBe("rejected");
+    expect(row?.rejected_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
+
+  it("refunds derivative bytes once when the sweep deletes an Asset, even if a run repeats", async () => {
+    await seedR2Used(1000);
+    const id = await seedAsset("quarantined", at(-30 * DAY), at(-29 * DAY), ["display", "thumb"], {
+      sizes: { display: 30, thumb: 12 },
+    });
+    await quarantineAction(id, at(-8 * DAY));
+
+    await runScheduled();
+    expect(await assetState(id)).toBe("deleted");
+    expect(await stored(id)).toBe(0);
+    expect(await r2Used()).toBe(958);
+
+    await runScheduled();
+    expect(await r2Used()).toBe(958);
+
+    // An interrupted run: the row is back in deletion_pending and the bytes are still there.
+    await env.DB.prepare("UPDATE assets SET state = 'deletion_pending' WHERE id = ?").bind(id).run();
+    await putObjects(id, ["display", "thumb"], { display: 30, thumb: 12 });
+    await runScheduled();
+    expect(await assetState(id)).toBe("deleted");
+    expect(await stored(id)).toBe(0);
+    expect(await r2Used()).toBe(958);
+
+    expect(await refundAssetBytes(env, id, 42)).toBe(false);
+    expect(await r2Used()).toBe(958);
+  });
+
+  it("never refunds r2_bytes below zero", async () => {
+    await seedR2Used(10);
+    const id = await seedAsset("deletion_pending", at(-10 * DAY), at(-9 * DAY), ["display", "thumb"], {
+      sizes: { display: 30, thumb: 12 },
+    });
+    await runScheduled();
+    expect(await assetState(id)).toBe("deleted");
+    expect(await r2Used()).toBe(0);
+  });
+
+  it("refunds derivative bytes once when the Operator requests deletion", async () => {
+    await seedR2Used(500);
+    const id = await seedAsset("ready", at(-3 * DAY), at(-2 * DAY), ["display", "thumb"], {
+      sizes: { display: 50, thumb: 20 },
+    });
+
+    const response = await call("/v1/deletion-requests", { email: OPERATOR, body: { agent_id: agentId } });
+    expect(response.status).toBe(200);
+    expect(await assetState(id)).toBe("deleted");
+    expect(await stored(id)).toBe(0);
+    expect(await r2Used()).toBe(430);
+
+    await call("/v1/deletion-requests", { email: OPERATOR, body: { agent_id: agentId } });
+    expect(await refundAssetBytes(env, id, 70)).toBe(false);
+    expect(await r2Used()).toBe(430);
   });
 });
