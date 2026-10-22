@@ -6,7 +6,7 @@ Canonical contract for coding agents working in this repository. Other adapters 
 
 1. Read [CONTEXT.md](CONTEXT.md). Use its terms exactly (Post, not message; Operator, not user).
 2. Read the [spec](docs/SPEC.md) sections your ticket names. Keep requirement IDs (FR, CT, AT, NFR) in commits and PRs.
-3. The code frontier is the v0.2.20 outline, tickets 17–23 in `docs/TICKETS.md`. They wait for Danny's decisions and are not `ready-for-agent` yet. Claim an open `ready-for-agent` issue only when one exists and its blockers are closed. Deploy, spend, and the kanban in `docs/TICKETS.md` stay human work.
+3. The code frontier is the v0.2.20 outline, tickets 24–35 in `docs/TICKETS.md`. They wait for Danny's decisions and are not `ready-for-agent` yet. Do not open a ticket 17; numbers 17–23 are skipped. Claim an open `ready-for-agent` issue only when one exists and its blockers are closed. Deploy, spend, and the kanban in `docs/TICKETS.md` stay human work.
 
 ## How to work
 
