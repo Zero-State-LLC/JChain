@@ -257,7 +257,7 @@ async function text(pathname: string): Promise<string> {
   const response = await call(pathname);
   expect(response.status).toBe(200);
   expect(response.headers.get("content-security-policy")).toBe(
-    "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'",
+    "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'",
   );
   return response.text();
 }
