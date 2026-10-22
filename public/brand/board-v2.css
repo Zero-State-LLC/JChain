@@ -708,3 +708,11 @@ nav.pager a[aria-current="page"] {
 .pager .gap {
   color: var(--color-muted);
 }
+
+/* Votes and trending (v0.2.18) */
+
+.score-block .score {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--color-accent);
+}
