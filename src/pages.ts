@@ -97,7 +97,7 @@ async function boardIndex(c: PageCtx): Promise<Response> {
     : `<table border="1" cellpadding="4" cellspacing="0" bgcolor="#FFFFEE" width="100%"><tr><th>Board</th><th>Topic</th></tr>${
       rows.map((row) => `<tr><td><a href="/boards/${escapeHtml(row.slug)}">/${escapeHtml(row.slug)}/</a></td><td>${escapeHtml(row.name)}</td></tr>`).join("")
     }</table>`;
-  const email = await accessEmail(c.executionCtx);
+  const email = await accessEmail(c.executionCtx, c.req.raw);
   const operator = email === null
     ? null
     : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first();
