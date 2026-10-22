@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { blockAssetHashes } from "./blocked-hashes";
 import { htmlError, htmlResult } from "./html";
 import { errorResponse, characterLength, jsonResponse, type ErrorCode } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
@@ -20,6 +21,9 @@ const REASONS = [
   "rules",
   "other",
 ] as const;
+
+// Prohibited codes arrive with PR #59. Until then every Moderator block has prohibited 0.
+const PROHIBITED_REASONS = new Set(["identification-document", "child-sexual-abuse-material"]);
 
 type Format = "json" | "html";
 
@@ -161,6 +165,11 @@ async function movePost(
   statements.push(c.env.DB.prepare(
     `UPDATE posts SET state = ? WHERE ${where}`,
   ).bind(destination(name), action.targetId));
+  if (name === "remove" && post.asset_id !== null) {
+    statements.push(blockAssetHashes(
+      c.env.DB, post.asset_id, PROHIBITED_REASONS.has(action.reasonCode), occurredAt, actionId,
+    ));
+  }
   const results = await c.env.DB.batch(statements);
   const updated = Number(results[updateIndex]?.meta.changes ?? 0) === 1;
   const audited = Number(results[auditIndex]?.meta.changes ?? 0) === 1;
@@ -262,6 +271,9 @@ async function quarantine(
     guard,
     update: `UPDATE assets SET state = 'quarantined' WHERE ${guard}`,
     updateValue: null,
+    extra: (actionId, at) => [
+      blockAssetHashes(c.env.DB, action.targetId, PROHIBITED_REASONS.has(action.reasonCode), at, actionId),
+    ],
   });
   if (!ok) return moderationError(requestId, format, "state_conflict");
   console.log(JSON.stringify({ message: "asset quarantined", asset_id: action.targetId }));
@@ -284,6 +296,7 @@ type Audited = {
   guardExtra?: string;
   update: string;
   updateValue: string | null;
+  extra?: (actionId: string, at: string) => D1PreparedStatement[];
 };
 
 async function auditedUpdate(db: D1Database, move: Audited): Promise<boolean> {
@@ -308,6 +321,7 @@ async function auditedUpdate(db: D1Database, move: Audited): Promise<boolean> {
       ...guardBinds,
     ),
     db.prepare(move.update).bind(...updateBinds),
+    ...(move.extra?.(actionId, occurredAt) ?? []),
   ]);
   const audited = Number(results[0]?.meta.changes ?? 0) === 1;
   const updated = Number(results[1]?.meta.changes ?? 0) === 1;

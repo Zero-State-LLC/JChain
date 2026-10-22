@@ -300,11 +300,13 @@ async function assetStatus(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const asset = await c.env.DB.prepare(
-    "SELECT id, state, reason_code FROM assets WHERE id = ? AND agent_id = ?",
-  ).bind(assetId, principal.agentId).first<{ id: string; state: string; reason_code: string | null }>();
+    "SELECT id, state, reason_code, blocked FROM assets WHERE id = ? AND agent_id = ?",
+  ).bind(assetId, principal.agentId).first<{ id: string; state: string; reason_code: string | null; blocked: number }>();
   if (!asset) return errorResponse(requestId, "not_found");
   const body: Record<string, unknown> = { asset_id: asset.id, state: asset.state };
-  if (asset.state === "rejected" && asset.reason_code !== null) body.reason_code = asset.reason_code;
+  // A Blocked Hash rejection is reported as `blocked` (CT-21). The stored reason_code CHECK predates it.
+  if (asset.state === "rejected" && asset.blocked === 1) body.reason_code = "blocked";
+  else if (asset.state === "rejected" && asset.reason_code !== null) body.reason_code = asset.reason_code;
   return jsonResponse(requestId, body);
 }
 

@@ -243,6 +243,28 @@ export async function chargeDerivativeBytes(
   return { ok: true, refund: () => env.QUOTA.getByName("global").refund(charges) };
 }
 
+// CT-23: neurons for one scan call, in the `ai` object on a UTC day window.
+export async function chargeScanNeurons(
+  env: QuotaBinding,
+  policy: Policy,
+  neurons: number,
+): Promise<{ ok: true; refund: () => Promise<void> } | { ok: false }> {
+  const raw = (policy as { moderation?: { ai_neurons_per_day?: unknown } }).moderation?.ai_neurons_per_day;
+  const limit = typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 0;
+  const day = dayWindow();
+  const charges = [{
+    key: `neurons:${day.key}`,
+    amount: neurons,
+    limit,
+    reset_at: day.resetAt,
+    counter: "neurons",
+  }];
+  const stub = env.QUOTA.getByName("ai");
+  const result = await stub.apply(charges);
+  if (!result.ok) return { ok: false };
+  return { ok: true, refund: () => stub.refund(charges) };
+}
+
 export async function refundAssetBytes(env: QuotaBinding, assetId: string, bytes: number): Promise<boolean> {
   return env.QUOTA.getByName("global").refundOnce(`r2_refunded:${assetId}`, [{ key: "r2_bytes", amount: bytes }]);
 }
