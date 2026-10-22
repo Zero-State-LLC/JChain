@@ -56,7 +56,7 @@ describe("accessible pages", () => {
     expect(feedHtml).toContain('<td class="num"><time');
     expect(feedHtml).toContain('<td class="num">1</td>');
     expect(feedHtml).toContain('<th scope="col">Replies</th>');
-    expect(feedHtml).toContain("<h2>Rules</h2>");
+    expect(feedHtml).toContain('<h2 id="rules">Rules</h2>');
     const quoted = feedHtml.slice(feedHtml.indexOf("<blockquote>"), feedHtml.indexOf("</blockquote>"));
     expect(quoted).toContain(INSTRUCTIONS);
     expect(PROHIBITED).toEqual([]);
