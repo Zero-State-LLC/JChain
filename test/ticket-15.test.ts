@@ -228,7 +228,7 @@ describe("accessible pages", () => {
     expect(jsonAction.headers.get("content-type")).toContain("application/json");
   });
 
-  it("pages the feed, thread, and profile with the shared cursor", async () => {
+  it("pages the feed by number, and the thread and profile with the shared cursor", async () => {
     const ada = await enroll("Ada");
     const assetId = await readyAsset(ada.credential);
     const older = await publishThread(ada.credential, assetId, "Older title", "older caption", "pages-older");
@@ -240,13 +240,13 @@ describe("accessible pages", () => {
     const feed = await page("/boards/beta");
     expect(feed).toContain("Older title");
     expect(feed).toContain("Newer title");
-    expect(nextHref(feed, "Feed")).toBeNull();
+    expect(feed).not.toContain('aria-label="Pages"');
     const wide = await page("/boards/beta?limit=101");
     expect(wide).toContain("Older title");
     expect(wide).toContain("Newer title");
-    expect(nextHref(wide, "Feed")).toBeNull();
+    expect(wide).not.toContain('aria-label="Pages"');
     await expectError(await call("/boards/beta?limit=0"), 400, "malformed");
-    await expectError(await call("/boards/beta?cursor=not-a-cursor"), 400, "malformed");
+    await expectError(await call("/boards/beta?page=0"), 400, "malformed");
     await expectError(await call(`/threads/${older.threadId}?limit=0`), 400, "malformed");
     await expectError(await call(`/agents/${ada.agentId}?cursor=not-a-cursor`), 400, "malformed");
     await expectError(await call("/moderation?limit=0", { email: MODERATOR }), 400, "malformed");
@@ -254,12 +254,13 @@ describe("accessible pages", () => {
     const firstFeed = await page("/boards/beta?limit=1");
     expect(firstFeed).toContain("Newer title");
     expect(firstFeed).not.toContain("Older title");
-    const feedNext = nextHref(firstFeed, "Feed");
-    expect(feedNext).toContain("limit=1");
+    const feedNext = pageHref(firstFeed, "next");
+    expect(feedNext).toBe("/boards/beta?limit=1&page=2");
     const secondFeed = await page(feedNext ?? "");
     expect(secondFeed).toContain("Older title");
     expect(secondFeed).not.toContain("Newer title");
-    expect(nextHref(secondFeed, "Feed")).toBeNull();
+    expect(pageHref(secondFeed, "next")).toBeNull();
+    expect(pageHref(secondFeed, "prev")).toBe("/boards/beta?limit=1");
 
     const firstProfile = await page(`/agents/${ada.agentId}?limit=1`);
     expect(firstProfile).toContain("newer caption");
@@ -368,6 +369,11 @@ function keyboardShell(html: string): boolean {
 
 function nextHref(html: string, label: string): string | null {
   const found = html.match(new RegExp(`<nav aria-label="${label}"><a href="([^"]+)">Next(?: [^<]+)?</a></nav>`));
+  return found?.[1]?.replaceAll("&amp;", "&") ?? null;
+}
+
+function pageHref(html: string, rel: "next" | "prev"): string | null {
+  const found = html.match(new RegExp(`<a href="([^"]+)" rel="${rel}">`));
   return found?.[1]?.replaceAll("&amp;", "&") ?? null;
 }
 
