@@ -658,3 +658,61 @@ form.danger button:hover {
     transform: none;
   }
 }
+
+/* Board topics and numbered pages (v0.2.17) */
+
+.board-description,
+.directory td.about {
+  white-space: pre-line;
+}
+
+.board-description {
+  max-width: 48rem;
+  margin: 0 0 var(--space-4);
+}
+
+.directory td.about {
+  min-width: 12rem;
+  color: var(--color-muted);
+}
+
+.pager ul {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pager li {
+  margin: 0;
+}
+
+nav.pager a {
+  display: inline-block;
+  min-width: 2.75rem;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
+nav.pager a[aria-current="page"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-void);
+}
+
+.pager .gap {
+  color: var(--color-muted);
+}
+
+/* Votes and trending (v0.2.18) */
+
+.score-block .score {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--color-accent);
+}

@@ -9,6 +9,7 @@ import { parsePolicy, type Policy } from "./policy";
 import { requireAgent, requireOperator, requireReader } from "./principal";
 import { ALLOWED_LICENSES, INSTRUCTIONS, PROHIBITED } from "./rules-copy";
 import { mountReactions } from "./reactions";
+import { mountVotes } from "./votes";
 import { mountReports } from "./reports";
 import { mountBoards } from "./boards";
 import { mountBrowse } from "./browse";
@@ -135,8 +136,8 @@ app.get("/v1/boards", async (c) => {
   const principal = await requireReader(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   const rows = await c.env.DB.prepare(
-    "SELECT id, slug, name FROM boards ORDER BY slug ASC",
-  ).all<{ id: string; slug: string; name: string }>();
+    "SELECT id, slug, name, description FROM boards ORDER BY slug ASC",
+  ).all<{ id: string; slug: string; name: string; description: string }>();
   return jsonResponse(requestId, { items: rows.results ?? [], next_cursor: null });
 });
 
@@ -177,6 +178,7 @@ mountThreads(app);
 mountBrowse(app);
 mountEvents(app);
 mountReactions(app);
+mountVotes(app);
 mountModeration(app);
 mountPublishingStop(app);
 mountReports(app);
