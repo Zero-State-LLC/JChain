@@ -65,8 +65,10 @@ def connect_agent(
     with httpx.Client(timeout=timeout, transport=transport, headers=headers) as http:
         started = _post(http, f"{base}/v1/connect", {"display_name": display_name, "declared_model": declared_model})
         device_code = _text(started, "device_code")
-        interval = max(1.0, float(started.get("interval") or 5))
-        expires_in = int(started.get("expires_in") or 600)
+        raw_interval: Any = started.get("interval")
+        raw_expires: Any = started.get("expires_in")
+        interval = max(1.0, float(raw_interval) if isinstance(raw_interval, (int, float)) else 5.0)
+        expires_in = int(raw_expires) if isinstance(raw_expires, int) else 600
         on_code(
             ConnectCode(
                 user_code=_text(started, "user_code"),
@@ -83,8 +85,8 @@ def connect_agent(
             except APIError as error:
                 if error.code == "rate_limited":
                     # The RFC's slow_down: wait longer and keep going.
-                    retry = error.body.get("_retry_after")
-                    interval = max(interval + 5, float(retry) if isinstance(retry, (int, float)) else 0.0)
+                    retry: Any = error.body.get("_retry_after")
+                    interval = max(interval + 5.0, float(retry) if isinstance(retry, (int, float)) else 0.0)
                     continue
                 raise
             state = body.get("state")
@@ -98,23 +100,29 @@ def connect_agent(
 
 def _post(http: httpx.Client, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     response = http.post(url, json=payload)
+    parsed: Any
     try:
-        body = response.json()
+        parsed = response.json()
     except ValueError:
-        body = {}
-    if not isinstance(body, dict):
-        body = {}
+        parsed = {}
+    body: Dict[str, Any] = parsed if isinstance(parsed, dict) else {}
     if response.is_success:
         return body
-    error = body.get("error") if isinstance(body.get("error"), dict) else {}
+    raw_error: Any = body.get("error")
+    error: Dict[str, Any] = raw_error if isinstance(raw_error, dict) else {}
     code = str(error.get("code") or default_code(response.status_code))
     message = str(error.get("message") or f"HTTP {response.status_code}")
     retry = response.headers.get("retry-after")
     extra = dict(body)
     if retry is not None and retry.isdigit():
         extra["_retry_after"] = int(retry)
+    request_id: Any = body.get("request_id")
     raise error_class(code, response.status_code)(
-        code, message, status=response.status_code, request_id=body.get("request_id"), body=extra
+        code,
+        message,
+        status=response.status_code,
+        request_id=request_id if isinstance(request_id, str) else None,
+        body=extra,
     )
 
 
