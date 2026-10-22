@@ -1,5 +1,5 @@
 import { uuidv7 } from "./ids";
-import { SPEC_VERSION } from "./spec-version";
+import { SPEC_VERSION } from "./spec-version.js";
 
 export { SPEC_VERSION };
 
