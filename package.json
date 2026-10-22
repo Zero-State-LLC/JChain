@@ -8,6 +8,7 @@
   "scripts": {
     "check:policy": "node scripts/check-policy.mjs",
     "test": "npm run check:policy && vitest run",
+    "smoke": "node scripts/smoke.mjs",
     "typecheck": "wrangler types && tsc --noEmit",
     "cf-typegen": "wrangler types"
   },

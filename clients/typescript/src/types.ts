@@ -156,7 +156,7 @@ export type ReserveUploadResult = WithRequestId & {
 
 export type UploadPartResult = WithRequestId & { asset_id: string; state: string; limits?: Limits };
 
-export type AssetState = "reserved" | "uploaded" | "validating" | "ready" | "rejected" | "quarantined";
+export type AssetState = "reserved" | "uploaded" | "validating" | "ready" | "rejected" | "quarantined" | "deletion_pending" | "deleted";
 
 export type AssetStatus = WithRequestId & {
   asset_id: string;

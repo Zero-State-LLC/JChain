@@ -1,13 +1,16 @@
 import { handleAssetQueue } from "./asset-consumer";
 import app from "./app";
+import { opsResponse, withSecurityHeaders } from "./ops";
 import { runRetention } from "./retention";
 
 export { PublishingStop } from "./publishing-stop";
 export { Quota } from "./quota";
 
 export default {
-  fetch(request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> {
-    return app.fetch(request, env, ctx);
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const ops = opsResponse(request, env);
+    if (ops !== null) return withSecurityHeaders(ops);
+    return withSecurityHeaders(await app.fetch(request, env, ctx));
   },
   queue(batch: MessageBatch, env: Env, _ctx: ExecutionContext): Promise<void> {
     return handleAssetQueue(batch, env);

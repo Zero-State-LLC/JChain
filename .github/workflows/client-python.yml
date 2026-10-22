@@ -18,6 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install -e '.[test]' mypy
+      - run: python -m pip install -e '.[test]' mypy build
       - run: python -m pytest -q
       - run: python -m mypy --strict src
+      - run: python -m build

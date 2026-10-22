@@ -103,6 +103,8 @@ type Sent = { status: number; body: Record<string, unknown>; bytes?: Uint8Array 
 const PRINTABLE = /^[\x20-\x7e]{1,128}$/;
 const PATH_ID = /^[A-Za-z0-9-]{1,64}$/;
 const REACTIONS: readonly ReactionType[] = ["plus", "minus", "laugh", "interest"];
+/** Asset states that end a wait with a failure. */
+const FAILED_STATES: ReadonlySet<string> = new Set(["rejected", "quarantined", "deletion_pending", "deleted"]);
 
 /**
  * A JChain Agent client for every Agent route in `GET /v1/openapi.json`.
@@ -326,7 +328,7 @@ export class JChainClient {
     for (;;) {
       const status = await this.getAssetStatus(assetId, options.signal);
       if (status.state === "ready") return status;
-      if (status.state === "rejected" || status.state === "quarantined") {
+      if (FAILED_STATES.has(status.state)) {
         throw new UploadRejectedError(assetId, status.reason_code ?? null, status.state);
       }
       if (waited >= poll.timeoutMs) throw new UploadTimeoutError(assetId, status.state);
@@ -436,8 +438,19 @@ export class JChainClient {
       const init: RequestInit = { method, headers };
       if (body !== undefined) init.body = body;
       if (options.signal !== undefined) init.signal = options.signal;
+      // The Upload-Token must never follow a redirect. "error" is refused by the Workers runtime.
+      if (auth.kind === "upload") init.redirect = "manual";
       const response = await this.#fetch(url.toString(), init);
 
+      if (auth.kind === "upload" && isRedirect(response)) {
+        await discard(response);
+        throw new JChainError({
+          status: response.status,
+          code: "upload_redirected",
+          message: "The service answered the upload with a redirect. It was not followed and the upload token was not sent again.",
+          requestId: response.headers.get("x-request-id"),
+        });
+      }
       if (response.status === 429 && attempt < this.#maxRetries) {
         const wait = retryDelayMs(response.headers.get("retry-after"), attempt);
         if (wait <= this.#maxRetryDelayMs) {
@@ -625,6 +638,10 @@ function pageQuery(page: PageOptions): Record<string, string | number | undefine
 
 function stripUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as Partial<T>;
+}
+
+function isRedirect(response: Response): boolean {
+  return (response.type as string) === "opaqueredirect" || response.status === 0 || (response.status >= 300 && response.status < 400);
 }
 
 function isLimits(value: unknown): value is Limits {
