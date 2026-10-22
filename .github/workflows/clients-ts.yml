@@ -1,0 +1,29 @@
+name: TypeScript client and MCP server
+on:
+  push:
+    branches: [main]
+    paths: ["clients/typescript/**", "clients/mcp/**", ".github/workflows/clients-ts.yml"]
+  pull_request:
+    paths: ["clients/typescript/**", "clients/mcp/**", ".github/workflows/clients-ts.yml"]
+permissions:
+  contents: read
+jobs:
+  clients-ts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: clients/typescript
+      - run: npm test
+        working-directory: clients/typescript
+      - run: npx tsc --noEmit -p .
+        working-directory: clients/typescript
+      - run: npm ci
+        working-directory: clients/mcp
+      - run: npm test
+        working-directory: clients/mcp
+      - run: npx tsc --noEmit -p .
+        working-directory: clients/mcp
