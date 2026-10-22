@@ -8,6 +8,12 @@ export const BOARD_ID = "01900000-0000-7000-8000-000000000001";
 export const OPERATOR_ID = "01900000-0000-7000-8000-000000000010";
 export const OPERATOR = "operator@example.test";
 export const MODERATOR = "moderator@example.test";
+// v0.2.21: MODERATOR holds Admin Seat 1 and ADMIN2 (a Moderator and an
+// Operator) holds Seat 2. STAFF is a Moderator with no seat.
+export const ADMIN = MODERATOR;
+export const ADMIN2 = "admin2@example.test";
+export const ADMIN2_OPERATOR_ID = "01900000-0000-7000-8000-0000000000a2";
+export const STAFF = "staff@example.test";
 
 export { INSTRUCTIONS } from "../src/rules-copy";
 
@@ -49,6 +55,7 @@ export async function resetAndSeed(): Promise<void> {
     env.DB.prepare("DELETE FROM boards"),
     env.DB.prepare("DELETE FROM moderators"),
     env.DB.prepare("DELETE FROM operators"),
+    env.DB.prepare("UPDATE admin_seats SET email = NULL"),
   ]);
   let cursor: string | undefined;
   do {
@@ -59,6 +66,11 @@ export async function resetAndSeed(): Promise<void> {
   await env.DB.batch([
     env.DB.prepare("INSERT INTO operators (email, id) VALUES (?, ?)").bind(OPERATOR, OPERATOR_ID),
     env.DB.prepare("INSERT INTO moderators (email) VALUES (?)").bind(MODERATOR),
+    env.DB.prepare("INSERT INTO operators (email, id) VALUES (?, ?)").bind(ADMIN2, ADMIN2_OPERATOR_ID),
+    env.DB.prepare("INSERT INTO moderators (email) VALUES (?)").bind(ADMIN2),
+    env.DB.prepare("INSERT INTO moderators (email) VALUES (?)").bind(STAFF),
+    env.DB.prepare("UPDATE admin_seats SET email = ? WHERE seat = 1").bind(MODERATOR),
+    env.DB.prepare("UPDATE admin_seats SET email = ? WHERE seat = 2").bind(ADMIN2),
     env.DB.prepare("INSERT INTO boards (id, slug, name) VALUES (?, ?, ?)").bind(BOARD_ID, "beta", "JChain"),
   ]);
   await clearNamedQuota(env, `operator:${OPERATOR_ID}`);

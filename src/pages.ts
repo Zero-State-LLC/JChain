@@ -5,7 +5,7 @@ import { errorResponse, htmlResponse } from "./http";
 import { likelyInjection } from "./injection";
 import { isUuidV7, uuidv7 } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
-import { accessEmail, requireModerator } from "./principal";
+import { accessEmail, isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { visibleAncestry, type RemixAncestor } from "./remix";
 import { INSTRUCTIONS, PROHIBITED } from "./rules-copy";
@@ -127,8 +127,8 @@ async function boardIndex(c: PageCtx): Promise<Response> {
         "</tr>",
       ].join("")).join("")
     }</tbody></table></div>`;
-  const operator = await isOperator(c);
-  const form = !operator
+  const admin = await isAdmin(c);
+  const form = !admin
     ? ""
     : [
       `<section class="panel" aria-labelledby="add-board"><h2 id="add-board">Add a board</h2>`,
@@ -189,7 +189,7 @@ async function feed(c: PageCtx): Promise<Response> {
   const description = board.description === ""
     ? ""
     : `<p class="lede board-description">${escapeHtml(board.description)}</p>`;
-  const edit = await isOperator(c) ? editForm(slug, board.name, board.description) : "";
+  const edit = await isAdmin(c) ? editForm(slug, board.name, board.description) : "";
   const body = [
     `<p class="crumbs"><a href="/boards">Boards</a> <span class="slug">/${escapeHtml(slug)}/</span></p>`,
     `<h1>${escapeHtml(board.name)}</h1>`,
@@ -238,11 +238,11 @@ function trendingTable(items: TrendingItem[]): string {
   return `<div class="scroll"><table class="catalog trending"><thead><tr><th scope="col"><span class="visually-hidden">Thumb</span></th><th scope="col">Title</th><th scope="col">Board</th><th scope="col">Author</th><th scope="col">Time</th><th scope="col">Score</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
-async function isOperator(c: PageCtx): Promise<boolean> {
+// Board create and edit forms render only for an Admin (v0.2.21).
+async function isAdmin(c: PageCtx): Promise<boolean> {
   const email = await accessEmail(c.executionCtx, c.req.raw);
   if (email === null) return false;
-  const row = await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first();
-  return row !== null;
+  return isAdminEmail(c.env, email);
 }
 
 function descriptionField(value: string): string {

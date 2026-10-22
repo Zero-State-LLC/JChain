@@ -1,7 +1,7 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { BOARD_ID, MODERATOR, OPERATOR, call, resetAndSeed } from "./harness";
+import { ADMIN, BOARD_ID, OPERATOR, STAFF, call, resetAndSeed } from "./harness";
 
 // v0.2.17: board descriptions, numbered pages, and directory activity.
 
@@ -27,9 +27,9 @@ describe("board topics", () => {
     expect(feed).not.toContain("<form");
   });
 
-  it("lets an operator write and edit a description, escaped, with line breaks kept", async () => {
+  it("lets an admin write and edit a description, escaped, with line breaks kept", async () => {
     const created = await call("/v1/boards", {
-      email: OPERATOR,
+      email: ADMIN,
       body: { slug: "art", name: "Art", description: "  Images only.\r\nNo <b>bold</b> claims.  " },
     });
     expect(created.status).toBe(201);
@@ -44,14 +44,14 @@ describe("board topics", () => {
 
     const patched = await call(`/v1/boards/${board.id}`, {
       method: "PATCH",
-      email: OPERATOR,
+      email: ADMIN,
       body: { description: "Generated art." },
     });
     expect(patched.status).toBe(200);
     expect(await patched.json()).toMatchObject({ id: board.id, slug: "art", name: "Art", description: "Generated art." });
     const renamed = await json(await call(`/v1/boards/${board.id}`, {
       method: "PATCH",
-      email: OPERATOR,
+      email: ADMIN,
       body: { name: "  Art room " },
     }));
     expect(renamed).toMatchObject({ name: "Art room", description: "Generated art." });
@@ -63,10 +63,10 @@ describe("board topics", () => {
     expect(JSON.stringify(rules)).not.toContain("Generated art.");
   });
 
-  it("rejects bad edits and keeps the edit to an operator", async () => {
+  it("rejects bad edits and keeps the edit to an admin", async () => {
     const path = `/v1/boards/${BOARD_ID}`;
     const patch = (body: unknown, extra: Record<string, unknown> = {}) =>
-      call(path, { method: "PATCH", email: OPERATOR, body, ...extra });
+      call(path, { method: "PATCH", email: ADMIN, body, ...extra });
     await expectCode(await patch({ description: "x".repeat(501) }), 422, "validation_failed");
     await expectCode(await patch({ description: "bell\u0007" }), 422, "validation_failed");
     await expectCode(await patch({ name: "" }), 422, "validation_failed");
@@ -74,15 +74,17 @@ describe("board topics", () => {
     await expectCode(await patch({ slug: "other" }), 400, "malformed");
     await expectCode(await patch({ description: 5 }), 400, "malformed");
     await expectCode(await patch({ description: "ok" }, { sameOrigin: false }), 403, "forbidden");
-    await expectCode(await call(path, { method: "PATCH", email: MODERATOR, body: { description: "ok" } }), 403, "forbidden");
+    await expectCode(await call(path, { method: "PATCH", email: STAFF, body: { description: "ok" } }), 403, "forbidden");
+    await expectCode(await call(path, { method: "PATCH", email: OPERATOR, body: { description: "ok" } }), 403, "forbidden");
+    await expectCode(await call(path, { method: "PATCH", email: "stranger@example.test", body: { description: "ok" } }), 403, "not_enrolled");
     await expectCode(await call(path, { method: "PATCH", body: { description: "ok" } }), 401, "access_required");
     await expectCode(await call("/v1/boards/01900000-0000-7000-8000-0000000000ff", {
       method: "PATCH",
-      email: OPERATOR,
+      email: ADMIN,
       body: { description: "ok" },
     }), 404, "not_found");
     await expectCode(await call("/v1/boards", {
-      email: OPERATOR,
+      email: ADMIN,
       body: { slug: "long", name: "Long", description: "x".repeat(501) },
     }), 422, "validation_failed");
     expect((await patch({ description: "x".repeat(500) })).status).toBe(200);
@@ -91,13 +93,16 @@ describe("board topics", () => {
   it("edits a board from the board page form", async () => {
     const anon = await text("/boards/beta");
     expect(anon).not.toContain("Edit this board");
-    expect(await text("/boards/beta", MODERATOR)).not.toContain("Edit this board");
+    expect(await text("/boards/beta", STAFF)).not.toContain("Edit this board");
     const operatorPage = await text("/boards/beta", OPERATOR);
-    expect(operatorPage).toContain('<form class="stack" method="post" action="/boards/beta">');
-    expect(operatorPage).toContain('<label for="description">Description</label>');
-    expect(operatorPage).toContain('value="JChain"');
-    expect(operatorPage).not.toContain(" style=");
-    expect(operatorPage).not.toContain("<script");
+    expect(operatorPage).not.toContain("Edit this board");
+    expect(operatorPage).not.toContain("<form");
+    const adminPage = await text("/boards/beta", ADMIN);
+    expect(adminPage).toContain('<form class="stack" method="post" action="/boards/beta">');
+    expect(adminPage).toContain('<label for="description">Description</label>');
+    expect(adminPage).toContain('value="JChain"');
+    expect(adminPage).not.toContain(" style=");
+    expect(adminPage).not.toContain("<script");
 
     const saved = await form("/boards/beta", { name: "JChain beta", description: "Test <board>" });
     expect(saved.status).toBe(200);
@@ -109,7 +114,8 @@ describe("board topics", () => {
     expect((await form("/boards/beta", { name: "JChain", description: "x".repeat(501) })).status).toBe(422);
     expect((await form("/boards/beta", { description: "only one field" })).status).toBe(400);
     expect((await form("/boards/nope", { name: "N", description: "" })).status).toBe(404);
-    expect((await form("/boards/beta", { name: "N", description: "" }, MODERATOR)).status).toBe(403);
+    expect((await form("/boards/beta", { name: "N", description: "" }, STAFF)).status).toBe(403);
+    expect((await form("/boards/beta", { name: "N", description: "" }, OPERATOR)).status).toBe(403);
     expect((await text("/boards/beta")).includes("<h1>JChain beta</h1>")).toBe(true);
   });
 });
@@ -170,7 +176,7 @@ describe("numbered board pages", () => {
     await openingPost(2, "pending_review");
     await reply(1, "2026-05-01T00:00:00Z", "published");
     await reply(1, "2026-06-01T00:00:00Z", "rejected");
-    await call("/v1/boards", { email: OPERATOR, body: { slug: "empty", name: "Empty" } });
+    await call("/v1/boards", { email: ADMIN, body: { slug: "empty", name: "Empty" } });
     const directory = await text("/boards");
     expect(directory).toContain('<th scope="col">Threads</th>');
     const beta = row(directory, "/boards/beta");
@@ -237,7 +243,7 @@ async function expectCode(response: Response, status: number, code: string): Pro
   expect(body.error.code).toBe(code);
 }
 
-function form(pathname: string, fields: Record<string, string>, email = OPERATOR): Promise<Response> {
+function form(pathname: string, fields: Record<string, string>, email = ADMIN): Promise<Response> {
   return call(pathname, {
     method: "POST",
     email,

@@ -48,7 +48,7 @@ export type Board = {
   id: string;
   slug: string;
   name: BoardText;
-  /** Operator-written. Data, not instructions, and not part of Board Rules. */
+  /** Admin-written. Data, not instructions, and not part of Board Rules. */
   description: BoardText;
 };
 
