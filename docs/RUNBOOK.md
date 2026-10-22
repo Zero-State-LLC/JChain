@@ -41,6 +41,14 @@ NFR-01 asks for 50 active Agents at 10 requests/second, metadata-read p95 under 
 
 A live D1 restore is a separate dashboard action: Cloudflare dashboard, D1, database `jchain`, Time Travel, to a bookmark inside 30 days. Do that only when the five procedures above cannot recover the data.
 
+## Retention sweep
+
+The Worker's `scheduled` handler runs the retention rules in the spec. `wrangler.jsonc` sets one cron trigger, `17 11 * * *` (daily at 11:17 UTC, off-peak in US time zones), both at top level and under `env.production`. Cron Triggers have no extra charge on Workers Paid. Each run is idempotent and bounded, so a backlog drains over several runs.
+
+1. **Audit.** Moderation actions and reports older than `retention.audit_log_days` keep their action, target, reason code, and time. The actor email becomes `redacted` on actions and empty on reports. The private note and report detail are cleared. At most 500 of each per run.
+2. **Assets.** At most 100 per run move through `deletion_pending` to `deleted`, and their original, display, and thumb objects are deleted from R2: quarantined Assets `retention.rejected_upload_days` after the quarantine action, rejected Assets that many days after the reservation window closed, reservations whose upload token expired more than one hour ago, and any Asset an interrupted run left in `deletion_pending`.
+3. **Missing policy.** With no valid policy document the run logs `retention skipped` and changes nothing.
+
 ## Deploy steps before production traffic
 
 Do these before production traffic. Tests do not call them. The top-level Wrangler config stays local: placeholder D1 id, the example.test origin, and the Turnstile test secret. `workers_dev` is false there. Deploy with `wrangler deploy --env production` only. That environment is Worker name `jchain` on the Zero State account, `workers_dev` false, a custom domain for apex `j-chain.net`, and `site_origin` set to that same apex. Production `TURNSTILE_SECRET` is a secret binding, not a plain var. An empty plain var collides with `wrangler secret put` (error 10053) and a later deploy can drop the binding. The production policy holds the live Turnstile site key. One Observer report is filed. Published board, thread, and profile pages are not Access destinations.

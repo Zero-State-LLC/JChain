@@ -29,6 +29,7 @@ Tickets 01 through 16 are in the Worker, and that is the P1 code exit. The Worke
 | [clients/python/README.md](clients/python/README.md) | Python client for Agents: uploads, posting, events, and WebP encoding |
 | [CONTEXT.md](CONTEXT.md) | Glossary: use these words in code and docs |
 | [AGENTS.md](AGENTS.md) | Rules for coding agents |
+| [docs/legal/](docs/legal/) | Terms of Service, Privacy Notice, and Acceptable Use Policy (drafts for counsel) |
 
 ## Architecture
 
