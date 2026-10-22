@@ -1,158 +1,202 @@
-ZERO STATE PROPRIETARY LICENSE
 
-Version 1.0 — August 2026
-
-Copyright © 2026 Zero State LLC. All Rights Reserved.
-
-This Zero State Proprietary License ("License") governs the software, source code, object code, documentation, specifications, designs, models, prompts, workflows, schemas, data structures, configuration files, audiovisual materials, and other materials contained in or distributed with this repository (collectively, the "Software").
-
-The Software is proprietary to Zero State LLC ("Zero State") except for components expressly identified as third-party materials.
-
-## 1. Ownership
-
-Zero State retains all right, title, and interest in and to the Software, including all copyrights, trade secrets, intellectual property rights, and other proprietary rights owned or controlled by Zero State.
-
-Making source code or other materials publicly accessible does not constitute a dedication to the public domain, an open-source license, or a waiver of any rights.
-
-Except for the limited permissions expressly stated in this License, no rights are granted by implication, estoppel, exhaustion, or otherwise.
-
-## 2. Limited Permission to Inspect
-
-Subject to applicable platform terms, Zero State permits individuals to access, view, and inspect publicly available portions of the Software solely for evaluation, security review, interoperability assessment, educational review, or consideration of a commercial relationship with Zero State.
-
-This permission does not include any right to commercially exploit the Software or incorporate it into another product or service.
-
-## 3. Restrictions
-
-Except with prior written authorization from Zero State, you may not:
-
-a. copy or reproduce the Software except for transient or technically necessary copies associated with permitted access;
-
-b. modify, adapt, translate, transform, or create derivative works based upon the Software;
-
-c. distribute, publish, sublicense, sell, lease, rent, transfer, host, mirror, or otherwise make the Software available to another person or entity;
-
-d. use the Software, in whole or in part, in a commercial product, commercial service, internal commercial system, hosted service, software-as-a-service product, or revenue-generating activity;
-
-e. deploy or operate the Software for production use;
-
-f. remove, obscure, modify, or misrepresent copyright notices, attribution, trademarks, provenance information, or proprietary notices;
-
-g. represent the Software, or a derivative of the Software, as your own work;
-
-h. use the Software or its non-public architecture, documentation, specifications, prompts, datasets, outputs, or other protected materials to reproduce a substantially similar proprietary product or service;
-
-i. circumvent technical, contractual, or access-control measures associated with the Software; or
-
-j. authorize, encourage, or assist another party to perform any activity prohibited by this License.
-
-## 4. Artificial Intelligence and Machine Learning
-
-Unless Zero State provides prior written authorization, the Software may not be used as training data, fine-tuning data, evaluation data, retrieval corpus material, embedding source material, synthetic-data source material, or other input for developing, training, tuning, benchmarking, or improving a machine-learning or artificial-intelligence model.
-
-This restriction does not prohibit ordinary automated tools used solely to inspect, build, test, secure, or operate the Software on behalf of an authorized user where the Software is not retained or incorporated into a model or dataset beyond what is technically necessary to provide that service.
-
-## 5. Agents and Automated Systems
-
-No autonomous agent, software agent, crawler, scraper, coding agent, or other automated system receives rights greater than those granted to the person or organization operating it.
-
-Use of an automated system to access the Software does not grant permission to reproduce, retain, redistribute, commercialize, train upon, or create derivative works from the Software.
-
-## 6. Contributions
-
-Unless a separate written agreement states otherwise, submission of code, documentation, designs, or other material to Zero State does not transfer ownership of Zero State's pre-existing intellectual property.
-
-Zero State may require contributors to execute a Contributor License Agreement, intellectual-property assignment, work-for-hire agreement, or other written agreement before accepting a contribution.
-
-Acceptance of a contribution does not change the licensing status of this repository.
-
-## 7. Third-Party Components
-
-The Software may incorporate libraries, packages, assets, datasets, or other materials governed by separate licenses.
-
-Those materials remain subject to their respective licenses.
-
-Nothing in this License restricts rights that a recipient independently possesses under a valid third-party license.
-
-Where this License conflicts with a valid license governing a third-party component, the third-party license governs that component only.
-
-## 8. Commercial Licensing
-
-Commercial, deployment, redistribution, modification, integration, OEM, white-label, hosted-service, or other rights may be available under a separate written agreement with Zero State.
-
-Permission granted for one repository, product, customer, project, or use case does not imply permission for another.
-
-## 9. Confidential and Trade Secret Information
-
-This License does not authorize disclosure or use of Zero State confidential information or trade secrets.
-
-Access to confidential or private repositories may be subject to additional agreements, including nondisclosure agreements, employment agreements, contractor agreements, customer agreements, or statements of work.
-
-## 10. Trademarks
-
-This License does not grant permission to use the names "Zero State," "Zero State LLC," associated product names, logos, marks, trade dress, branding, or other source identifiers except as necessary for truthful identification of the Software.
-
-No use may imply sponsorship, endorsement, partnership, affiliation, or approval by Zero State without prior written authorization.
-
-## 11. Patents
-
-No patent license is granted under this License except where Zero State expressly grants such rights in a separate written agreement.
-
-## 12. No Warranty
-
-TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE," WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, EXPRESS OR IMPLIED.
-
-ZERO STATE DISCLAIMS ALL WARRANTIES, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, ACCURACY, RELIABILITY, SECURITY, AND PERFORMANCE.
-
-## 13. Limitation of Liability
-
-TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, ZERO STATE AND ITS MEMBERS, MANAGERS, EMPLOYEES, CONTRACTORS, AFFILIATES, LICENSORS, AND CONTRIBUTORS WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR LOSS OF PROFITS, REVENUE, DATA, BUSINESS, GOODWILL, OR BUSINESS OPPORTUNITY, ARISING FROM OR RELATED TO THE SOFTWARE OR THIS LICENSE.
-
-## 14. Termination
-
-Any permission granted under this License terminates automatically upon material violation of its terms.
-
-Termination does not limit any rights or remedies available to Zero State arising from conduct occurring before or after termination.
-
-Sections concerning ownership, restrictions, intellectual property, disclaimers, liability, and enforcement survive termination.
-
-## 15. No Open-Source Grant
-
-This License is a proprietary license.
-
-The Software is not licensed as open-source software merely because its source code can be viewed, accessed through a repository hosting service, or otherwise inspected.
-
-No permission granted by this License should be interpreted as satisfying the requirements of an open-source license.
-
-## 16. Repository Hosting Platforms
-
-Where the Software is hosted by GitHub or another repository hosting provider, access to and operation of the hosting platform may also be governed by that provider's terms.
-
-Nothing in this License is intended to revoke rights that Zero State must grant to the hosting provider or its users solely to the extent necessary for functionality expressly authorized by the applicable hosting-platform terms.
-
-Any use beyond those platform-specific rights remains subject to this License.
-
-## 17. Exceptions
-
-A restriction in this License does not apply where applicable law gives a person a right that cannot legally be restricted by contract or copyright.
-
-Nothing in this License is intended to restrict lawful activity that Zero State does not have the legal authority to prohibit.
-
-## 18. Separate Agreements
-
-If Zero State and a recipient enter into a separate written license, services agreement, statement of work, enterprise agreement, partnership agreement, or other contract governing the Software, that agreement controls to the extent of any conflict with this License.
-
-## 19. Severability
-
-If any provision of this License is determined to be unenforceable, that provision will be limited or modified to the minimum extent necessary to make it enforceable, and the remaining provisions will remain in effect.
-
-## 20. Reservation of Rights
-
-All rights not expressly granted under this License are reserved by Zero State LLC.
-
----
-
-**Zero State LLC**
-Proprietary Software License Version 1.0 — August 2026
-
-For commercial licensing or permissions, contact Zero State LLC through an authorized Zero State communication channel.
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.

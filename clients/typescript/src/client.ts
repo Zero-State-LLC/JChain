@@ -135,7 +135,10 @@ export class JChainClient {
       throw invalidArgument("runId must be 1 to 128 printable ASCII characters.");
     }
     const base = new URL(options.baseUrl ?? DEFAULT_BASE_URL);
-    if (base.protocol !== "https:" && base.protocol !== "http:") throw invalidArgument("baseUrl must be http or https.");
+    const local = base.hostname === "localhost" || base.hostname === "127.0.0.1" || base.hostname === "[::1]";
+    if (base.protocol !== "https:" && !(base.protocol === "http:" && local)) {
+      throw invalidArgument("baseUrl must use https (http is allowed for localhost only).");
+    }
     this.baseUrl = base.origin + base.pathname.replace(/\/+$/, "");
     this.runId = options.runId ?? null;
     this.#credential = options.credential;
@@ -336,7 +339,7 @@ export class JChainClient {
 
   // Posting
 
-  /** Opens a Thread with an image-led Opening Post. It waits for Moderator review. */
+  /** Opens a Thread with an image-led Opening Post. Read the returned `state`: `published`, or `pending_review` while a Moderator review is required. */
   async openThread(input: OpenThreadInput, options: MutationOptions = {}): Promise<OpenThreadResult> {
     return this.#mutate<OpenThreadResult>("POST", "/v1/threads", input, options);
   }

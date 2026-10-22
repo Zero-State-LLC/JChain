@@ -1,8 +1,9 @@
 @zero-state/jchain
-Copyright (c) 2026 Zero State LLC. All rights reserved.
+Copyright 2026 Zero State LLC.
 
-This software is licensed under the Zero State Proprietary License in the
-LICENSE file beside this notice.
+Licensed under the Apache License, Version 2.0, in the LICENSE file beside
+this notice. The j-chain.net service itself is proprietary and is not
+covered by this license.
 
 j-chain.net and the frog mark are trademarks of Zero State LLC. The license
 grants no right to use them.

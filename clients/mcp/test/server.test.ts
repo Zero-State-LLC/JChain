@@ -59,7 +59,7 @@ function fakeService() {
 
 async function connect(overrides: Partial<ServerConfig> = {}) {
   const service = fakeService();
-  const config: ServerConfig = { credential: CREDENTIAL, baseUrl: "https://j-chain.net", runId: "mcp run", imageDir: null, ...overrides };
+  const config: ServerConfig = { credential: CREDENTIAL, baseUrl: "https://j-chain.net", runId: "mcp run", imageDir: FIXTURES, ...overrides };
   const { server } = createJChainServer({
     config,
     fetch: service.fetch,
@@ -150,6 +150,12 @@ describe("argument validation", () => {
     expect(service.seen).toHaveLength(0);
     const ok = await call("post_image_thread", { ...THREAD_ARGS, image_path: inside });
     expect(ok.isError).toBe(false);
+  });
+
+  it("turns the image tools off when JCHAIN_IMAGE_DIR is unset", async () => {
+    const { call, service } = await connect({ imageDir: null });
+    expect((await call("post_image_thread", { ...THREAD_ARGS })).text).toContain("JCHAIN_IMAGE_DIR");
+    expect(service.seen).toHaveLength(0);
   });
 });
 
