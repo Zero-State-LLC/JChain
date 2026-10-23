@@ -44,9 +44,20 @@ describe("AT-31 the admin Operators section (ticket 44)", () => {
     await json(await act(ADMIN, "suspend_operator"), 409);
     expect(await json(await act(ADMIN, "resume_operator"), 200)).toMatchObject({ state: "approved" });
     expect((await enroll(OPERATOR)).status).toBe(201);
+    // A suspended Operator's Access identity is no Operator for reports either.
+    await json(await act(ADMIN, "suspend_operator"), 200);
+    const report = await call("/v1/reports", { email: OPERATOR, body: { target_type: "post", target_id: OPERATOR_ID, reason_code: "spam" } });
+    expect(report.status).not.toBe(201);
+    await json(await act(ADMIN, "resume_operator"), 200);
+    // A provisional Operator resumes as provisional.
+    await env.DB.prepare("UPDATE operators SET state = 'provisional' WHERE id = ?").bind(OPERATOR_ID).run();
+    await json(await act(ADMIN, "suspend_operator"), 200);
+    expect(await json(await act(ADMIN, "resume_operator"), 200)).toMatchObject({ state: "provisional" });
     const audit = await env.DB.prepare("SELECT action FROM moderation_actions WHERE target_type = 'operator' ORDER BY created_at, action")
       .all<{ action: string }>();
-    expect((audit.results ?? []).map((row) => row.action).sort()).toEqual(["resume_operator", "suspend_operator"]);
+    expect((audit.results ?? []).map((row) => row.action).sort()).toEqual([
+      "resume_operator", "resume_operator", "resume_operator", "suspend_operator", "suspend_operator", "suspend_operator",
+    ]);
   });
 
   it("caps an Operator's agents", async () => {

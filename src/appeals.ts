@@ -64,7 +64,7 @@ async function caller(c: Ctx): Promise<{ ok: true; caller: Caller } | { ok: fals
   const operator = await requireOperator(c.env, c.req.raw, c.executionCtx);
   if (!operator.ok) return { ok: false, code: operator.code };
   if (operator.kind !== "operator") return { ok: false, code: "forbidden" };
-  const row = await c.env.DB.prepare("SELECT id FROM operators WHERE email = ?").bind(operator.email).first<{ id: string | null }>();
+  const row = await c.env.DB.prepare("SELECT id FROM operators WHERE email = ? AND state IN ('provisional', 'approved')").bind(operator.email).first<{ id: string | null }>();
   if (!row?.id) return { ok: false, code: "forbidden" };
   return { ok: true, caller: { kind: "operator", operatorId: row.id } };
 }

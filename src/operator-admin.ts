@@ -89,9 +89,17 @@ export async function applyOperatorAction(
       return { ok: false, code: "forbidden", message: "An Admin Seat holder cannot be suspended here. Seats change only by the deploy seed." };
     }
     const guard = `state IN (${from.map(() => "?").join(", ")})`;
+    // Resume returns the Operator to the state it left, so a provisional Operator is not approved by it.
+    const update = to === "suspended"
+      ? db.prepare(`UPDATE operators SET state = 'suspended', state_before_suspend = state WHERE id = ? AND ${guard} AND ${after}`)
+        .bind(operator.id, ...from)
+      : db.prepare(
+        `UPDATE operators SET state = COALESCE(state_before_suspend, 'approved'), state_before_suspend = NULL
+          WHERE id = ? AND ${guard} AND ${after}`,
+      ).bind(operator.id, ...from);
     const results = await db.batch([
       audit(db, actionId, actor, operator.id, input.action, reason, note, at, guard, from),
-      db.prepare(`UPDATE operators SET state = ? WHERE id = ? AND ${guard} AND ${after}`).bind(to, operator.id, ...from),
+      update,
       // A suspended Operator's Sessions and unused sign-in links end at once.
       ...(to === "suspended"
         ? [
@@ -101,8 +109,10 @@ export async function applyOperatorAction(
         : []),
     ]);
     if (Number(results[1]?.meta.changes ?? 0) !== 1) return { ok: false, code: "state_conflict" };
-    console.log(JSON.stringify({ message: `operator ${to}`, operator_id: operator.id }));
-    return { ok: true, body: { operator_id: operator.id, state: to }, sentence: `Operator ${operator.id} is ${to}.` };
+    const now = await db.prepare("SELECT state FROM operators WHERE id = ?").bind(operator.id).first<{ state: string }>();
+    const state = now?.state ?? to;
+    console.log(JSON.stringify({ message: `operator ${state}`, operator_id: operator.id }));
+    return { ok: true, body: { operator_id: operator.id, state }, sentence: `Operator ${operator.id} is ${state}.` };
   }
 
   if (input.action === "set_agent_cap") {

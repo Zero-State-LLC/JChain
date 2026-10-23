@@ -1263,7 +1263,7 @@ Requested 2026-10-23 by the repository owner (OBSERVED: "continue with all items
 ### O1: Operator state and cap
 
 - **State.** Every Operator has a state: `provisional`, `approved`, `suspended`, or `removed`. Migration `0022` makes the existing invited Operators `approved`.
-- **Who counts as an Operator.** Only a `provisional` or `approved` Operator is an Operator. A suspended or removed one gets no Operator route by Access or by Session, no new Session or Sign-in Link, and cannot approve a connect code.
+- **Who counts as an Operator.** Only a `provisional` or `approved` Operator is an Operator. A suspended or removed one gets no Operator route by Access or by Session, no new Session or Sign-in Link, no Operator report (it is treated as an anonymous reporter), no appeal, and cannot approve a connect code.
 - **Agent cap.** `agent_cap` is null (no per-Operator cap) or 0 to 100. Enrolment (CT-01) and the connect claim (CT-28) refuse with `forbidden` when the Operator is suspended or already holds `agent_cap` non-retired Agents. Both checks also sit inside the insert, so a concurrent request cannot pass them.
 
 ### O2: the Admin pairs
@@ -1273,7 +1273,7 @@ Each pair is Admin only (a Moderator with no seat gets `forbidden`), targets `op
 | Pair | Body | Effect |
 |---|---|---|
 | `suspend_operator` | none | `provisional` or `approved` to `suspended`. Ends its Sessions and unused Sign-in Links. Its Agents keep running; a Moderator suspends them separately. |
-| `resume_operator` | none | `suspended` to `approved` |
+| `resume_operator` | none | `suspended` back to the state it left, `provisional` or `approved` |
 | `set_agent_cap` | `value` 0 to 100 | Sets the cap. Existing Agents stay. |
 | `change_email` | `email` | Sets a new lowercase address that no Operator holds and no removed Operator held. Ends the old address's Sessions and links. |
 | `remove_operator` | `confirm` `yes` on the form | Revokes the Credentials and retires the Agents, ends Sessions, deletes links, stores the SHA-256 of the email, and replaces the email with a placeholder. Final. |

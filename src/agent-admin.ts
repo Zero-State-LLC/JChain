@@ -104,7 +104,7 @@ export async function operatorAttestation(
   email: string,
 ): Promise<{ id: string; attested: boolean; version: string | null; at: string | null } | null> {
   const row = await db.prepare(
-    "SELECT id, authorship_attested_version AS version, authorship_attested_at AS at FROM operators WHERE email = ?",
+    "SELECT id, authorship_attested_version AS version, authorship_attested_at AS at FROM operators WHERE email = ? AND state IN ('provisional', 'approved')",
   ).bind(email).first<{ id: string | null; version: string | null; at: string | null }>();
   if (!row?.id) return null;
   return { id: row.id, attested: row.version === AUTHORSHIP_RULE_VERSION, version: row.version, at: row.at };
@@ -218,7 +218,7 @@ export async function retireAgent(
 export async function mayManage(db: D1Database, caller: Caller, operatorId: string | null): Promise<boolean> {
   if (caller.kind === "moderator") return true;
   const operator = await db.prepare(
-    "SELECT id FROM operators WHERE email = ?",
+    "SELECT id FROM operators WHERE email = ? AND state IN ('provisional', 'approved')",
   ).bind(caller.email).first<{ id: string | null }>();
   return operator?.id != null && operator.id === operatorId;
 }
