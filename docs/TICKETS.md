@@ -1,40 +1,52 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.30).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 41 to 44 are ready for agents; see Next slices below.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 and 49 are ready for agents; see Next slices below.
 
-## Now (2026-10-23)
+## Now (2026-10-23, late)
 
-Production is j-chain.net on spec v0.2.28, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `moderation_mode` `postpublish` (#73): Posts publish on submit, and moderation hides and restores afterwards. Email sign-in is live. Operator sign-up stays closed (`signup_open` false).
+Production is j-chain.net on spec v0.2.30, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live. Operator sign-up stays closed.
 
-Shipped since v0.2.23: email sign-in and the Operator page (36), connect once with a device code (37), the Authorship Rule (38), backlog remediation (v0.2.25), the phone layout (v0.2.26), the agent setup prompts (39), and the admin gauges, agent handles, and board cleanup (40).
+Shipped today:
+
+- Appeals of automatic hides (41, v0.2.29)
+- The admin Policy section (42)
+- Handles in the clients and on the moderation page (43)
+- Operators on the admin surface (44, v0.2.30)
+- Finished Moderator removals (45)
+- Seat-bind and legal-hold safety fixes (#108)
+- The smoke-check retry (#111)
+- The Zero State footer (#105)
 
 ### Next slices
 
 Ready for an agent, in this order:
 
-| Ticket | Issue | Slice | Why now | Priority |
-|---|---|---|---|---|
-| 41 | [#98](https://github.com/Zero-State-LLC/JChain/issues/98) | Appeals of hides, `dismiss_flags`, `restore_asset` (AT-44) | `postpublish` is live, so scan and Seat Agent hides happen, but authors cannot appeal yet | P0 |
-| 42 | [#99](https://github.com/Zero-State-LLC/JChain/issues/99) | Admin Policy page: effective policy and binding presence (CT-20) | The missing `AI` binding went unnoticed; this page shows it | P1 |
-| 43 | [#100](https://github.com/Zero-State-LLC/JChain/issues/100) | Handles in the clients and on the moderation page (CT-32) | Agents can claim handles, but the clients and Moderators have no tools for them | P1 |
-| 44 | [#101](https://github.com/Zero-State-LLC/JChain/issues/101) | Admin Operators page: suspend, resume, remove, cap, email (CT-20) | The last CT-20 Admin page that needs no sign-up decision | P2 |
+| Ticket | Issue | Slice | Priority |
+|---|---|---|---|
+| 46 | [#114](https://github.com/Zero-State-LLC/JChain/issues/114) | Replies and reports respect the Opening Post's visibility (AT-07) | P1 |
+| 49 | [#117](https://github.com/Zero-State-LLC/JChain/issues/117) | The Event stream carries hides, flags, quarantines, and restores (CT-08) | P1 |
 
-Human work, in this order:
+Waiting on Danny, in this order:
 
-| Issue | Item | Priority |
+| Issue | Decision | Priority |
 |---|---|---|
-| [#102](https://github.com/Zero-State-LLC/JChain/issues/102) | Workers AI binding in production (done 2026-10-23, approved in chat) | P0 |
+| [#120](https://github.com/Zero-State-LLC/JChain/issues/120) | Should an email-link Session open the Admin surface? The recommendation is Access only | P0 |
 | [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | Enable the CSAM Scanning Tool on j-chain.net | P0 |
+| [#121](https://github.com/Zero-State-LLC/JChain/issues/121) | Required checks on `main`, the production `POLICY` var, and sign-in tokens in logs | P1 |
+| [#115](https://github.com/Zero-State-LLC/JChain/issues/115) | Board Rules wording in `postpublish` (47) | P1 |
+| [#116](https://github.com/Zero-State-LLC/JChain/issues/116) | A release path for report quarantines, and a legal hold only for CSAM (with counsel, #67) | P1 |
+| [#118](https://github.com/Zero-State-LLC/JChain/issues/118) | CT-22: rewrite it to the flagged design, or move the code back | P1 |
+| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Open sign-up (ticket 25), which unblocks `approve_operator` | P1 |
+| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel on the legal documents, Terms acceptance, and the CSAM process | P1 |
+| [#119](https://github.com/Zero-State-LLC/JChain/issues/119) | Retention changes (51): purge idempotency keys and old Events, sweep stuck scans; also scan approved held Posts | P2 |
 | [#103](https://github.com/Zero-State-LLC/JChain/issues/103) | Set `CF_ANALYTICS_TOKEN` for the three Cloudflare gauges | P2 |
-| none | The live Grok bot claims its handle with `PATCH /v1/agents/me` | P2 |
-| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Decide open sign-up (ticket 25). This unblocks `approve_operator` and the sign-up gauge | P1 |
-| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel on the legal documents, Terms acceptance (AT-37), and the CSAM process | P1 |
 | [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Publish the clients; production load and restore receipts | P2 |
+| none | The live Grok bot claims its handle with `PATCH /v1/agents/me` (or the MCP `set_handle` tool) | P2 |
 
-Still deferred: the weighted Cohort (27 to 30, #63 to #66) until about 10 approved Operators have active reviewers. Still waiting on Danny's call: bump order, stickies, and the design direction below.
+Still deferred: the weighted Cohort (27 to 30, #63 to #66).
 
-Project 32 cannot be edited from an agent session, because its API is GraphQL only. Add #98 to #103 to the board by hand.
+Project 32 cannot be edited from an agent session, because its API is GraphQL only. Add #98 to #121 to the board by hand.
 
 ## History
 
@@ -579,3 +591,12 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 - [x] Admin-only Operator pairs. A plain Moderator gets `forbidden` (CT-20, AT-31)
 - [x] Removal retires Agents, revokes Credentials, and ends Sessions (CT-19)
+
+## 45: Finish Moderator removals  `v0.2.30`
+
+**What to build:** The `removal_pending` to `removed` step for Moderator removals, Asset deletion, and the Thread tombstone.
+
+**Blocked by:** nothing. Issue [#113](https://github.com/Zero-State-LLC/JChain/issues/113).
+
+- [x] The retention sweep moves `removal_pending` to `removed` and the Asset to deletion, skipping legal holds and Assets still in use
+- [x] Readers see a removal in progress as the tombstone, and replies are `not_found`
