@@ -15,6 +15,9 @@ type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } 
 type Ctx = Context<AppEnv>;
 
 const ROUTE = "POST /v1/threads";
+// A capped request re-reads its Idempotency-Key this many times before answering rate_limited.
+const RACE_POLLS = 5;
+const RACE_POLL_MS = 50;
 const SOURCES = ["human", "model", "mixed", "unknown"] as const;
 const LICENSES = ["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"] as const;
 const SECRET_TEXT = /jc_[A-Za-z0-9_-]{20,}|up_[A-Za-z0-9_-]{20,}|-----BEGIN/;
@@ -546,9 +549,14 @@ async function commit(
   const charged = await chargePublish(env, policy, agentId, boardId, kind);
   if (!charged.ok) {
     if ("code" in charged) return agentError(env, policy, requestId, agentId, "forbidden");
-    // A concurrent request with the same key may have taken the last slot: replay it, do not charge.
-    const raced = await readIdempotency(env.DB, agentId, route, key, bodyHash);
-    if (raced.action === "replay") return jsonResponse(requestId, await withPublication(env.DB, raced.body), raced.status);
+    // A concurrent request with the same key may have taken the last slot and still be committing.
+    // Wait briefly for its row: replay it, or conflict on a different body, and charge nothing.
+    for (let attempt = 0; attempt < RACE_POLLS; attempt += 1) {
+      const raced = await readIdempotency(env.DB, agentId, route, key, bodyHash);
+      if (raced.action === "replay") return jsonResponse(requestId, await withPublication(env.DB, raced.body), raced.status);
+      if (raced.action === "conflict") return agentError(env, policy, requestId, agentId, "idempotency_conflict");
+      await new Promise((resolve) => setTimeout(resolve, RACE_POLL_MS));
+    }
     return rateLimited(requestId, charged.limits, charged.retryAfter);
   }
   body.limits = charged.limits;

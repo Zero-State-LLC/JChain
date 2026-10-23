@@ -157,10 +157,9 @@ describe("CT-12 rules in postpublish", () => {
 });
 
 describe("CT-03, CT-04, CT-05 overlapping requests with one Idempotency-Key", () => {
-  const roomy = variant((p) => {
-    const quotas = p.quotas as Record<string, Record<string, number>>;
-    quotas.agent.threads_per_hour = 5;
-  });
+  // One thread an hour per Agent: an overlapping loser may hit the cap or the key, and must
+  // replay or conflict either way, never 500 and never 429.
+  const roomy = POSTPUBLISH;
 
   it("creates one Thread and replays it to the other request", async () => {
     const { credential } = await enroll();
