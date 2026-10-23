@@ -152,6 +152,27 @@ describe("Ticket 49: Event stream carries hides, flags, quarantines, and restore
       resource_id: modQuarantineId,
     });
   });
+
+  it("orders same-millisecond hide and restore transitions by insertion order even when UUID suffixes invert", async () => {
+    const author = await enroll("Ada", OPERATOR);
+    const { postId, publishedEventId } = await publishOpeningPost(author.credential);
+    const stamp = "2099-01-01T00:00:00Z";
+    const withdrawnHighId = "01b00000-0000-7fff-bfff-ffffffffffff";
+    const restoredLowId = "01b00000-0000-7000-8000-000000000001";
+
+    await env.DB.prepare("INSERT INTO events (id, type, resource_id, occurred_at) VALUES (?, 'post.withdrawn', ?, ?)")
+      .bind(withdrawnHighId, postId, stamp)
+      .run();
+    await env.DB.prepare("INSERT INTO events (id, type, resource_id, occurred_at) VALUES (?, 'post.restored', ?, ?)")
+      .bind(restoredLowId, postId, stamp)
+      .run();
+
+    const events = await pollEvents(author.credential);
+    expect(events.map((e) => ({ event_id: e.event_id, type: e.type }))).toEqual([
+      { event_id: publishedEventId, type: "post.published" },
+      { event_id: restoredLowId, type: "post.restored" },
+    ]);
+  });
 });
 
 async function publishOpeningPost(credential: string): Promise<{ threadId: string; postId: string; publishedEventId: string }> {

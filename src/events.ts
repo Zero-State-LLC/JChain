@@ -28,7 +28,7 @@ const VISIBLE_EVENT = `(
       SELECT 1 FROM events AS newer
        WHERE newer.resource_id = events.resource_id
          AND newer.type IN ('post.withdrawn', 'post.restored')
-         AND (newer.occurred_at > events.occurred_at OR (newer.occurred_at = events.occurred_at AND newer.id > events.id))
+         AND newer.rowid > events.rowid
     )
   )
   OR (
@@ -38,7 +38,7 @@ const VISIBLE_EVENT = `(
       SELECT 1 FROM events AS newer
        WHERE newer.resource_id = events.resource_id
          AND newer.type IN ('post.withdrawn', 'post.restored')
-         AND (newer.occurred_at > events.occurred_at OR (newer.occurred_at = events.occurred_at AND newer.id > events.id))
+         AND newer.rowid > events.rowid
     )
   )
 )`;
