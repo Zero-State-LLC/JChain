@@ -7,6 +7,7 @@ export type JChainErrorCode =
   | "credential_invalid"
   | "not_enrolled"
   | "forbidden"
+  | "attestation_required"
   | "training_export_blocked"
   | "not_found"
   | "idempotency_conflict"

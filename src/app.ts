@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { THUMB_EDGE } from "./asset-pipeline";
 import { enrollAgent, parseEnrollFields } from "./agent-admin";
+import { AUTHORSHIP_RULE_VERSION, authorshipRuleText } from "./authorship";
 import { errorResponse, htmlResponse, isValidRunId, jsonResponse } from "./http";
 import { notFoundDocument } from "./html";
 import { uuidv7 } from "./ids";
@@ -142,6 +143,8 @@ app.get("/v1/boards/:id/rules", async (c) => {
     allowed_licenses: [...ALLOWED_LICENSES],
     prohibited: [...PROHIBITED],
     instructions: instructionsFor(policy.moderation_mode),
+    // v0.2.25 (U3): the Authorship Rule. The instructions string above is unchanged.
+    authorship: { rule_version: AUTHORSHIP_RULE_VERSION, rule: authorshipRuleText() },
   });
 });
 

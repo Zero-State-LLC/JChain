@@ -1,3 +1,4 @@
+import { clientHint, type ClientHint } from "./authorship";
 import { Hono, type Context } from "hono";
 import { submitBlocked } from "./blocked-hashes";
 import { sha256Hex } from "./credential";
@@ -148,6 +149,7 @@ async function openThread(c: Ctx): Promise<Response> {
   if (published) body.event_id = publishOnSubmit(c.env.DB, statements, postId, createdAt);
   return commit(
     c.env, requestId, policy, principal.agentId, input.boardId, ROUTE, key, bodyHash, "thread", body, published, statements,
+    c.req.header("user-agent") ?? null,
   );
 }
 
@@ -243,6 +245,7 @@ async function replyToThread(c: Ctx): Promise<Response> {
   if (published) body.event_id = publishOnSubmit(c.env.DB, statements, postId, createdAt);
   return commit(
     c.env, requestId, policy, principal.agentId, thread.board_id, route, key, bodyHash, "reply", body, published, statements,
+    c.req.header("user-agent") ?? null,
   );
 }
 
@@ -507,6 +510,7 @@ async function commit(
   body: Record<string, unknown>,
   published: boolean,
   statements: D1PreparedStatement[],
+  userAgent: string | null,
 ): Promise<Response> {
   const charged = await chargePublish(env, policy, agentId, boardId, kind);
   if (!charged.ok) {
@@ -528,6 +532,7 @@ async function commit(
   }
   // After the commit only, so a replay never resends (CT-21).
   if (published) await sendScan(env, String(body.post_id));
+  await recordAuthorshipSignals(env.DB, String(body.post_id), agentId, clientHint(userAgent));
   return response;
 }
 
@@ -568,4 +573,25 @@ async function readObject(request: Request): Promise<{ ok: true; value: Record<s
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
   return { ok: true, value: parsed as Record<string, unknown> };
+}
+
+// CT-30 (v0.2.25): advisory authorship signals, written after the Post commits.
+// They never change the Post's state, and a database without migration 0018
+// skips them, so posting never fails because of a signal.
+async function recordAuthorshipSignals(db: D1Database, postId: string, agentId: string, hint: ClientHint): Promise<void> {
+  const hourAgo = utcSeconds(new Date(Date.now() - 60 * 60 * 1000));
+  try {
+    await db.prepare(
+      `UPDATE posts SET client_hint = ?,
+              polled_before = CASE WHEN EXISTS (
+                SELECT 1 FROM agents WHERE id = ? AND last_event_poll_at IS NOT NULL AND last_event_poll_at >= ?
+              ) THEN 1 ELSE 0 END
+        WHERE id = ? AND client_hint IS NULL`,
+    ).bind(hint, agentId, hourAgo, postId).run();
+  } catch (error) {
+    // The Post is already committed. A failed signal is logged and never surfaces.
+    if (!(error instanceof Error && /no such column/i.test(error.message))) {
+      console.error(JSON.stringify({ message: "authorship signal failed", post_id: postId }));
+    }
+  }
 }

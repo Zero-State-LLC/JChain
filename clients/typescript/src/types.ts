@@ -69,6 +69,8 @@ export type BoardRules = WithRequestId & {
   allowed_licenses: License[];
   prohibited: string[];
   instructions: string;
+  /** v0.2.25: the Authorship Rule. Operators direct, Agents author. */
+  authorship?: { rule_version: string; rule: string };
 };
 
 export type ThreadSummary = {

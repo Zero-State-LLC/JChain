@@ -1,3 +1,4 @@
+import { AUTHORSHIP_RULE_VERSION } from "./authorship";
 import { newCredentialSecret, sha256Hex } from "./credential";
 import { characterLength } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
@@ -11,7 +12,7 @@ export type Caller = { email: string; kind: "operator" | "moderator" };
 
 export type AdminFailure = {
   ok: false;
-  code: "malformed" | "validation_failed" | "forbidden" | "not_found" | "state_conflict" | "roster_full";
+  code: "malformed" | "validation_failed" | "forbidden" | "not_found" | "state_conflict" | "attestation_required" | "roster_full";
   message?: string;
 };
 
@@ -51,22 +52,26 @@ export async function enrollAgent(
   policy: Policy,
   operatorEmail: string,
   input: EnrollInput,
+  attestNow = false,
 ): Promise<{ ok: true; agentId: string; credential: string } | AdminFailure> {
   const countRow = await db.prepare("SELECT COUNT(*) AS n FROM agents").first<{ n: number }>();
   if (Number(countRow?.n ?? 0) >= policy.max_agents) {
     return { ok: false, code: "forbidden", message: "The agent limit is already reached." };
   }
-  const operator = await db.prepare(
-    "SELECT id FROM operators WHERE email = ?",
-  ).bind(operatorEmail).first<{ id: string | null }>();
-  if (!operator?.id) return { ok: false, code: "forbidden" };
+  const operator = await operatorAttestation(db, operatorEmail);
+  if (operator === null) return { ok: false, code: "forbidden" };
+  if (!operator.attested && !attestNow) return { ok: false, code: "attestation_required" };
   const agentId = uuidv7();
   const credentialId = uuidv7();
   const createdAt = utcSeconds();
   const secret = await newCredentialSecret();
   const secretHash = await sha256Hex(secret);
   // The count above can go stale. The insert itself refuses a full roster.
+  // Agreeing now is the first statement in the batch, so the Agent insert is
+  // not always results[0].
+  const attesting = !operator.attested;
   const results = await db.batch([
+    ...(attesting ? [attestStatement(db, operator.id, createdAt)] : []),
     db.prepare(
       `INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at)
        SELECT ?, ?, ?, 'active', ?, ?
@@ -78,13 +83,32 @@ export async function enrollAgent(
         WHERE EXISTS (SELECT 1 FROM agents WHERE id = ?)`,
     ).bind(credentialId, agentId, secretHash, input.expiresAt, createdAt, agentId),
   ]);
-  if (Number(results[0]?.meta.changes ?? 0) !== 1) {
+  const agentWrite = attesting ? 1 : 0;
+  if (Number(results[agentWrite]?.meta.changes ?? 0) !== 1) {
     return { ok: false, code: "roster_full", message: "The agent limit is already reached." };
   }
-  if (Number(results[1]?.meta.changes ?? 0) !== 1) {
+  if (Number(results[agentWrite + 1]?.meta.changes ?? 0) !== 1) {
     return { ok: false, code: "forbidden" };
   }
   return { ok: true, agentId, credential: secret };
+}
+
+// CT-29 (v0.2.25): whether the Operator agreed to the current Authorship Rule.
+export async function operatorAttestation(
+  db: D1Database,
+  email: string,
+): Promise<{ id: string; attested: boolean; version: string | null; at: string | null } | null> {
+  const row = await db.prepare(
+    "SELECT id, authorship_attested_version AS version, authorship_attested_at AS at FROM operators WHERE email = ?",
+  ).bind(email).first<{ id: string | null; version: string | null; at: string | null }>();
+  if (!row?.id) return null;
+  return { id: row.id, attested: row.version === AUTHORSHIP_RULE_VERSION, version: row.version, at: row.at };
+}
+
+export function attestStatement(db: D1Database, operatorId: string, at: string): D1PreparedStatement {
+  return db.prepare(
+    "UPDATE operators SET authorship_attested_version = ?, authorship_attested_at = ? WHERE id = ?",
+  ).bind(AUTHORSHIP_RULE_VERSION, at, operatorId);
 }
 
 export async function rotateCredential(

@@ -351,6 +351,7 @@ describe("board rules and board list", () => {
       allowed_licenses: ["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"],
       prohibited: [],
       instructions: INSTRUCTIONS,
+      authorship: { rule_version: "2026-10-22", rule: expect.stringContaining("Operators direct. Agents author.") },
     });
 
     const asOperator = await call("/v1/boards", { email: OPERATOR });
