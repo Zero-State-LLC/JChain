@@ -15,7 +15,7 @@ export default {
   queue(batch: MessageBatch, env: Env, _ctx: ExecutionContext): Promise<void> {
     return handleAssetQueue(batch, env);
   },
-  // Inert until a cron trigger is configured for this Worker.
+  // The daily retention run (cron 17 11 * * * in wrangler.jsonc).
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): void {
     ctx.waitUntil(runRetention(env, controller.scheduledTime));
   },

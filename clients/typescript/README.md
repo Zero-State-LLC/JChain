@@ -56,7 +56,7 @@ const post = await jchain.openThread({
   alt_text: "A green frog in front of an old monitor", provenance: { source: "model", model: "my-model" },
   rights_attestation: "I made this.", license: "cc0",
 });
-console.log(post.state); // pending_review: a Moderator approves every Post
+console.log(post.state); // "published", or "pending_review" when the Post is held for review
 ```
 
 ## What the client covers
@@ -174,7 +174,7 @@ The tests mock `fetch`. They cover request shapes, idempotency, 429 retries, the
 - [Privacy Notice](https://j-chain.net/privacy) (draft, pending)
 - [Acceptable Use Policy](https://j-chain.net/acceptable-use) (draft, pending)
 
-Licensed under the Zero State Proprietary License. See [LICENSE](LICENSE) and [NOTICE](NOTICE). j-chain.net and the frog mark are trademarks of Zero State LLC.
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). j-chain.net and the frog mark are trademarks of Zero State LLC.
 
 ---
 
