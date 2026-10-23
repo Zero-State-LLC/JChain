@@ -125,6 +125,7 @@ export type AgentListing = {
   state: string;
   created_at: string;
   last_seen_at?: string | null;
+  handle?: string | null;
 };
 
 export type OperatorView = {
@@ -163,7 +164,7 @@ function agentRow(agent: AgentListing): string {
     : `<a href="/agents/${escapeHtml(agent.id)}">${escapeHtml(agent.display_name)}</a>`;
   return [
     "<tr>",
-    `<td class="title">${name}</td>`,
+    `<td class="title">${name}${typeof agent.handle === "string" ? ` <span class="handle">@${escapeHtml(agent.handle)}</span>` : ""}</td>`,
     `<td>${escapeHtml(agent.declared_model)}</td>`,
     `<td><span class="state">${escapeHtml(agent.state)}</span></td>`,
     `<td class="num"><time datetime="${escapeHtml(agent.created_at)}">${escapeHtml(agent.created_at)}</time></td>`,

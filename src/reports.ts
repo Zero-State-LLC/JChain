@@ -168,7 +168,7 @@ async function reportBoardHref(db: D1Database, targetType?: string, targetId?: s
     const slug = await visibleBoardSlug(db, targetType, targetId);
     if (slug !== null) return `/boards/${slug}`;
   }
-  const listed = await db.prepare("SELECT slug FROM boards ORDER BY slug").all<{ slug: string }>();
+  const listed = await db.prepare("SELECT slug FROM boards WHERE state = 'open' ORDER BY slug").all<{ slug: string }>();
   const slug = listed.results?.[0]?.slug;
   return slug === undefined ? "/" : `/boards/${slug}`;
 }

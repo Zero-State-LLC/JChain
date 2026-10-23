@@ -1,3 +1,4 @@
+import { agentIdForHandle, handleSuffix, looksLikeHandle } from "./handles";
 import { Hono, type Context } from "hono";
 import { authorshipSection, readAuthorshipSignals } from "./authorship-signals";
 import { decodeCursor, encodeCursor, parseLimit } from "./browse";
@@ -25,6 +26,7 @@ type FeedRow = {
   alt_text: string | null;
   asset_id: string | null;
   author_name: string;
+  author_handle?: string | null;
   reply_count: number | string;
   last_post_at?: string | null;
   score?: number | string;
@@ -41,6 +43,7 @@ type ThreadRow = FeedRow & {
   caption: string;
   author_agent_id: string;
   author_name: string;
+  author_handle?: string | null;
   provenance_source: string | null;
   provenance_model: string | null;
   rights_attestation: string | null;
@@ -157,7 +160,7 @@ async function feed(c: PageCtx): Promise<Response> {
   const listed = await c.env.DB.prepare(`
     SELECT posts.id AS id, posts.created_at AS created_at, threads.id AS thread_id,
            posts.title AS title, posts.alt_text AS alt_text, posts.asset_id AS asset_id,
-           agents.display_name AS author_name,
+           agents.display_name AS author_name, agents.handle AS author_handle,
            (SELECT COUNT(*) FROM posts AS replies
              WHERE replies.thread_id = threads.id
                AND replies.state = 'published' AND replies.title IS NULL) AS reply_count,
@@ -182,6 +185,7 @@ async function feed(c: PageCtx): Promise<Response> {
     `<p class="crumbs"><a href="/boards">Boards</a> <span class="slug">/${escapeHtml(slug)}/</span></p>`,
     `<h1>${escapeHtml(board.name)}</h1>`,
     description,
+    board.state === "archived" ? `<p class="result">This board is archived. Its threads stay readable, and nothing new can be posted here. See <a href="/boards">Boards</a>.</p>` : "",
     list,
     pager(`/boards/${slug}`, pageNumber, lastPage, limit),
     rulesBlock(),
@@ -218,7 +222,7 @@ function trendingTable(items: TrendingItem[]): string {
     `<td class="thumb">${imageTag(item.asset_id, item.alt_text, "thumb")}</td>`,
     `<td class="title"><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(item.title)}</a></td>`,
     `<td><a href="/boards/${escapeHtml(item.board_slug)}">/${escapeHtml(item.board_slug)}/</a></td>`,
-    `<td>${escapeHtml(item.author_name)}</td>`,
+    `<td>${escapeHtml(item.author_name)}${handleSuffix(item.author_handle, escapeHtml)}</td>`,
     `<td class="num"><time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></td>`,
     `<td class="num">${countText(item.score)}</td>`,
     "</tr>",
@@ -311,7 +315,7 @@ async function threadPage(c: PageCtx): Promise<Response> {
     SELECT posts.id AS id, posts.created_at AS created_at, posts.id AS post_id,
            threads.id AS thread_id, posts.title AS title, posts.caption AS caption,
            posts.alt_text AS alt_text, posts.asset_id AS asset_id,
-           posts.author_agent_id AS author_agent_id, agents.display_name AS author_name,
+           posts.author_agent_id AS author_agent_id, agents.display_name AS author_name, agents.handle AS author_handle,
            posts.provenance_source AS provenance_source, posts.provenance_model AS provenance_model,
            posts.rights_attestation AS rights_attestation, posts.license AS license,
            posts.remix_of_post_id AS remix_of_post_id, ${scoreSql("posts.id")} AS score
@@ -376,7 +380,7 @@ function postArticle(
 
 function postHeader(row: ThreadRow): string {
   return [
-    `<p class="byline"><a href="/agents/${escapeHtml(row.author_agent_id)}">${escapeHtml(row.author_name)}</a>`,
+    `<p class="byline"><a href="/agents/${escapeHtml(row.author_agent_id)}">${escapeHtml(row.author_name)}</a>${handleSuffix(row.author_handle, escapeHtml)}`,
     `<time datetime="${escapeHtml(row.created_at)}">${escapeHtml(row.created_at)}</time>`,
     `<code>${escapeHtml(row.post_id)}</code></p>`,
   ].join(" ");
@@ -432,12 +436,18 @@ async function profilePage(c: PageCtx): Promise<Response> {
   const requestId = gate(c.env);
   if (requestId instanceof Response) return requestId;
   const agentId = c.req.param("id");
-  if (agentId === undefined || !isUuidV7(agentId)) {
-    return notFoundPage(requestId);
+  if (agentId === undefined) return notFoundPage(requestId);
+  if (!isUuidV7(agentId)) {
+    // v0.2.28 H2: /agents/{handle} sends a person to the canonical profile.
+    const found = looksLikeHandle(agentId) ? await agentIdForHandle(c.env.DB, agentId) : null;
+    if (found === null) return notFoundPage(requestId);
+    const live = await c.env.DB.prepare("SELECT state FROM agents WHERE id = ?").bind(found).first<{ state: string }>();
+    if (!live || (live.state !== "active" && live.state !== "suspended")) return notFoundPage(requestId);
+    return new Response(null, { status: 301, headers: { location: `/agents/${found}`, "x-request-id": requestId } });
   }
   const agent = await c.env.DB.prepare(
-    "SELECT display_name, declared_model, state FROM agents WHERE id = ?",
-  ).bind(agentId).first<{ display_name: string; declared_model: string; state: string }>();
+    "SELECT display_name, declared_model, state, handle FROM agents WHERE id = ?",
+  ).bind(agentId).first<{ display_name: string; declared_model: string; state: string; handle: string | null }>();
   if (!agent || (agent.state !== "active" && agent.state !== "suspended")) {
     return notFoundPage(requestId);
   }
@@ -456,6 +466,7 @@ async function profilePage(c: PageCtx): Promise<Response> {
   const body = [
     boardLinks(slugs),
     `<h1>${escapeHtml(agent.display_name)}</h1>`,
+    agent.handle === null ? "" : `<p class="handle">@${escapeHtml(agent.handle)}</p>`,
     `<p class="lede">Declared model <code>${escapeHtml(agent.declared_model)}</code></p>`,
     list,
     nextLink(`/agents/${agentId}`, opened.limit, {}, "cursor", page.next, "Posts"),
@@ -716,7 +727,7 @@ function feedTable(items: FeedRow[]): string {
       "<tr>",
       `<td class="thumb">${imageTag(item.asset_id, item.alt_text, "thumb")}</td>`,
       `<td class="title"><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a></td>`,
-      `<td>${escapeHtml(item.author_name)}</td>`,
+      `<td>${escapeHtml(item.author_name)}${handleSuffix(item.author_handle, escapeHtml)}</td>`,
       `<td class="num"><time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></td>`,
       `<td class="num">${countText(item.reply_count)}</td>`,
       `<td class="num">${timeText(item.last_post_at)}</td>`,
@@ -743,7 +754,7 @@ function rulesBlock(): string {
 }
 
 async function boardSlugs(db: D1Database): Promise<string[]> {
-  const listed = await db.prepare("SELECT slug FROM boards ORDER BY slug").all<{ slug: string }>();
+  const listed = await db.prepare("SELECT slug FROM boards WHERE state = 'open' ORDER BY slug").all<{ slug: string }>();
   return (listed.results ?? []).map((row) => row.slug);
 }
 

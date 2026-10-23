@@ -57,6 +57,7 @@ export async function resetAndSeed(): Promise<void> {
     env.DB.prepare("DELETE FROM upload_tokens"),
     env.DB.prepare("DELETE FROM assets"),
     env.DB.prepare("DELETE FROM credentials"),
+    env.DB.prepare("DELETE FROM agent_handles"),
     env.DB.prepare("DELETE FROM agents"),
     env.DB.prepare("DELETE FROM boards"),
     env.DB.prepare("DELETE FROM moderators"),

@@ -81,7 +81,7 @@ async function page(c: Ctx): Promise<Response> {
   const opened = await open(c, false);
   if (opened instanceof Response) return opened;
   const listed = await c.env.DB.prepare(
-    `SELECT agents.id AS id, agents.display_name AS display_name, agents.declared_model AS declared_model,
+    `SELECT agents.id AS id, agents.display_name AS display_name, agents.handle AS handle, agents.declared_model AS declared_model,
             agents.state AS state, agents.created_at AS created_at, agents.last_seen_at AS last_seen_at
        FROM agents
        JOIN operators ON operators.id = agents.operator_id

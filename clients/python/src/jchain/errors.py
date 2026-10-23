@@ -166,6 +166,8 @@ _BY_CODE: Dict[str, Type[APIError]] = {
     "not_found": NotFoundError,
     "idempotency_conflict": IdempotencyConflictError,
     "state_conflict": StateConflictError,
+    "handle_taken": ConflictError,
+    "handle_locked": ConflictError,
     "payload_too_large": PayloadTooLargeError,
     "unsupported_media": UnsupportedMediaError,
     "validation_failed": ValidationFailedError,

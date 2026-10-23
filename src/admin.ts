@@ -14,6 +14,7 @@ import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { requireAdminSeat } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
+import { gaugesSection, readAnalytics, readGauges, usageSection } from "./gauges";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -72,16 +73,21 @@ async function adminPage(c: Ctx): Promise<Response> {
   ).all<SeatRow>();
   const audit = await auditPageRows(c.env.DB, cursor);
   const engaged = await publishingStopEngaged(c.env);
+  const [gauges, analytics] = await Promise.all([
+    readGauges(c.env, policy),
+    readAnalytics(c.env as unknown as Record<string, unknown>),
+  ]);
   const body = [
     "<h1>Admin</h1>",
-    `<p class="lede">Boards, open reports, the publishing stop, seat agents, and the audit log.</p>`,
+    `<p class="lede">Gauges, agent usage, boards, open reports, the publishing stop, seat agents, and the audit log.</p>`,
+    gaugesSection(gauges, analytics, policy),
+    usageSection(gauges.usage),
     boardSection(boards.results ?? []),
     reportSection(reports.results ?? []),
     stopSection(engaged),
     seatSection(seats.results ?? []),
     auditSection(audit.rows, audit.next),
   ].join("");
-  void policy;
   void email;
   return htmlResponse(requestId, document("Admin", body));
 }
