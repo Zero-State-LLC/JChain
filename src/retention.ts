@@ -16,12 +16,14 @@ export const REDACTED_EMAIL = "redacted";
 export const RESERVATION_GRACE_HOURS = 1;
 
 export const SCAN_PENDING_MINUTES = 15;
+// CT-23: at most this many published Posts with no scan row are sent for a scan per run.
+export const SCAN_BACKFILL_BATCH = 10;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
 
-type RetentionEnv = Pick<Env, "DB" | "MEDIA" | "POLICY" | "QUOTA">;
+type RetentionEnv = Pick<Env, "DB" | "MEDIA" | "POLICY" | "QUOTA"> & Partial<Pick<Env, "ASSET_UPLOAD">>;
 
 export type RetentionAlert = {
   metric: string;
@@ -53,6 +55,8 @@ export async function runRetention(env: RetentionEnv, now: number): Promise<Rete
   const idempotency = await purgeExpiredIdempotency(env.DB, now);
   const events = await purgeOldEvents(env.DB, policy, now);
   const scans = await sweepStuckScans(env.DB, now);
+  // After the sweep, so a row it writes is not marked unscanned in the same run.
+  const backfilled = policy.moderation_mode === "postpublish" ? await backfillScans(env) : 0;
   const alerts = await breachAlerts(env.DB, now);
   const result = { ran: true, ...audit, assets_deleted: assets, alerts };
   console.log(JSON.stringify({
@@ -63,6 +67,7 @@ export async function runRetention(env: RetentionEnv, now: number): Promise<Rete
     idempotency_deleted: idempotency,
     events_deleted: events,
     scans_swept: scans,
+    scans_backfilled: backfilled,
   }));
   return result;
 }
@@ -296,4 +301,46 @@ async function sweepStuckScans(db: D1Database, now: number): Promise<number> {
     if (error instanceof Error && /no such table/i.test(error.message)) return 0;
     throw error;
   }
+}
+
+// CT-23: a Post published before postpublish took effect (approved under prepublish) has no scan
+// row. Give a bounded batch a pending row and a moderation.scan message, as a submit does. A
+// failed send marks the row unscanned for review. The row's published_at is the Post's first
+// post.published Event, or its created_at.
+async function backfillScans(env: RetentionEnv): Promise<number> {
+  let listed: D1Result<{ id: string; published_at: string }>;
+  try {
+    listed = await env.DB.prepare(
+      `SELECT posts.id AS id,
+              COALESCE((SELECT MIN(events.occurred_at) FROM events
+                         WHERE events.resource_id = posts.id AND events.type = 'post.published'),
+                       posts.created_at) AS published_at
+         FROM posts
+        WHERE posts.state = 'published'
+          AND NOT EXISTS (SELECT 1 FROM post_scans WHERE post_scans.post_id = posts.id)
+        ORDER BY posts.created_at, posts.id
+        LIMIT ?`,
+    ).bind(SCAN_BACKFILL_BATCH).all<{ id: string; published_at: string }>();
+  } catch (error) {
+    if (error instanceof Error && /no such table/i.test(error.message)) return 0;
+    throw error;
+  }
+  let count = 0;
+  for (const row of listed.results ?? []) {
+    const inserted = await env.DB.prepare(
+      "INSERT OR IGNORE INTO post_scans (post_id, result, hidden, published_at) VALUES (?, 'pending', 0, ?)",
+    ).bind(row.id, row.published_at).run();
+    if (Number(inserted.meta.changes ?? 0) !== 1) continue;
+    count += 1;
+    try {
+      if (env.ASSET_UPLOAD === undefined) throw new Error("no queue binding");
+      await env.ASSET_UPLOAD.send({ post_id: row.id });
+    } catch {
+      console.error(JSON.stringify({ message: "scan backfill send failed", post_id: row.id }));
+      await env.DB.prepare(
+        "UPDATE post_scans SET result = 'unscanned' WHERE post_id = ? AND result = 'pending'",
+      ).bind(row.id).run();
+    }
+  }
+  return count;
 }

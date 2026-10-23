@@ -5,7 +5,8 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { derivativeKey, originalKey, rejectInFlight } from "../src/asset-pipeline";
 import { refundAssetBytes } from "../src/quota";
-import { REDACTED_EMAIL, RETENTION_BATCH, runRetention } from "../src/retention";
+import { REDACTED_EMAIL, RETENTION_BATCH, SCAN_BACKFILL_BATCH, runRetention } from "../src/retention";
+import postpublishFixture from "./fixtures/policy-postpublish.json";
 import { BOARD_ID, MODERATOR, OPERATOR, OPERATOR_ID, call, resetAndSeed } from "./harness";
 
 const NOW = Date.parse("2026-10-21T12:00:00Z");
@@ -405,5 +406,77 @@ describe("AT-46 rejected_at and r2_bytes refunds", () => {
     const fresh = await env.DB.prepare("SELECT result FROM post_scans WHERE post_id = ?").bind(freshPostId).first<{ result: string }>();
     expect(stuck?.result).toBe("unscanned");
     expect(fresh?.result).toBe("pending");
+  });
+});
+
+describe("scan backfill (CT-23)", () => {
+  function backfillEnv(sent: unknown[], fail = false, policy = JSON.stringify(postpublishFixture)): Env {
+    const queue = {
+      async send(body: unknown): Promise<void> {
+        sent.push(body);
+        if (fail) throw new Error("queue unavailable");
+      },
+      async sendBatch(): Promise<void> {},
+    };
+    return new Proxy(env, {
+      get(target, property) {
+        if (property === "POLICY") return policy;
+        if (property === "ASSET_UPLOAD") return queue;
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as Env;
+  }
+
+  async function seedPublished(count: number): Promise<string[]> {
+    const threadId = uuidv7();
+    await env.DB.prepare("INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)")
+      .bind(threadId, BOARD_ID, at(-2 * DAY)).run();
+    const ids: string[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const id = uuidv7();
+      ids.push(id);
+      await env.DB.prepare(
+        "INSERT INTO posts (id, thread_id, author_agent_id, caption, state, created_at) VALUES (?, ?, ?, 'old', 'published', ?)",
+      ).bind(id, threadId, agentId, at(-2 * DAY + i * 1000)).run();
+    }
+    return ids;
+  }
+
+  async function scanResults(): Promise<Record<string, string>> {
+    const listed = await env.DB.prepare("SELECT post_id, result FROM post_scans").all<{ post_id: string; result: string }>();
+    return Object.fromEntries((listed.results ?? []).map((row) => [row.post_id, row.result]));
+  }
+
+  it("sends a bounded batch of unscanned published Posts for a scan in postpublish", async () => {
+    const ids = await seedPublished(SCAN_BACKFILL_BATCH + 2);
+    const sent: unknown[] = [];
+    await runRetention(backfillEnv(sent), NOW);
+    expect(sent).toEqual(ids.slice(0, SCAN_BACKFILL_BATCH).map((id) => ({ post_id: id })));
+    const first = await scanResults();
+    expect(Object.keys(first)).toHaveLength(SCAN_BACKFILL_BATCH);
+    expect(Object.values(first).every((result) => result === "pending")).toBe(true);
+
+    await runRetention(backfillEnv(sent), NOW);
+    expect(sent).toHaveLength(SCAN_BACKFILL_BATCH + 2);
+    expect(Object.keys(await scanResults())).toHaveLength(SCAN_BACKFILL_BATCH + 2);
+    await runRetention(backfillEnv(sent), NOW);
+    expect(sent).toHaveLength(SCAN_BACKFILL_BATCH + 2);
+  });
+
+  it("marks the row unscanned when the send fails", async () => {
+    const [id] = await seedPublished(1);
+    const sent: unknown[] = [];
+    await runRetention(backfillEnv(sent, true), NOW);
+    expect(sent).toHaveLength(1);
+    expect((await scanResults())[String(id)]).toBe("unscanned");
+  });
+
+  it("does nothing in prepublish", async () => {
+    await seedPublished(2);
+    const sent: unknown[] = [];
+    await runRetention(backfillEnv(sent, false, env.POLICY as string), NOW);
+    expect(sent).toHaveLength(0);
+    expect(Object.keys(await scanResults())).toHaveLength(0);
   });
 });

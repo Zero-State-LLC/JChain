@@ -546,6 +546,9 @@ async function commit(
   const charged = await chargePublish(env, policy, agentId, boardId, kind);
   if (!charged.ok) {
     if ("code" in charged) return agentError(env, policy, requestId, agentId, "forbidden");
+    // A concurrent request with the same key may have taken the last slot: replay it, do not charge.
+    const raced = await readIdempotency(env.DB, agentId, route, key, bodyHash);
+    if (raced.action === "replay") return jsonResponse(requestId, await withPublication(env.DB, raced.body), raced.status);
     return rateLimited(requestId, charged.limits, charged.retryAfter);
   }
   body.limits = charged.limits;
@@ -554,18 +557,26 @@ async function commit(
     thread_id: body.thread_id,
     post_id: body.post_id,
   }));
-  let response: Response;
+  let stored: Stored;
   try {
-    response = await remember(env, requestId, policy, agentId, route, key, bodyHash, { status: 201, body }, statements);
+    stored = await store(env, requestId, policy, agentId, route, key, bodyHash, { status: 201, body }, statements);
   } catch (error) {
     await charged.refund();
     throw error;
   }
+  // A concurrent request with the same key won: nothing of ours committed, so refund and replay.
+  if (stored.raced) {
+    await charged.refund();
+    return stored.response;
+  }
+  const response = stored.response;
   // After the commit only, so a replay never resends (CT-21).
   if (published) await sendScan(env, String(body.post_id));
   await recordAuthorshipSignals(env.DB, String(body.post_id), agentId, clientHint(userAgent));
   return response;
 }
+
+type Stored = { response: Response; raced: boolean };
 
 async function remember(
   env: Env,
@@ -578,6 +589,21 @@ async function remember(
   outcome: Outcome,
   statements: D1PreparedStatement[],
 ): Promise<Response> {
+  return (await store(env, requestId, policy, agentId, route, key, bodyHash, outcome, statements)).response;
+}
+
+// The batch is atomic: when the idempotency row already exists, none of its writes committed.
+async function store(
+  env: Env,
+  requestId: string,
+  policy: Policy,
+  agentId: string,
+  route: string,
+  key: string,
+  bodyHash: string,
+  outcome: Outcome,
+  statements: D1PreparedStatement[],
+): Promise<Stored> {
   if (outcome.body.limits === undefined) outcome.body.limits = await readAgentLimits(env, policy, agentId);
   statements.push(idempotencyInsert(
     env.DB,
@@ -589,8 +615,20 @@ async function remember(
     outcome.body,
     hoursAhead(policy.retention.idempotency_hours),
   ));
-  await env.DB.batch(statements);
-  return jsonResponse(requestId, outcome.body, outcome.status);
+  try {
+    await env.DB.batch(statements);
+  } catch (error) {
+    if (!(error instanceof Error && error.message.includes("UNIQUE"))) throw error;
+    const raced = await readIdempotency(env.DB, agentId, route, key, bodyHash);
+    if (raced.action === "replay") {
+      return { response: jsonResponse(requestId, await withPublication(env.DB, raced.body), raced.status), raced: true };
+    }
+    if (raced.action === "conflict") {
+      return { response: await agentError(env, policy, requestId, agentId, "idempotency_conflict"), raced: true };
+    }
+    throw error;
+  }
+  return { response: jsonResponse(requestId, outcome.body, outcome.status), raced: false };
 }
 
 async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {

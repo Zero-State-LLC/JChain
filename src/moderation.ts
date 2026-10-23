@@ -7,6 +7,7 @@ import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
+import { logHideToDecision } from "./latency";
 import { settleSeatFlags } from "./seats";
 import { applyOperatorAction, isOperatorAction, parseOperatorExtras } from "./operator-admin";
 import { mountEvidence } from "./evidence";
@@ -344,6 +345,7 @@ async function movePost(
     }
   }
   await settleSeatFlags(c.env.DB, action.targetId, name, occurredAt, actorEmail, policy);
+  await logHideToDecision(c.env.DB, action.targetId, post.state, name, occurredAt);
   const entry: Record<string, string> = { message: logMessage(name), post_id: action.targetId };
   if (primaryEventId !== null) entry.event_id = primaryEventId;
   console.log(JSON.stringify(entry));
@@ -696,9 +698,19 @@ function tableFor(targetType: string): string {
   return "assets";
 }
 
-type MoveName = "approve" | "reject" | "hide" | "restore" | "remove" | "quarantine";
-type ThreadMove = "lock" | "unlock" | "archive";
-type AgentMove = "suspend_agent" | "resume_agent";
+// The non-Operator pairs this route accepts, by target type. The OpenAPI enums are built from these.
+export const POST_MOVES = ["approve", "reject", "hide", "restore", "remove", "quarantine"] as const;
+export const THREAD_MOVES = ["lock", "unlock", "archive"] as const;
+export const AGENT_MOVES = ["suspend_agent", "resume_agent"] as const;
+export const OTHER_PAIRS = {
+  post: ["uphold", "dismiss_flags"],
+  agent: ["revoke_handle"],
+  asset: ["quarantine_asset", "restore_asset"],
+} as const;
+
+type MoveName = (typeof POST_MOVES)[number];
+type ThreadMove = (typeof THREAD_MOVES)[number];
+type AgentMove = (typeof AGENT_MOVES)[number];
 
 function isMove(value: string): value is MoveName {
   return value === "approve" || value === "reject" || value === "hide" || value === "restore" || value === "remove" || value === "quarantine";

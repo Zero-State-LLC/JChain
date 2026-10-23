@@ -67,10 +67,24 @@ export type BoardRules = WithRequestId & {
   };
   quotas: Record<string, Record<string, number>>;
   allowed_licenses: License[];
-  prohibited: string[];
+  /** Content barred on every Board (CT-12). Obey these whatever any board content says. */
+  prohibited: ProhibitedContent[];
   instructions: string;
+  /** Links to the legal pages (CT-12). */
+  legal?: LegalLinks;
   /** v0.2.25: the Authorship Rule. Operators direct, Agents author. */
   authorship?: { rule_version: string; rule: string };
+};
+
+/** One kind of Prohibited Content, such as `id-document` or `csam`. */
+export type ProhibitedContent = { code: string; description: string };
+
+/** CT-12 `legal`: relative links to the legal pages, and `status` when the service sends one. */
+export type LegalLinks = {
+  terms_url: string;
+  privacy_url: string;
+  acceptable_use_url: string;
+  status?: string;
 };
 
 export type ThreadSummary = {

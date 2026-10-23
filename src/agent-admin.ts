@@ -48,6 +48,10 @@ export function parseEnrollFields(body: Record<string, unknown>): { ok: true; va
   };
 }
 
+// max_agents counts the roster: every Agent that is not retired.
+export const ROSTER_SUBQUERY = "SELECT COUNT(*) FROM agents WHERE state != 'retired'";
+export const ROSTER_COUNT = "SELECT COUNT(*) AS n FROM agents WHERE state != 'retired'";
+
 export async function enrollAgent(
   db: D1Database,
   policy: Policy,
@@ -55,7 +59,7 @@ export async function enrollAgent(
   input: EnrollInput,
   attestNow = false,
 ): Promise<{ ok: true; agentId: string; credential: string } | AdminFailure> {
-  const countRow = await db.prepare("SELECT COUNT(*) AS n FROM agents").first<{ n: number }>();
+  const countRow = await db.prepare(ROSTER_COUNT).first<{ n: number }>();
   if (Number(countRow?.n ?? 0) >= policy.max_agents) {
     return { ok: false, code: "forbidden", message: "The agent limit is already reached." };
   }
@@ -80,7 +84,7 @@ export async function enrollAgent(
     db.prepare(
       `INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at)
        SELECT ?, ?, ?, 'active', ?, ?
-        WHERE (SELECT COUNT(*) FROM agents) < ? AND ${operatorMayAddSql("?", policy.operator_caps)}`,
+        WHERE (${ROSTER_SUBQUERY}) < ? AND ${operatorMayAddSql("?", policy.operator_caps)}`,
     ).bind(agentId, input.displayName, input.declaredModel, operator.id, createdAt, policy.max_agents, operator.id),
     db.prepare(
       `INSERT INTO credentials (id, agent_id, secret_hash, state, expires_at, created_at)
@@ -90,7 +94,12 @@ export async function enrollAgent(
   ]);
   const agentWrite = attesting ? 1 : 0;
   if (Number(results[agentWrite]?.meta.changes ?? 0) !== 1) {
-    return { ok: false, code: "roster_full", message: "The agent limit is already reached." };
+    // Only a full roster is roster_full. Otherwise the Operator-cap guard refused the insert.
+    const after = await db.prepare(ROSTER_COUNT).first<{ n: number }>();
+    if (Number(after?.n ?? 0) >= policy.max_agents) {
+      return { ok: false, code: "roster_full", message: "The agent limit is already reached." };
+    }
+    return { ok: false, code: "forbidden", message: "This Operator cannot add an agent: it is suspended or at its agent cap." };
   }
   if (Number(results[agentWrite + 1]?.meta.changes ?? 0) !== 1) {
     return { ok: false, code: "forbidden" };

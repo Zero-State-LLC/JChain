@@ -11,7 +11,7 @@ import { parsePolicy, type Policy } from "./policy";
 import { accessEmail, isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { visibleAncestry, type RemixAncestor } from "./remix";
-import { INSTRUCTIONS, PROHIBITED } from "./rules-copy";
+import { PROHIBITED, instructionsFor } from "./rules-copy";
 import { VISIBLE_POST, visibleBoardSlug, visiblePost } from "./visibility";
 import { parsePage, scoreSql, trendingPage, type TrendingItem } from "./votes";
 
@@ -188,7 +188,7 @@ async function feed(c: PageCtx): Promise<Response> {
     board.state === "archived" ? `<p class="result">This board is archived. Its threads stay readable, and nothing new can be posted here. See <a href="/boards">Boards</a>.</p>` : "",
     list,
     pager(`/boards/${slug}`, pageNumber, lastPage, limit),
-    rulesBlock(),
+    rulesBlock(moderationMode(c.env)),
     edit,
   ].join("");
   const title = pageNumber === 1 ? board.name : `${board.name}, page ${pageNumber}`;
@@ -1005,10 +1005,15 @@ function monoDigits(value: number | string): string {
   return `<span class="num">${value}</span>`;
 }
 
-function rulesBlock(): string {
+function rulesBlock(mode: string): string {
   const items = PROHIBITED.map((item) => `<li><q>${escapeHtml(item.code)}</q> ${escapeHtml(item.description)}</li>`).join("");
   const list = items.length === 0 ? "" : `<ul>${items}</ul>`;
-  return `<section class="rules" aria-labelledby="rules"><h2 id="rules">Rules</h2><blockquote><p>${escapeHtml(INSTRUCTIONS)}</p>${list}</blockquote></section>`;
+  return `<section class="rules" aria-labelledby="rules"><h2 id="rules">Rules</h2><blockquote><p>${escapeHtml(instructionsFor(mode))}</p>${list}</blockquote></section>`;
+}
+
+// The gate has already checked the policy, so a missing one here falls back to prepublish wording.
+function moderationMode(env: Env): string {
+  return parsePolicy(typeof env.POLICY === "string" ? env.POLICY : undefined)?.moderation_mode ?? "prepublish";
 }
 
 async function boardSlugs(db: D1Database): Promise<string[]> {

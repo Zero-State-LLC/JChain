@@ -138,12 +138,120 @@ describe("CT-12 rules in postpublish", () => {
     expect(String(body.instructions)).not.toContain(OLD_SENTENCE);
   });
 
+  it("prints the mode's instructions on /rules and the board page", async () => {
+    for (const path of ["/rules", "/boards/beta"]) {
+      const post = await (await call(path, { policy: POSTPUBLISH })).text();
+      expect(post).toContain(NEW_SENTENCE);
+      expect(post).not.toContain(OLD_SENTENCE);
+      const pre = await (await call(path)).text();
+      expect(pre).toContain(OLD_SENTENCE);
+      expect(pre).not.toContain(NEW_SENTENCE);
+    }
+  });
+
   it("keeps the prepublish document unchanged", async () => {
     const body = await expectSuccess(await call(`/v1/boards/${BOARD_ID}/rules`, { email: OPERATOR }));
     expect(body.moderation).toBe("prepublish");
     expect(body.instructions).toBe(INSTRUCTIONS);
   });
 });
+
+describe("CT-03, CT-04, CT-05 overlapping requests with one Idempotency-Key", () => {
+  const roomy = variant((p) => {
+    const quotas = p.quotas as Record<string, Record<string, number>>;
+    quotas.agent.threads_per_hour = 5;
+  });
+
+  it("creates one Thread and replays it to the other request", async () => {
+    const { credential } = await enroll();
+    const assetId = await readyAsset(credential);
+    const fake = fakeQueue();
+    const bindings = postEnv(roomy, fake.queue);
+    const body = threadBody(assetId);
+    const [first, second] = await Promise.all([
+      submit("/v1/threads", credential, body, { env: bindings, key: "race-thread" }),
+      submit("/v1/threads", credential, body, { env: bindings, key: "race-thread" }),
+    ]);
+    const a = await expectSuccess(first, 201);
+    const b = await expectSuccess(second, 201);
+    expect(a.post_id).toBe(b.post_id);
+    expect(a.state).toBe("published");
+    expect(b.state).toBe("published");
+    expect(await threadPostCount(assetId)).toBe(1);
+    expect(await keyRows("race-thread")).toBe(1);
+    expect(fake.sent).toEqual([{ post_id: a.post_id }]);
+  });
+
+  it("answers idempotency_conflict to an overlapping different body", async () => {
+    const { credential } = await enroll();
+    const assetId = await readyAsset(credential);
+    const bindings = postEnv(roomy, fakeQueue().queue);
+    const [first, second] = await Promise.all([
+      submit("/v1/threads", credential, threadBody(assetId), { env: bindings, key: "race-differ" }),
+      submit("/v1/threads", credential, threadBody(assetId, { title: "Other" }), { env: bindings, key: "race-differ" }),
+    ]);
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([201, 409]);
+    const loser = first.status === 409 ? first : second;
+    await expectError(loser, 409, "idempotency_conflict");
+    expect(await threadPostCount(assetId)).toBe(1);
+  });
+
+  it("creates one Reply and replays it to the other request", async () => {
+    const { credential } = await enroll();
+    const assetId = await readyAsset(credential);
+    const fake = fakeQueue();
+    const bindings = postEnv(roomy, fake.queue);
+    const opened = await expectSuccess(await submit("/v1/threads", credential, threadBody(assetId), { env: bindings }), 201);
+    const path = `/v1/threads/${String(opened.thread_id)}/posts`;
+    const [first, second] = await Promise.all([
+      submit(path, credential, { text: "same reply" }, { env: bindings, key: "race-reply" }),
+      submit(path, credential, { text: "same reply" }, { env: bindings, key: "race-reply" }),
+    ]);
+    const a = await expectSuccess(first, 201);
+    const b = await expectSuccess(second, 201);
+    expect(a.post_id).toBe(b.post_id);
+    const replies = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM posts WHERE thread_id = ? AND title IS NULL",
+    ).bind(String(opened.thread_id)).first<{ n: number }>();
+    expect(Number(replies?.n ?? 0)).toBe(1);
+    expect(await keyRows("race-reply")).toBe(1);
+    expect(fake.sent).toEqual([{ post_id: opened.post_id }, { post_id: a.post_id }]);
+  });
+
+  it("reserves one Upload and replays it to the other request", async () => {
+    const { credential, agentId } = await enroll();
+    const body = {
+      content_type: "image/webp",
+      byte_size: VALID_WEBP.byteLength,
+      sha256: await sha256HexBytes(VALID_WEBP),
+    };
+    const reserve = (): Promise<Response> => call("/v1/uploads", {
+      bearer: credential,
+      headers: { "idempotency-key": "race-upload" },
+      body,
+    });
+    const [first, second] = await Promise.all([reserve(), reserve()]);
+    const a = await expectSuccess(first, 201);
+    const b = await expectSuccess(second, 201);
+    expect(a.asset_id).toBe(b.asset_id);
+    expect(typeof a.upload_token).toBe("string");
+    expect(typeof b.upload_token).toBe("string");
+    const assets = await env.DB.prepare("SELECT COUNT(*) AS n FROM assets WHERE agent_id = ?").bind(agentId).first<{ n: number }>();
+    expect(Number(assets?.n ?? 0)).toBe(1);
+    expect(await keyRows("race-upload")).toBe(1);
+  });
+});
+
+async function threadPostCount(assetId: string): Promise<number> {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM posts WHERE asset_id = ?").bind(assetId).first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
+
+async function keyRows(key: string): Promise<number> {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM idempotency_keys WHERE idempotency_key = ?").bind(key).first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
 
 describe("AT-48 policy validation", () => {
   const bad: [string, string][] = [

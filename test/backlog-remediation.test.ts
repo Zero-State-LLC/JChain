@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { derivativeKey } from "../src/asset-pipeline";
 import { utcSeconds, uuidv7 } from "../src/ids";
 import { runRetention } from "../src/retention";
-import { LEGAL_LINKS, PROHIBITED } from "../src/rules-copy";
+import { LEGAL_LINKS } from "../src/rules-copy";
 import {
   ADMIN,
   ADMIN2,
@@ -62,6 +62,30 @@ describe("archived boards (AT-32)", () => {
     const listed = await expectJson(await call("/v1/boards", { email: OPERATOR }), 200);
     const items = listed.items as Array<{ id: string; state: string }>;
     expect(items.find((item) => item.id === BOARD_ID)?.state).toBe("archived");
+
+    // CT-06, CT-20: the state change is audited with a reason code; `rules` when none is given.
+    await expectJson(await call(`/v1/boards/${BOARD_ID}`, {
+      method: "PATCH",
+      email: ADMIN,
+      body: { state: "open", reason_code: "spam" },
+    }), 200);
+    await expectError(await call(`/v1/boards/${BOARD_ID}`, {
+      method: "PATCH",
+      email: ADMIN,
+      body: { state: "archived", reason_code: "not-a-reason" },
+    }), 422, "validation_failed");
+    await expectError(await call(`/v1/boards/${BOARD_ID}`, {
+      method: "PATCH",
+      email: ADMIN,
+      body: { name: "JChain", reason_code: "spam" },
+    }), 400, "malformed");
+    const audit = await env.DB.prepare(
+      "SELECT action, reason_code FROM moderation_actions WHERE target_type = 'board' AND target_id = ? ORDER BY created_at, rowid",
+    ).bind(BOARD_ID).all<{ action: string; reason_code: string }>();
+    expect(audit.results.map((row) => [row.action, row.reason_code])).toEqual([
+      ["archive_board", "rules"],
+      ["unarchive_board", "spam"],
+    ]);
   });
 });
 
@@ -330,11 +354,42 @@ describe("legal surface (AT-36, CT-12)", () => {
     expect(use).toContain("Prohibited content");
 
     const rules = await expectJson(await call("/v1/rules", { email: OPERATOR }), 200);
-    expect(rules.prohibited).toEqual([...PROHIBITED]);
+    // AT-38: the exact CT-12 descriptions.
+    expect(rules.prohibited).toEqual([
+      {
+        code: "id-document",
+        description: "Images or text of a government or personal identity document, such as a passport, driver's licence, national ID card, or social security card, real or forged.",
+      },
+      {
+        code: "csam",
+        description: "Any sexual depiction of a minor, including drawn, edited, or AI-generated images.",
+      },
+    ]);
     expect(rules.legal).toEqual({ ...LEGAL_LINKS });
     const spec = await expectJson(await call("/v1/openapi.json", { email: OPERATOR }), 200);
-    const info = spec.info as { termsOfService: string };
+    const info = spec.info as { termsOfService: string; title: string; license: { name: string } };
     expect(info.termsOfService).toBe("https://j-chain.net/terms");
+    // Part E: the document's title and license.
+    expect(info.title).toBe("j-chain.net API");
+    expect(info.license.name).toBe("Zero State Proprietary License");
+    type Schema = { properties: Record<string, { enum?: string[] }> };
+    type Operation = { requestBody: { content: { "application/json": { schema: Schema } } } };
+    const paths = spec.paths as Record<string, Record<string, Operation>>;
+    const moderation = paths["/v1/moderation/actions"]?.post?.requestBody.content["application/json"].schema.properties ?? {};
+    expect(moderation.target_type?.enum).toEqual(["post", "thread", "agent", "asset", "operator"]);
+    for (const action of [
+      "approve_operator", "suspend_operator", "resume_operator", "remove_operator", "set_agent_cap", "change_email",
+      "uphold", "dismiss_flags", "restore_asset", "revoke_handle", "quarantine",
+    ]) {
+      expect(moderation.action?.enum, action).toContain(action);
+    }
+    expect(moderation.reason_code?.enum).toContain("id-document");
+    expect(moderation.reason_code?.enum).toContain("csam");
+    expect(Object.keys(moderation)).toEqual(expect.arrayContaining(["value", "email"]));
+    const reports = paths["/v1/reports"]?.post?.requestBody.content["application/json"].schema.properties ?? {};
+    expect(reports.reason_code?.enum).toEqual(expect.arrayContaining(["id-document", "csam"]));
+    const editBoard = paths["/v1/boards/{id}"]?.patch?.requestBody.content["application/json"].schema.properties ?? {};
+    expect(editBoard.state?.enum).toEqual(["open", "archived"]);
   });
 });
 
@@ -544,6 +599,24 @@ describe("thread feed index (#81) and public asset cache (#74)", () => {
     const bytes = await call(`/v1/assets/${assetId}/content?variant=display`);
     expect(bytes.status).toBe(200);
     expect(bytes.headers.get("cache-control")).toBe("public, max-age=300");
+  });
+});
+
+describe("export size guard (platform constraints)", () => {
+  it("refuses an in-request export of a Board above 5,000 Posts and writes nothing", async () => {
+    const author = await enroll("Ada", OPERATOR);
+    const { threadId } = await seedPost(author.agentId);
+    const exportCall = () => call("/v1/exports", { email: ADMIN, body: { board_id: BOARD_ID, purpose: "archive" } });
+    expect((await exportCall()).status).toBe(201);
+    await env.DB.prepare(
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
+       INSERT INTO posts (id, thread_id, author_agent_id, caption, state, created_at)
+       SELECT printf('01900000-0000-7000-8000-%012d', i), ?, ?, 'reply', 'published', ? FROM n`,
+    ).bind(threadId, author.agentId, utcSeconds()).run();
+    const before = await env.DB.prepare("SELECT COUNT(*) AS n FROM exports").first<{ n: number }>();
+    await expectError(await exportCall(), 409, "state_conflict");
+    const after = await env.DB.prepare("SELECT COUNT(*) AS n FROM exports").first<{ n: number }>();
+    expect(Number(after?.n)).toBe(Number(before?.n));
   });
 });
 

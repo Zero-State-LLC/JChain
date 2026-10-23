@@ -438,7 +438,19 @@ async function remember(
     outcome.body,
     hoursAhead(policy.retention.idempotency_hours),
   ));
-  await env.DB.batch(statements);
+  try {
+    await env.DB.batch(statements);
+  } catch (error) {
+    // A concurrent request with the same key committed first; the batch is atomic, so none of ours did.
+    if (!(error instanceof Error && error.message.includes("UNIQUE"))) throw error;
+    const raced = await readIdempotency(env.DB, agentId, route, key, bodyHash);
+    if (raced.action === "conflict") return agentError(env, policy, requestId, agentId, "idempotency_conflict");
+    if (raced.action !== "replay") throw error;
+    if (route === RESERVE_ROUTE && raced.status === 201 && typeof raced.body.asset_id === "string") {
+      return reissueToken(env, requestId, policy, agentId, raced.body.asset_id, raced.body);
+    }
+    return jsonResponse(requestId, raced.body, raced.status);
+  }
   return jsonResponse(requestId, { ...outcome.body, ...reveal }, outcome.status);
 }
 

@@ -1,5 +1,6 @@
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { parsePolicy } from "./policy";
+import { millisBetween } from "./latency";
 import { chargeScanNeurons } from "./quota";
 
 // First delivery plus the upload queue's max_retries (3) in wrangler.jsonc. Keep in step with it.
@@ -32,7 +33,8 @@ export async function handleScanMessage(env: Env, postId: string, attempts = 1):
 
   const row = await env.DB.prepare(
     `SELECT posts.state AS state, posts.caption AS caption, posts.alt_text AS alt_text,
-            posts.title AS title, post_scans.result AS result, post_scans.scanned_at AS scanned_at
+            posts.title AS title, post_scans.result AS result, post_scans.scanned_at AS scanned_at,
+            post_scans.published_at AS published_at
        FROM posts
        LEFT JOIN post_scans ON post_scans.post_id = posts.id
       WHERE posts.id = ?`,
@@ -43,6 +45,7 @@ export async function handleScanMessage(env: Env, postId: string, attempts = 1):
     title: string | null;
     result: string | null;
     scanned_at: string | null;
+    published_at: string | null;
   }>();
   if (!row || row.state !== "published" || row.result === null || row.scanned_at !== null) return;
 
@@ -50,12 +53,12 @@ export async function handleScanMessage(env: Env, postId: string, attempts = 1):
   const neurons = estimateNeurons(content);
   const ai = (env as Env & { AI?: ScanAi }).AI;
   if (!ai || typeof ai.run !== "function") {
-    await markUnscanned(env.DB, postId, 0, "no_binding");
+    await markUnscanned(env.DB, postId, 0, "no_binding", row.published_at);
     return;
   }
   const charge = await chargeScanNeurons(env, policy, neurons);
   if (!charge.ok) {
-    await markUnscanned(env.DB, postId, 0, "over_cap");
+    await markUnscanned(env.DB, postId, 0, "over_cap", row.published_at);
     return;
   }
 
@@ -69,7 +72,7 @@ export async function handleScanMessage(env: Env, postId: string, attempts = 1):
   const latencyMs = Date.now() - started;
   if (verdict === null) {
     if (attempts >= SCAN_MAX_ATTEMPTS) {
-      await markUnscanned(env.DB, postId, neurons, "failed");
+      await markUnscanned(env.DB, postId, neurons, "failed", row.published_at);
       return;
     }
     throw new Error("scan call failed");
@@ -97,6 +100,8 @@ export async function handleScanMessage(env: Env, postId: string, attempts = 1):
     categories: verdict.categories,
     neurons,
     latency_ms: latencyMs,
+    // NFR-10: time from publish to the recorded scan result.
+    publish_to_scan_ms: millisBetween(row.published_at, at),
   }));
 }
 
@@ -138,12 +143,19 @@ async function markUnscanned(
   postId: string,
   neurons: number,
   reason: "over_cap" | "no_binding" | "failed",
+  publishedAt: string | null,
 ): Promise<void> {
+  const at = utcSeconds();
   await db.prepare(
     `UPDATE post_scans SET result = 'unscanned', neurons = ?, scanned_at = ?
       WHERE post_id = ? AND scanned_at IS NULL`,
-  ).bind(neurons, utcSeconds(), postId).run();
-  console.log(JSON.stringify({ message: "post unscanned", post_id: postId, reason }));
+  ).bind(neurons, at, postId).run();
+  console.log(JSON.stringify({
+    message: "post unscanned",
+    post_id: postId,
+    reason,
+    publish_to_scan_ms: millisBetween(publishedAt, at),
+  }));
 }
 
 function escapeField(value: string | null): string {

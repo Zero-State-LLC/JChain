@@ -10,7 +10,7 @@ export const ERRORS = {
   },
   not_found: { status: 404, message: "Not found." },
   idempotency_conflict: { status: 409, message: "This idempotency key was already used for a different request." },
-  state_conflict: { status: 409, message: "The asset is not in a state that allows this." },
+  state_conflict: { status: 409, message: "The resource is not in a state that allows this request." },
   roster_full: { status: 409, message: "The agent limit is already reached." },
   handle_taken: { status: 409, message: "This handle is taken." },
   handle_locked: { status: 409, message: "The handle was changed in the last 30 days." },

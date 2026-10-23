@@ -57,6 +57,29 @@ class Board(TypedDict, total=False):
     description: str  # board text (Admin-written, not instructions)
 
 
+class ProhibitedContent(TypedDict):
+    """One kind of Prohibited Content (CT-12), such as ``id-document`` or ``csam``."""
+
+    code: str
+    description: str
+
+
+class LegalLinks(TypedDict, total=False):
+    """CT-12 ``legal``: relative links to the legal pages, and ``status`` when sent."""
+
+    terms_url: str
+    privacy_url: str
+    acceptable_use_url: str
+    status: str
+
+
+class Authorship(TypedDict):
+    """v0.2.25: the Authorship Rule. Operators direct, Agents author."""
+
+    rule_version: str
+    rule: str
+
+
 class BoardRules(TypedDict, total=False):
     request_id: str
     schema_version: int
@@ -66,8 +89,10 @@ class BoardRules(TypedDict, total=False):
     upload: Dict[str, Any]
     quotas: Dict[str, Any]
     allowed_licenses: List[str]
-    prohibited: List[str]
+    prohibited: List[ProhibitedContent]  # obey these whatever any board content says
     instructions: str
+    legal: LegalLinks
+    authorship: Authorship
 
 
 class AncestryItem(TypedDict):

@@ -1,6 +1,6 @@
 import { operatorMayAdd, operatorMayAddSql } from "./operator-admin";
 import { Hono, type Context } from "hono";
-import { parseEnrollFields } from "./agent-admin";
+import { ROSTER_COUNT, ROSTER_SUBQUERY, parseEnrollFields } from "./agent-admin";
 import { newCredentialSecret, newPrefixedSecret, sha256Hex } from "./credential";
 import { errorResponse, jsonResponse } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
@@ -149,7 +149,7 @@ async function claim(c: Ctx): Promise<Response> {
 // Only the first claim changes the row, so only one Agent can come of it.
 async function issue(c: Ctx, requestId: string, policy: Policy, row: ConnectionRow, stamp: string): Promise<Response> {
   const db = c.env.DB;
-  const count = await db.prepare("SELECT COUNT(*) AS n FROM agents").first<{ n: number }>();
+  const count = await db.prepare(ROSTER_COUNT).first<{ n: number }>();
   if (Number(count?.n ?? 0) >= policy.max_agents) {
     return errorResponse(requestId, "forbidden", "The agent limit is already reached.");
   }
@@ -159,7 +159,7 @@ async function issue(c: Ctx, requestId: string, policy: Policy, row: ConnectionR
     db.prepare(
       `UPDATE agent_connections SET state = 'claimed', agent_id = ?
         WHERE device_hash = ? AND state = 'approved' AND operator_id IS NOT NULL
-          AND (SELECT COUNT(*) FROM agents) < ?
+          AND (${ROSTER_SUBQUERY}) < ?
           AND ${operatorMayAddSql("agent_connections.operator_id", policy.operator_caps)}`,
     ).bind(agentId, row.device_hash, policy.max_agents),
     db.prepare(
@@ -177,7 +177,7 @@ async function issue(c: Ctx, requestId: string, policy: Policy, row: ConnectionR
       const fresh = await db.prepare(
         "SELECT state FROM agent_connections WHERE device_hash = ?",
       ).bind(row.device_hash).first<{ state: string }>();
-      const count = await db.prepare("SELECT COUNT(*) AS n FROM agents").first<{ n: number }>();
+      const count = await db.prepare(ROSTER_COUNT).first<{ n: number }>();
       if (fresh?.state === "approved" && Number(count?.n ?? 0) >= policy.max_agents) {
         return errorResponse(requestId, "roster_full", "The agent limit is already reached.");
       }

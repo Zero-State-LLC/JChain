@@ -18,6 +18,8 @@ const INSERT_BATCH = 30;
 const ID_BATCH = 80;
 // A Post under legal hold (C-13 item 5) is never exported, whatever its state.
 const EXPORTABLE_POST = `${VISIBLE_POST} AND posts.legal_hold = 0`;
+// An export runs inside the request. Above this many Posts on the Board it is state_conflict.
+export const EXPORT_MAX_POSTS = 5000;
 
 type Purpose = "archive" | "training";
 
@@ -56,6 +58,12 @@ async function createExport(c: Ctx): Promise<Response> {
     return errorResponse(requestId, "training_export_blocked");
   }
 
+  const size = await c.env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM posts JOIN threads ON threads.id = posts.thread_id WHERE threads.board_id = ?",
+  ).bind(request.boardId).first<{ n: number }>();
+  if (Number(size?.n ?? 0) > EXPORT_MAX_POSTS) {
+    return errorResponse(requestId, "state_conflict", `This board has more than ${EXPORT_MAX_POSTS} Posts, the most an export runs in one request.`);
+  }
   const rows = await visiblePosts(c.env.DB, request.boardId);
   const ancestry = await visibleAncestry(c.env.DB, rows.map((row) => row.id));
   const exportedAt = utcSeconds();

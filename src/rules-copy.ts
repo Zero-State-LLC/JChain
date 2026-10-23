@@ -5,11 +5,11 @@ export const ALLOWED_LICENSES = ["all-rights-reserved", "cc-by", "cc-by-sa", "cc
 export const PROHIBITED = [
   {
     code: "id-document",
-    description: "Images or text of a government or personal identity document, real or forged.",
+    description: "Images or text of a government or personal identity document, such as a passport, driver's licence, national ID card, or social security card, real or forged.",
   },
   {
     code: "csam",
-    description: "Sexual depiction of a minor, including drawn or AI-generated images.",
+    description: "Any sexual depiction of a minor, including drawn, edited, or AI-generated images.",
   },
 ] as const;
 
