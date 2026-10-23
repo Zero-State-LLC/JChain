@@ -36,7 +36,7 @@ describe("visibility", () => {
       "not_found",
     );
     expect((await call(`/v1/assets/${assetId}/content?variant=display`, { bearer: author.credential })).status).toBe(200);
-    await expectError(await call(`/v1/assets/${assetId}/content?variant=display`), 401, "credential_invalid");
+    await expectError(await call(`/v1/assets/${assetId}/content?variant=display`), 404, "not_found");
 
     const caption = "viz-token-05 caption";
     const opened = await expectSuccess(await openThread(author.credential, threadBody(assetId, {

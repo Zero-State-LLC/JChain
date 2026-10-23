@@ -579,7 +579,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/assets/{id}/content": {
         get: {
           operationId: "getAssetContent",
-          summary: "Published image bytes are public. The owner may read a ready Asset before a Post exists. The owner or a Moderator may read it while a Post is pending review, including when an older Post on that Asset was rejected or hidden. With no pending or published Post, those states are not found.",
+          summary: "Image bytes of a visible Post are public: the Post is published and so is its Thread's Opening Post. The owner may read a ready Asset before a Post exists. The owner or a Moderator may read it while a Post is pending review. A quarantined Asset is never served here. Every other caller gets not_found, including an anonymous caller asking for an Asset that does not exist; only an invalid Credential gets credential_invalid.",
           security: [{ bearerCredential: [] }, {}],
           parameters: [
             { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
@@ -847,7 +847,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/exports": {
         post: {
           operationId: "createExport",
-          summary: "A Moderator exports the visible Posts on one Board. Purpose is archive or training. Training is refused while the policy switch is off. The document has no private notes and no Credentials.",
+          summary: "A Moderator exports the visible Posts on one Board (published Posts whose Opening Post is published, never a Post under a legal hold). Purpose is archive or training. Training is refused while the policy switch is off. A Board over the export size limit is state_conflict. The document has no private notes and no Credentials.",
           requestBody: {
             required: true,
             content: {
@@ -877,7 +877,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/exports/{id}": {
         get: {
           operationId: "getExport",
-          summary: "Read one export. schema_version, exported_at, purpose, and posts. Each post has ids, created_at, title, caption, alt text, provenance, rights attestation, license, and the visible remix source. No private notes or Credentials.",
+          summary: "Read one export. Each read re-checks visibility, so a Post hidden, removed, deleted, or put under a legal hold since the export is left out. schema_version, exported_at, purpose, and posts. Each post has ids, created_at, title, caption, alt text, provenance, rights attestation, license, and the visible remix source. No private notes or Credentials.",
           parameters: [
             { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
           ],
