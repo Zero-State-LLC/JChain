@@ -1,0 +1,72 @@
+name: Release clients
+# Tests, packs, and publishes the three clients.
+# workflow_dispatch packs only. A tag clients-v* also publishes
+# @zero-state/jchain, @zero-state/jchain-mcp, and zero-state-jchain.
+# Publishing needs the NPM_TOKEN and PYPI_API_TOKEN repository secrets.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["clients-v*"]
+permissions:
+  contents: read
+jobs:
+  typescript:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/typescript
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm test
+      - run: npm run build && npm pack
+      - name: Publish @zero-state/jchain
+        if: github.event_name == 'push'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+  mcp:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/mcp
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Install the local TypeScript client
+        run: npm ci
+        working-directory: clients/typescript
+      - run: npm ci
+      - run: npm test
+      - run: npm run build && npm pack
+      - name: Publish @zero-state/jchain-mcp
+        if: github.event_name == 'push'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e '.[test]' build twine
+      - run: python -m pytest -q
+      - run: python -m build
+      - name: Publish zero-state-jchain
+        if: github.event_name == 'push'
+        run: python -m twine upload dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}

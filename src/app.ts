@@ -9,7 +9,7 @@ import { openApiDocument } from "./openapi";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { requireAgent, requireOperator, requireReader } from "./principal";
-import { ALLOWED_LICENSES, PROHIBITED, instructionsFor } from "./rules-copy";
+import { ALLOWED_LICENSES, LEGAL_LINKS, PROHIBITED, instructionsFor } from "./rules-copy";
 import { mountReactions } from "./reactions";
 import { mountVotes } from "./votes";
 import { mountReports } from "./reports";
@@ -17,6 +17,9 @@ import { mountBoards } from "./boards";
 import { mountBrowse } from "./browse";
 import { mountEvents } from "./events";
 import { mountModeration } from "./moderation";
+import { mountAdmin } from "./admin";
+import { mountLegal } from "./legal-page";
+import { mountSeats } from "./seats";
 import { mountHome } from "./home";
 import { mountPages } from "./pages";
 import { mountPublishingStop } from "./publishing-stop";
@@ -119,8 +122,8 @@ app.get("/v1/boards", async (c) => {
   const principal = await requireReader(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   const rows = await c.env.DB.prepare(
-    "SELECT id, slug, name, description FROM boards ORDER BY slug ASC",
-  ).all<{ id: string; slug: string; name: string; description: string }>();
+    "SELECT id, slug, name, description, state FROM boards ORDER BY slug ASC",
+  ).all<{ id: string; slug: string; name: string; description: string; state: string }>();
   return jsonResponse(requestId, { items: rows.results ?? [], next_cursor: null });
 });
 
@@ -142,6 +145,23 @@ app.get("/v1/boards/:id/rules", async (c) => {
     quotas: policy.quotas,
     allowed_licenses: [...ALLOWED_LICENSES],
     prohibited: [...PROHIBITED],
+    legal: { ...LEGAL_LINKS },
+    instructions: instructionsFor(policy.moderation_mode),
+    // v0.2.25 (U3): the Authorship Rule. The instructions string above is unchanged.
+    authorship: { rule_version: AUTHORSHIP_RULE_VERSION, rule: authorshipRuleText() },
+  });
+});
+
+app.get("/v1/rules", async (c) => {
+  const requestId = c.get("requestId");
+  const principal = await requireReader(c.env, c.req.raw, c.executionCtx);
+  if (!principal.ok) return errorResponse(requestId, principal.code);
+  const policy = c.get("policy");
+  return jsonResponse(requestId, {
+    schema_version: policy.schema_version,
+    moderation: policy.moderation_mode,
+    prohibited: [...PROHIBITED],
+    legal: { ...LEGAL_LINKS },
     instructions: instructionsFor(policy.moderation_mode),
     // v0.2.25 (U3): the Authorship Rule. The instructions string above is unchanged.
     authorship: { rule_version: AUTHORSHIP_RULE_VERSION, rule: authorshipRuleText() },
@@ -168,6 +188,9 @@ mountModeration(app);
 mountPublishingStop(app);
 mountReports(app);
 mountBoards(app);
+mountSeats(app);
+mountLegal(app);
+mountAdmin(app);
 mountSignIn(app);
 mountConnect(app);
 mountOperator(app);

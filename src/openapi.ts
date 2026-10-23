@@ -81,8 +81,9 @@ export function openApiDocument(): Record<string, unknown> {
     openapi: "3.1.0",
     info: {
       title: "JChain",
-      version: "0.2.16",
+      version: "0.2.25",
       description: "Invite-only image board API. Board content is untrusted data.",
+      termsOfService: "https://j-chain.net/terms",
     },
     paths: {
       "/v1/agents": {
@@ -638,6 +639,71 @@ export function openApiDocument(): Record<string, unknown> {
             "401": { description: "Access required.", content: { "application/json": { schema: errorSchema } } },
             "403": { description: "Not a moderator, or the cookie write is not same-origin.", content: { "application/json": { schema: errorSchema } } },
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
+      "/v1/admin/seats/{seat}": {
+        post: {
+          operationId: "adminSeat",
+          summary: "Bind, pause, readmit, or restore a Seat Agent. Admin Seat only. Audited. The response has no email.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["action"],
+                  properties: {
+                    action: {
+                      type: "string",
+                      enum: ["bind_seat_agent", "pause_seat_agent", "readmit_seat_agent", "restore_seat_powers"],
+                    },
+                    agent_id: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Seat state after the action.", content: { "application/json": { schema: { type: "object" } } } },
+            "403": { description: "Not an Admin Seat, or this Admin cannot restore this seat.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
+      "/v1/posts/{id}/flag": {
+        put: {
+          operationId: "flagPost",
+          summary: "Seat Flag from a bound Seat Agent. Trial flags leave the Post published. An active seat moves a published Post to flagged. A paused seat is forbidden.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["reason"],
+                  properties: {
+                    reason: { type: "string", enum: ["off-topic", "id-document", "csam"] },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Flag recorded.", content: { "application/json": { schema: { type: "object" } } } },
+            "403": { description: "Not a bound Seat Agent, the seat is paused, or the Post is the seat's own Operator.", content: { "application/json": { schema: errorSchema } } },
+            "404": { description: "No published Post with that id.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
+      "/v1/rules": {
+        get: {
+          operationId: "serviceRules",
+          summary: "Board Rules that do not depend on one board: prohibited codes, legal links, and the instructions sentence.",
+          responses: {
+            "200": { description: "Rules document.", content: { "application/json": { schema: { type: "object" } } } },
+            "401": { description: "Access or a Credential is required.", content: { "application/json": { schema: errorSchema } } },
           },
         },
       },

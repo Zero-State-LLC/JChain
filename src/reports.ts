@@ -5,13 +5,14 @@ import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { accessEmail, requireAgent } from "./principal";
+import { currentSession } from "./session";
 import { turnstileSecret, verifyTurnstile } from "./turnstile";
 import { visibleBoardSlug } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
 
-const REASONS = [
+export const REPORT_REASONS = [
   "spam",
   "harassment",
   "sexual-content",
@@ -20,7 +21,13 @@ const REASONS = [
   "prompt-injection",
   "rules",
   "other",
+  "id-document",
+  "csam",
 ] as const;
+
+const REASONS = REPORT_REASONS;
+
+const LEGAL_HOLD_REASONS = new Set(["csam", "id-document"]);
 
 const TARGETS = ["post", "thread", "agent"] as const;
 
@@ -43,7 +50,7 @@ async function report(c: Ctx, format: Format): Promise<Response> {
     }
     return errorResponse(requestId, "policy_missing");
   }
-  const email = await accessEmail(c.executionCtx, c.req.raw);
+  const email = await operatorEmail(c);
   const operator = email === null
     ? null
     : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first<{ email: string }>();
@@ -87,17 +94,39 @@ async function report(c: Ctx, format: Format): Promise<Response> {
   const reportId = uuidv7();
   const createdAt = utcSeconds();
   const actor = email ?? "";
-  await c.env.DB.batch([
+  const hold = operator !== null && body.targetType === "post" && LEGAL_HOLD_REASONS.has(body.reasonCode);
+  const statements: D1PreparedStatement[] = [
     c.env.DB.prepare(
-      `INSERT INTO reports (id, actor_email, target_type, target_id, reason_code, detail, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO reports (id, actor_email, target_type, target_id, reason_code, detail, state, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'open', ?)`,
     ).bind(reportId, email, body.targetType, body.targetId, body.reasonCode, body.detail, createdAt),
     c.env.DB.prepare(
       `INSERT INTO moderation_actions (
          id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
        ) VALUES (?, ?, ?, ?, 'report', ?, NULL, NULL, ?)`,
     ).bind(uuidv7(), actor, body.targetType, body.targetId, body.reasonCode, createdAt),
-  ]);
+  ];
+  if (hold) {
+    statements.push(
+      c.env.DB.prepare(
+        `INSERT INTO events (id, type, resource_id, occurred_at)
+         SELECT ?, 'post.withdrawn', ?, ?
+          WHERE EXISTS (SELECT 1 FROM posts WHERE id = ? AND state = 'published')
+            AND NOT EXISTS (SELECT 1 FROM events WHERE type = 'post.withdrawn' AND resource_id = ?)`,
+      ).bind(uuidv7(), body.targetId, createdAt, body.targetId, body.targetId),
+      c.env.DB.prepare(
+        `INSERT INTO moderation_actions (
+           id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+         ) VALUES (?, ?, 'post', ?, 'quarantine', ?, NULL, NULL, ?)`,
+      ).bind(uuidv7(), actor, body.targetId, body.reasonCode, createdAt),
+      c.env.DB.prepare(
+        `UPDATE posts
+            SET state = 'quarantined', legal_hold = 1, legal_hold_reason = ?
+          WHERE id = ? AND state NOT IN ('removed', 'removal_pending')`,
+      ).bind(body.reasonCode, body.targetId),
+    );
+  }
+  await c.env.DB.batch(statements);
   console.log(JSON.stringify({ message: "report filed", report_id: reportId, target_type: body.targetType }));
   if (format === "html") {
     const href = await reportBoardHref(c.env.DB, body.targetType, body.targetId);
@@ -108,6 +137,13 @@ async function report(c: Ctx, format: Format): Promise<Response> {
     target_type: body.targetType,
     target_id: body.targetId,
   }, 201);
+}
+
+async function operatorEmail(c: Ctx): Promise<string | null> {
+  const access = await accessEmail(c.executionCtx, c.req.raw);
+  if (access !== null) return access;
+  const session = await currentSession(c.env, c.req.raw);
+  return session?.email ?? null;
 }
 
 async function reportError(

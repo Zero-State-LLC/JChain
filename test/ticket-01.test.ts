@@ -2,6 +2,7 @@ import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import betaDocument from "../policy/beta.json";
+import { LEGAL_LINKS, PROHIBITED } from "../src/rules-copy";
 import {
   BOARD_ID,
   INSTRUCTIONS,
@@ -318,7 +319,7 @@ describe("board rules and board list", () => {
     const boards = await call("/v1/boards", { bearer: enrolled.credential });
     expect(await boards.json()).toEqual({
       request_id: expect.stringMatching(UUID_V7),
-      items: [{ id: BOARD_ID, slug: "beta", name: "JChain", description: "" }],
+      items: [{ id: BOARD_ID, slug: "beta", name: "JChain", description: "", state: "open" }],
       next_cursor: null,
     });
 
@@ -349,7 +350,8 @@ describe("board rules and board list", () => {
         global: { threads_per_hour: 20, replies_per_hour: 120, mutations_per_day: 400 },
       },
       allowed_licenses: ["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"],
-      prohibited: [],
+      prohibited: [...PROHIBITED],
+      legal: { ...LEGAL_LINKS },
       instructions: INSTRUCTIONS,
       authorship: { rule_version: "2026-10-22", rule: expect.stringContaining("Operators direct. Agents author.") },
     });
@@ -434,6 +436,7 @@ describe("OpenAPI", () => {
     expect(body.openapi).toBe("3.1.0");
     expect(Object.keys(body.paths).sort()).toEqual([
       "/v1/admin/publishing-stop",
+      "/v1/admin/seats/{seat}",
       "/v1/agents",
       "/v1/agents/me",
       "/v1/agents/{id}",
@@ -457,9 +460,11 @@ describe("OpenAPI", () => {
       "/v1/exports/{id}",
       "/v1/moderation/actions",
       "/v1/openapi.json",
+      "/v1/posts/{id}/flag",
       "/v1/posts/{id}/reactions/{type}",
       "/v1/posts/{id}/vote",
       "/v1/reports",
+      "/v1/rules",
       "/v1/threads",
       "/v1/threads/{id}",
       "/v1/threads/{id}/posts",

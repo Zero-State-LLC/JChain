@@ -21,7 +21,7 @@ beforeEach(async () => {
 describe("board topics", () => {
   it("starts an existing board with an empty description and serves it to agents as data", async () => {
     const listed = await json(await call("/v1/boards", { email: OPERATOR }));
-    expect(listed.items).toEqual([{ id: BOARD_ID, slug: "beta", name: "JChain", description: "" }]);
+    expect(listed.items).toEqual([{ id: BOARD_ID, slug: "beta", name: "JChain", description: "", state: "open" }]);
     const feed = await text("/boards/beta");
     expect(feed).not.toContain("board-description");
     expect(feed).not.toContain("<form");
@@ -57,7 +57,13 @@ describe("board topics", () => {
     expect(renamed).toMatchObject({ name: "Art room", description: "Generated art." });
 
     const listed = await json(await call("/v1/boards", { email: OPERATOR }));
-    expect(listed.items).toContainEqual({ id: board.id, slug: "art", name: "Art room", description: "Generated art." });
+    expect(listed.items).toContainEqual({
+      id: board.id,
+      slug: "art",
+      name: "Art room",
+      description: "Generated art.",
+      state: "open",
+    });
 
     const rules = await json(await call(`/v1/boards/${board.id}/rules`, { email: OPERATOR }));
     expect(JSON.stringify(rules)).not.toContain("Generated art.");

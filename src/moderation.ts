@@ -7,11 +7,12 @@ import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
+import { settleSeatFlags } from "./seats";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
 
-const REASONS = [
+export const MODERATION_REASONS = [
   "spam",
   "harassment",
   "sexual-content",
@@ -20,10 +21,18 @@ const REASONS = [
   "prompt-injection",
   "rules",
   "other",
+  "id-document",
+  "csam",
 ] as const;
 
-// Prohibited codes arrive with PR #59. Until then every Moderator block has prohibited 0.
-const PROHIBITED_REASONS = new Set(["identification-document", "child-sexual-abuse-material"]);
+const REASONS = MODERATION_REASONS;
+
+const PROHIBITED_REASONS = new Set([
+  "identification-document",
+  "child-sexual-abuse-material",
+  "id-document",
+  "csam",
+]);
 
 type Format = "json" | "html";
 
@@ -109,15 +118,19 @@ async function movePost(
   const actionId = uuidv7();
   // One post.published and one post.withdrawn per Post. Restore keeps the publication
   // row and deletes the withdrawal so a later hide can insert it again.
+  const fromFlagged = post.state === "flagged";
   let publishedEventId: string | null = null;
-  if (name === "approve") publishedEventId = uuidv7();
-  if (name === "restore") {
+  if (name === "approve" && !fromFlagged) publishedEventId = uuidv7();
+  if (name === "restore" || (name === "approve" && fromFlagged)) {
     const existing = await c.env.DB.prepare(
       "SELECT id FROM events WHERE type = 'post.published' AND resource_id = ?",
     ).bind(action.targetId).first<{ id: string }>();
     publishedEventId = existing?.id ?? null;
   }
-  const writeWithdrawn = name === "hide" || (name === "remove" && post.state === "published");
+  const wasPublic = post.state === "published" || post.state === "flagged";
+  const writeWithdrawn = name === "hide"
+    || (name === "quarantine" && wasPublic)
+    || (name === "remove" && wasPublic);
   const withdrawnEventId = writeWithdrawn ? uuidv7() : null;
   const auditEventId = publishedEventId ?? withdrawnEventId;
 
@@ -175,6 +188,7 @@ async function movePost(
   const audited = Number(results[auditIndex]?.meta.changes ?? 0) === 1;
   const recorded = writtenIndex === null || Number(results[writtenIndex]?.meta.changes ?? 0) === 1;
   if (!updated || !audited || !recorded) return moderationError(requestId, format, "state_conflict");
+  await settleSeatFlags(c.env.DB, action.targetId, name, occurredAt);
   const entry: Record<string, string> = { message: logMessage(name), post_id: action.targetId };
   if (publishedEventId !== null) entry.event_id = publishedEventId;
   console.log(JSON.stringify(entry));
@@ -334,12 +348,12 @@ function tableFor(targetType: string): string {
   return "assets";
 }
 
-type MoveName = "approve" | "reject" | "hide" | "restore" | "remove";
+type MoveName = "approve" | "reject" | "hide" | "restore" | "remove" | "quarantine";
 type ThreadMove = "lock" | "unlock" | "archive";
 type AgentMove = "suspend_agent" | "resume_agent";
 
 function isMove(value: string): value is MoveName {
-  return value === "approve" || value === "reject" || value === "hide" || value === "restore" || value === "remove";
+  return value === "approve" || value === "reject" || value === "hide" || value === "restore" || value === "remove" || value === "quarantine";
 }
 
 function isThreadMove(value: string): value is ThreadMove {
@@ -351,17 +365,22 @@ function isAgentMove(value: string): value is AgentMove {
 }
 
 function legal(name: MoveName, state: string, threadState: string, assetReady: boolean): boolean {
-  if (name === "approve") return state === "pending_review" && threadState === "open" && assetReady;
+  if (name === "approve") {
+    if (state === "flagged") return true;
+    return state === "pending_review" && threadState === "open" && assetReady;
+  }
   if (name === "reject") return state === "pending_review";
   if (name === "hide") return state === "published";
-  if (name === "remove") return state === "published" || state === "hidden" || state === "rejected";
-  return state === "hidden" && assetReady;
+  if (name === "remove") return state === "published" || state === "hidden" || state === "rejected" || state === "flagged";
+  if (name === "quarantine") return state === "flagged" || state === "published" || state === "hidden";
+  return (state === "hidden" || state === "flagged") && assetReady;
 }
 
 function destination(name: MoveName): string {
   if (name === "reject") return "rejected";
   if (name === "hide") return "hidden";
   if (name === "remove") return "removal_pending";
+  if (name === "quarantine") return "quarantined";
   return "published";
 }
 
@@ -370,6 +389,7 @@ function logMessage(name: MoveName): string {
   if (name === "reject") return "post rejected";
   if (name === "hide") return "post hidden";
   if (name === "remove") return "post removal pending";
+  if (name === "quarantine") return "post quarantined";
   return "post restored";
 }
 
@@ -393,20 +413,24 @@ function threadLog(name: ThreadMove): string {
 
 function guard(name: MoveName): string {
   if (name === "approve") {
-    return `posts.id = ? AND posts.state = 'pending_review'
-    AND EXISTS (SELECT 1 FROM threads WHERE threads.id = posts.thread_id AND threads.state = 'open')
-    AND (posts.asset_id IS NULL OR EXISTS (
-      SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
-    ))`;
+    return `posts.id = ? AND (
+      posts.state = 'flagged'
+      OR (posts.state = 'pending_review'
+        AND EXISTS (SELECT 1 FROM threads WHERE threads.id = posts.thread_id AND threads.state = 'open')
+        AND (posts.asset_id IS NULL OR EXISTS (
+          SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
+        )))
+    )`;
   }
   if (name === "restore") {
-    return `posts.id = ? AND posts.state = 'hidden'
+    return `posts.id = ? AND posts.state IN ('hidden', 'flagged')
     AND (posts.asset_id IS NULL OR EXISTS (
       SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
     ))`;
   }
   if (name === "hide") return "posts.id = ? AND posts.state = 'published'";
-  if (name === "remove") return "posts.id = ? AND posts.state IN ('published', 'hidden', 'rejected')";
+  if (name === "remove") return "posts.id = ? AND posts.state IN ('published', 'hidden', 'rejected', 'flagged')";
+  if (name === "quarantine") return "posts.id = ? AND posts.state IN ('flagged', 'published', 'hidden')";
   return "posts.id = ? AND posts.state = 'pending_review'";
 }
 

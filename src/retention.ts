@@ -20,23 +20,34 @@ const HOUR_MS = 60 * 60 * 1000;
 
 type RetentionEnv = Pick<Env, "DB" | "MEDIA" | "POLICY" | "QUOTA">;
 
+export type RetentionAlert = {
+  metric: string;
+  age_seconds: number;
+  count: number;
+};
+
 export type RetentionResult = {
   ran: boolean;
   audit_redacted: number;
   reports_redacted: number;
   assets_deleted: number;
+  alerts: RetentionAlert[];
 };
+
+const UPLOAD_ALERT_SECONDS = 300;
+const REVIEW_ALERT_SECONDS = 3600;
 
 export async function runRetention(env: RetentionEnv, now: number): Promise<RetentionResult> {
   const policy = parsePolicy(typeof env.POLICY === "string" ? env.POLICY : undefined);
   if (policy === null) {
     console.log(JSON.stringify({ message: "retention skipped", reason: "policy_missing" }));
-    return { ran: false, audit_redacted: 0, reports_redacted: 0, assets_deleted: 0 };
+    return { ran: false, audit_redacted: 0, reports_redacted: 0, assets_deleted: 0, alerts: [] };
   }
   const audit = await redactAudit(env.DB, policy, now);
   const assets = await deleteExpiredAssets(env, policy, now);
   const signIns = await purgeSignIns(env.DB, policy, now, mailerOf(env as Env) !== null && policy.auth !== undefined);
-  const result = { ran: true, ...audit, assets_deleted: assets };
+  const alerts = await breachAlerts(env.DB, now);
+  const result = { ran: true, ...audit, assets_deleted: assets, alerts };
   console.log(JSON.stringify({ message: "retention run", ...result, sign_ins_deleted: signIns }));
   return result;
 }
@@ -99,6 +110,9 @@ async function deleteExpiredAssets(env: RetentionEnv, policy: Policy, now: numbe
               (SELECT MAX(created_at) FROM moderation_actions
                 WHERE target_type = 'asset' AND target_id = assets.id AND action = 'quarantine_asset'),
               assets.created_at) < ?)
+      AND NOT EXISTS (
+        SELECT 1 FROM posts WHERE posts.asset_id = assets.id AND posts.legal_hold = 1
+      )
       ORDER BY created_at, id
       LIMIT ?`,
   ).bind(reservationCutoff, keepCutoff, legacyRejectedCutoff, keepCutoff, RETENTION_BATCH).all<{ id: string }>();
@@ -130,6 +144,46 @@ async function deleteExpiredAssets(env: RetentionEnv, policy: Policy, now: numbe
 // v0.2.23: ended Sessions, Sign-in Links, and connect requests. Only a database
 // that lacks those tables (migrations 0015 or 0016 not applied yet) skips this
 // step. Any other failure propagates, so the cron run fails and is retried.
+// #77: one structured line per breached age, with no content and no tokens.
+async function breachAlerts(db: D1Database, now: number): Promise<RetentionAlert[]> {
+  const alerts: RetentionAlert[] = [];
+  const upload = await ageOf(db, "SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM assets WHERE state IN ('uploaded', 'validating')");
+  const uploadAlert = alertFor("upload_queue_age", upload, now, UPLOAD_ALERT_SECONDS);
+  if (uploadAlert !== null) alerts.push(uploadAlert);
+  const review = await ageOf(db, "SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM posts WHERE state = 'pending_review'");
+  const reviewAlert = alertFor("moderation_queue_age", review, now, REVIEW_ALERT_SECONDS);
+  if (reviewAlert !== null) alerts.push(reviewAlert);
+  for (const alert of alerts) {
+    console.warn(JSON.stringify({
+      level: "warn",
+      message: "alert threshold breached",
+      metric: alert.metric,
+      age_seconds: alert.age_seconds,
+      count: alert.count,
+    }));
+  }
+  return alerts;
+}
+
+async function ageOf(db: D1Database, sql: string): Promise<{ n: number; oldest: string | null }> {
+  const row = await db.prepare(sql).first<{ n: number; oldest: string | null }>();
+  return { n: Number(row?.n ?? 0), oldest: row?.oldest ?? null };
+}
+
+function alertFor(
+  metric: string,
+  row: { n: number; oldest: string | null },
+  now: number,
+  limitSeconds: number,
+): RetentionAlert | null {
+  if (row.n < 1 || row.oldest === null) return null;
+  const parsed = Date.parse(row.oldest);
+  if (Number.isNaN(parsed)) return null;
+  const age = Math.floor((now - parsed) / 1000);
+  if (age <= limitSeconds) return null;
+  return { metric, age_seconds: age, count: row.n };
+}
+
 async function purgeSignIns(db: D1Database, policy: Policy, now: number, enabled: boolean): Promise<number> {
   try {
     return (await purgeEndedSignIns(db, policy, now, enabled)) + (await purgeConnections(db, now));

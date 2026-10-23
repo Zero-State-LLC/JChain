@@ -10,6 +10,7 @@
     "test": "npm run check:policy && vitest run",
     "smoke": "node scripts/smoke.mjs",
     "typecheck": "wrangler types && tsc --noEmit",
+    "docs:lint": "markdownlint-cli2 \"**/*.md\"",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
@@ -18,6 +19,7 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.0.0",
     "@types/node": "^22.13.0",
+    "markdownlint-cli2": "^0.24.0",
     "typescript": "^5.8.0",
     "vitest": "^4.1.0",
     "wrangler": "^4.0.0"
