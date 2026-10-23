@@ -323,4 +323,48 @@ describe("AT-46 rejected_at and r2_bytes refunds", () => {
     expect(await refundAssetBytes(env, id, 70)).toBe(false);
     expect(await r2Used()).toBe(430);
   });
+
+  it("purges expired idempotency_keys, purges events older than audit_log_days, and sweeps stuck pending post_scans (#119)", async () => {
+    const expiredAt = utcSeconds(new Date(NOW - 60_000));
+    const freshAt = utcSeconds(new Date(NOW + 3_600_000));
+    const oldEventAt = utcSeconds(new Date(NOW - 91 * 24 * 60 * 60 * 1000));
+    const recentEventAt = utcSeconds(new Date(NOW - 10 * 24 * 60 * 60 * 1000));
+    const stuckScanAt = utcSeconds(new Date(NOW - 20 * 60 * 1000));
+    const freshScanAt = utcSeconds(new Date(NOW - 5 * 60 * 1000));
+    const oldEventId = uuidv7();
+    const recentEventId = uuidv7();
+    const stuckPostId = uuidv7();
+    const freshPostId = uuidv7();
+
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO idempotency_keys (agent_id, route, idempotency_key, body_hash, status, response_json, expires_at)
+         VALUES ('a1', 'POST /v1/threads', 'k-expired', 'h1', 201, '{}', ?),
+                ('a1', 'POST /v1/threads', 'k-fresh', 'h2', 201, '{}', ?)`,
+      ).bind(expiredAt, freshAt),
+      env.DB.prepare(
+        `INSERT INTO events (id, type, resource_id, occurred_at)
+         VALUES (?, 'post.published', ?, ?),
+                (?, 'post.published', ?, ?)`,
+      ).bind(oldEventId, stuckPostId, oldEventAt, recentEventId, freshPostId, recentEventAt),
+      env.DB.prepare(
+        `INSERT INTO post_scans (post_id, result, hidden, published_at)
+         VALUES (?, 'pending', 0, ?),
+                (?, 'pending', 0, ?)`,
+      ).bind(stuckPostId, stuckScanAt, freshPostId, freshScanAt),
+    ]);
+
+    await runRetention(env, NOW);
+
+    const keys = await env.DB.prepare("SELECT idempotency_key FROM idempotency_keys").all<{ idempotency_key: string }>();
+    expect((keys.results ?? []).map((r) => r.idempotency_key)).toEqual(["k-fresh"]);
+
+    const events = await env.DB.prepare("SELECT id FROM events WHERE id IN (?, ?)").bind(oldEventId, recentEventId).all<{ id: string }>();
+    expect((events.results ?? []).map((r) => r.id)).toEqual([recentEventId]);
+
+    const stuck = await env.DB.prepare("SELECT result FROM post_scans WHERE post_id = ?").bind(stuckPostId).first<{ result: string }>();
+    const fresh = await env.DB.prepare("SELECT result FROM post_scans WHERE post_id = ?").bind(freshPostId).first<{ result: string }>();
+    expect(stuck?.result).toBe("unscanned");
+    expect(fresh?.result).toBe("pending");
+  });
 });
