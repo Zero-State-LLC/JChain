@@ -630,10 +630,18 @@ describe("seat flags (AT-42, AT-43)", () => {
       policy: POSTPUBLISH,
     });
     expect(appealed.status).toBe(201);
+    const logged: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((line?: unknown) => {
+      logged.push(String(line));
+    });
     await expectJson(await call("/v1/moderation/actions", {
       email: STAFF,
       body: { target_type: "post", target_id: seeded.postId, action: "restore", reason_code: "rules" },
     }), 200);
+    vi.restoreAllMocks();
+    // NFR-10: the decision on a seat hide logs its hide-to-decision time.
+    const decided = logged.filter((line) => line.includes('"hide decided"')).map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(decided).toEqual([expect.objectContaining({ post_id: seeded.postId, action: "restore", hidden_by: "seat_agents" })]);
     const flags = await env.DB.prepare("SELECT outcome FROM seat_flags WHERE post_id = ? ORDER BY seat")
       .bind(seeded.postId).all<{ outcome: string }>();
     expect(flags.results).toEqual([{ outcome: "overturned" }, { outcome: "overturned" }]);

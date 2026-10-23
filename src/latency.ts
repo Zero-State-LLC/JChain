@@ -10,8 +10,8 @@ export function millisBetween(from: string | null | undefined, to: string | null
 
 type HideState = { state: string; hidden_by: string | null };
 
-// When a Moderator decides on a Post that the Seat Agents hid (state 'flagged') or a scan hid
-// (state 'hidden', hidden_by 'scan'), log how long it waited since the original hide: the latest
+// When a Moderator decides on a Post that the Seat Agents hid (hidden_by 'seat_agents', or the legacy
+// state 'flagged') or a scan hid (hidden_by 'scan'), log how long it waited since the original hide: the latest
 // post.withdrawn or post.flagged Event for the Post at or before the decision. `prior` is the Post
 // as it was before the decision; when it is omitted (a decision that changes no state, such as an
 // appeal uphold) the Post is read now. A failure here never touches the decision.
@@ -25,9 +25,10 @@ export async function logHideToDecision(
   try {
     const post = prior ?? await db.prepare("SELECT state, hidden_by FROM posts WHERE id = ?").bind(postId).first<HideState>();
     if (!post) return;
+    // A Seat Flag hide is hidden_by seat_agents since the C-12b realignment; 'flagged' is legacy.
     const hiddenBy = post.state === "flagged"
       ? "seat_agents"
-      : post.state === "hidden" && post.hidden_by === "scan" ? "scan" : null;
+      : post.state === "hidden" && (post.hidden_by === "scan" || post.hidden_by === "seat_agents") ? post.hidden_by : null;
     if (hiddenBy === null) return;
     const row = await db.prepare(
       `SELECT MAX(occurred_at) AS at FROM events
