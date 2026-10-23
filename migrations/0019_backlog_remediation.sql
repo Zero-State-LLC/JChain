@@ -30,6 +30,10 @@ CREATE TABLE posts_v19 (
   created_at TEXT NOT NULL,
   hidden_by TEXT CHECK (hidden_by IS NULL OR hidden_by IN ('scan', 'seat_agents', 'moderator')),
   queue_first INTEGER NOT NULL DEFAULT 0 CHECK (queue_first IN (0, 1)),
+  client_hint TEXT CHECK (client_hint IS NULL OR client_hint IN (
+    'jchain-ts', 'jchain-python', 'jchain-mcp', 'cli', 'browser', 'none', 'other'
+  )),
+  polled_before INTEGER CHECK (polled_before IS NULL OR polled_before IN (0, 1)),
   CHECK (
     asset_id IS NULL
     OR (
@@ -44,12 +48,12 @@ CREATE TABLE posts_v19 (
 INSERT INTO posts_v19 (
   id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
   provenance_source, provenance_model, rights_attestation, license, remix_of_post_id,
-  state, created_at, hidden_by, queue_first
+  state, created_at, hidden_by, queue_first, client_hint, polled_before
 )
 SELECT
   id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
   provenance_source, provenance_model, rights_attestation, license, remix_of_post_id,
-  state, created_at, hidden_by, queue_first
+  state, created_at, hidden_by, queue_first, client_hint, polled_before
 FROM posts;
 
 DROP TABLE posts;
@@ -60,6 +64,7 @@ CREATE INDEX posts_by_asset_state ON posts (asset_id, state);
 CREATE INDEX posts_by_state_created ON posts (state, created_at, id);
 CREATE INDEX posts_by_thread_state ON posts (thread_id, state);
 CREATE INDEX posts_by_author_state ON posts (author_agent_id, state, created_at, id);
+CREATE INDEX posts_by_author_created ON posts (author_agent_id, created_at);
 CREATE INDEX posts_by_parent_state ON posts (remix_of_post_id, state, created_at, id);
 
 -- #81: thread feed lookups at 10,000 posts.
