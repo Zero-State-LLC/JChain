@@ -1,6 +1,7 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ROSTER_COUNT } from "../src/agent-admin";
 import { verifyTurnstile } from "../src/turnstile";
 import { OPERATOR, OPERATOR_ID, agentCount, call, clearConnectQuota, resetAndSeed } from "./harness";
 
@@ -51,7 +52,7 @@ function raceRoster(db: D1Database): D1Database {
       }
       return (sql: string) => {
         const statement = target.prepare(sql);
-        if (!armed || sql !== "SELECT COUNT(*) AS n FROM agents") return statement;
+        if (!armed || sql !== ROSTER_COUNT) return statement;
         const fake = {
           bind: () => fake,
           first: async () => {
@@ -154,6 +155,64 @@ describe("roster cap under a stale count", () => {
     const row = await env.DB.prepare("SELECT state FROM agent_connections").first<{ state: string }>();
     expect(row?.state).toBe("approved");
     expect(await agentCount()).toBe(1);
+  });
+});
+
+describe("max_agents counts the roster, not retired Agents", () => {
+  it("enrolls past a retired Agent and counts only non-retired Agents", async () => {
+    const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    await env.DB.prepare(
+      `INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at)
+       VALUES (?, 'Gone', 'm', 'retired', ?, ?)`,
+    ).bind(RACER_ID, OPERATOR_ID, stamp).run();
+    const first = await call("/v1/agents", {
+      email: OPERATOR,
+      env: envWith(env.DB, 1),
+      body: { display_name: "Ada", declared_model: "m" },
+    });
+    expect(first.status).toBe(201);
+    const second = await call("/v1/agents", {
+      email: OPERATOR,
+      env: envWith(env.DB, 1),
+      body: { display_name: "Bea", declared_model: "m" },
+    });
+    expect(second.status).toBe(403);
+    expect(await second.json()).toMatchObject({ error: { code: "forbidden" } });
+    expect(await agentCount()).toBe(2);
+  });
+
+  it("answers forbidden, not roster_full, when the Operator cap refuses the insert", async () => {
+    // The pre-checks pass; then the Operator is suspended before the guarded insert runs.
+    let armed = false;
+    const db = new Proxy(env.DB, {
+      get(target, property, receiver) {
+        if (property === "prepare") {
+          return (sql: string) => {
+            if (sql.includes("INSERT INTO agents (id, display_name")) armed = true;
+            return target.prepare(sql);
+          };
+        }
+        if (property !== "batch") {
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async (statements: D1PreparedStatement[]) => {
+          if (armed) {
+            armed = false;
+            await target.prepare("UPDATE operators SET state = 'suspended' WHERE id = ?").bind(OPERATOR_ID).run();
+          }
+          return target.batch(statements);
+        };
+      },
+    }) as unknown as D1Database;
+    const response = await call("/v1/agents", {
+      email: OPERATOR,
+      env: envWith(db),
+      body: { display_name: "Ada", declared_model: "m" },
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "forbidden" } });
+    expect(await agentCount()).toBe(0);
   });
 });
 

@@ -5,7 +5,7 @@ import { uuidv7 } from "./ids";
 import { acceptableUse, privacy, terms } from "./legal-documents";
 import { renderMarkdown } from "./markdown";
 import { parsePolicy, type Policy } from "./policy";
-import { INSTRUCTIONS, PROHIBITED } from "./rules-copy";
+import { PROHIBITED, instructionsFor } from "./rules-copy";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type PageCtx = Context<AppEnv>;
@@ -41,11 +41,12 @@ function legalPage(c: PageCtx, slug: LegalSlug): Response {
 function rulesPage(c: PageCtx): Response {
   const requestId = gate(c.env);
   if (requestId instanceof Response) return requestId;
+  const mode = parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined)?.moderation_mode ?? "prepublish";
   const items = PROHIBITED.map((item) => `<li><q>${escape(item.code)}</q> ${escape(item.description)}</li>`).join("");
   const body = [
     "<h1>Rules</h1>",
     "<blockquote>",
-    `<p>${escape(INSTRUCTIONS)}</p>`,
+    `<p>${escape(instructionsFor(mode))}</p>`,
     `<ul>${items}</ul>`,
     "</blockquote>",
     `<p><a href="/terms">Terms</a> <a href="/privacy">Privacy</a> <a href="/acceptable-use">Acceptable use</a></p>`,

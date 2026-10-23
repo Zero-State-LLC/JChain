@@ -5,7 +5,7 @@ import worker from "../src/index";
 import { SCAN_MAX_ATTEMPTS } from "../src/scan";
 import { VALID_WEBP } from "./fixtures/bytes";
 import postpublishFixture from "./fixtures/policy-postpublish.json";
-import { BOARD_ID, OPERATOR, UUID_V7, call, resetAndSeed } from "./harness";
+import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, resetAndSeed } from "./harness";
 
 const POSTPUBLISH = JSON.stringify(postpublishFixture);
 const SECRET_CAPTION = "zebra marmalade lighthouse caption";
@@ -420,6 +420,37 @@ describe("R5 Content Scan (CT-23, AT-41)", () => {
     expect(stub.calls).toHaveLength(0);
     expect(await scanRow(post.postId)).toBeNull();
     expect((await postRow(post.postId))?.state).toBe("pending_review");
+  });
+
+  it("logs publish_to_scan_ms and hide_to_decision_ms (NFR-10)", async () => {
+    const post = await publishThread("Ada");
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      lines.push(args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "));
+    });
+    await runScan(scanEnv(stubAi(UNSAFE_S4).ai), post.postId);
+    expect((await postRow(post.postId))?.state).toBe("hidden");
+    const parsed = (): Record<string, unknown>[] => lines.flatMap((line) => {
+      try {
+        const value = JSON.parse(line) as unknown;
+        return typeof value === "object" && value !== null ? [value as Record<string, unknown>] : [];
+      } catch {
+        return [];
+      }
+    });
+    const scanned = parsed().find((line) => line.message === "post scanned");
+    expect(typeof scanned?.publish_to_scan_ms).toBe("number");
+    expect(Number(scanned?.publish_to_scan_ms)).toBeGreaterThanOrEqual(0);
+
+    const decided = await call("/v1/moderation/actions", {
+      email: MODERATOR,
+      policy: POSTPUBLISH,
+      body: { target_type: "post", target_id: post.postId, action: "remove", reason_code: "rules" },
+    });
+    expect(decided.status).toBe(200);
+    const hide = parsed().find((line) => line.message === "hide decided");
+    expect(hide).toMatchObject({ post_id: post.postId, action: "remove", hidden_by: "scan" });
+    expect(typeof hide?.hide_to_decision_ms).toBe("number");
   });
 
   it("the image path never calls the AI binding", async () => {

@@ -4,6 +4,7 @@ import { characterLength, errorResponse, jsonResponse, type ErrorCode } from "./
 import { utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
+import { MODERATION_REASONS, canonicalReason } from "./moderation";
 import { requireAdmin } from "./principal";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
@@ -16,7 +17,10 @@ type Failure = { ok: false; code: "malformed" | "validation_failed"; message?: s
 
 type Parsed = { ok: true; slug: string; name: string; description: string } | Failure;
 
-type ParsedEdit = { ok: true; name?: string; description?: string; state?: BoardState } | Failure;
+type ParsedEdit = { ok: true; name?: string; description?: string; state?: BoardState; reasonCode?: string } | Failure;
+
+// A board state change with no reason_code is audited with this fixed reason.
+const BOARD_STATE_REASON = "rules";
 
 type BoardState = "open" | "archived";
 
@@ -141,19 +145,30 @@ export function parseBoardCreate(body: Record<string, unknown>): Parsed {
   return { ok: true, slug: body.slug, name, description };
 }
 
-// The JSON edit takes name, description, or both. The HTML form always sends both.
+// The JSON edit takes name, description, or both, and an Admin may set state (CT-06), with an
+// optional reason_code for the audit row. The HTML form always sends name and description.
 export function parseBoardEdit(body: Record<string, unknown>, form: boolean): ParsedEdit {
   const keys = Object.keys(body);
-  if (keys.length === 0 || !keys.every((key) => key === "name" || key === "description" || key === "state")) {
+  const allowed = new Set(["name", "description", "state", "reason_code"]);
+  if (keys.length === 0 || !keys.every((key) => allowed.has(key))) {
     return { ok: false, code: "malformed" };
   }
   if (form && (body.name === undefined || body.description === undefined)) return { ok: false, code: "malformed" };
-  const result: { ok: true; name?: string; description?: string; state?: BoardState } = { ok: true };
+  if (body.reason_code !== undefined && body.state === undefined) return { ok: false, code: "malformed" };
+  const result: { ok: true; name?: string; description?: string; state?: BoardState; reasonCode?: string } = { ok: true };
   if (body.state !== undefined) {
     if (body.state !== "open" && body.state !== "archived") {
       return { ok: false, code: "validation_failed", message: "state must be open or archived." };
     }
     result.state = body.state;
+  }
+  if (body.reason_code !== undefined && body.reason_code !== "") {
+    if (typeof body.reason_code !== "string") return { ok: false, code: "malformed" };
+    const reasonCode = canonicalReason(body.reason_code);
+    if (!(MODERATION_REASONS as readonly string[]).includes(reasonCode)) {
+      return { ok: false, code: "validation_failed", message: "reason_code is not a moderation reason." };
+    }
+    result.reasonCode = reasonCode;
   }
   if (body.name !== undefined) {
     if (typeof body.name !== "string") return { ok: false, code: "malformed" };
@@ -188,7 +203,7 @@ export async function updateBoard(
   db: D1Database,
   actor: string,
   board: BoardRow,
-  edit: { name?: string; description?: string; state?: BoardState },
+  edit: { name?: string; description?: string; state?: BoardState; reasonCode?: string },
 ): Promise<BoardRow> {
   const next: BoardRow = {
     ...board,
@@ -204,7 +219,7 @@ export async function updateBoard(
   await db.batch([
     db.prepare("UPDATE boards SET name = ?, description = ?, state = ? WHERE id = ?")
       .bind(next.name, next.description, next.state, board.id),
-    auditBoard(db, actor, board.id, action),
+    auditBoard(db, actor, board.id, action, action === "edit_board" ? "rules" : edit.reasonCode ?? BOARD_STATE_REASON),
   ]);
   return next;
 }
@@ -226,12 +241,13 @@ function auditBoard(
   actor: string,
   boardId: string,
   action: "create_board" | "edit_board" | "archive_board" | "unarchive_board",
+  reasonCode = "rules",
 ): D1PreparedStatement {
   return db.prepare(
     `INSERT INTO moderation_actions (
        id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
-     ) VALUES (?, ?, 'board', ?, ?, 'rules', NULL, NULL, ?)`,
-  ).bind(uuidv7(), actor, boardId, action, utcSeconds());
+     ) VALUES (?, ?, 'board', ?, ?, ?, NULL, NULL, ?)`,
+  ).bind(uuidv7(), actor, boardId, action, reasonCode, utcSeconds());
 }
 
 export async function insertBoard(

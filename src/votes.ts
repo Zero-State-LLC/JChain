@@ -2,7 +2,7 @@ import { Hono, type Context } from "hono";
 import { parseLimit } from "./browse";
 import { sha256Hex } from "./credential";
 import { errorResponse, isValidRunId, jsonResponse } from "./http";
-import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency";
+import { canonicalJson, readIdempotency } from "./idempotency";
 import { hoursAhead, isUuidV7, utcSeconds } from "./ids";
 import type { Policy } from "./policy";
 import { requireAgent, requireReader } from "./principal";
@@ -77,21 +77,31 @@ async function putVote(c: Ctx): Promise<Response> {
   }
   try {
     const value = body === "up" ? 1 : -1;
-    const written = await c.env.DB.prepare(
-      `INSERT INTO votes (post_id, agent_id, value, cast_at)
-       SELECT posts.id, ?, ?, ? FROM posts WHERE posts.id = ? AND ${VISIBLE_POST}
-       ON CONFLICT (post_id, agent_id) DO UPDATE SET
-         cast_at = CASE WHEN votes.value = excluded.value THEN votes.cast_at ELSE excluded.cast_at END,
-         value = excluded.value`,
-    ).bind(agentId, value, utcSeconds(), postId).run();
-    if (Number(written.meta.changes ?? 0) === 0) {
-      await charged.refund();
-      return agentError(c.env, policy, requestId, agentId, "not_found");
-    }
-    const response = { post_id: postId, vote: body, score: await postScore(c.env.DB, postId), limits: charged.limits };
+    // The Vote and its idempotency row commit in one batch. The stored response, score included,
+    // is built in SQL after the upsert, so a replay returns exactly what this call returns.
+    let results: D1Result[];
     try {
-      await c.env.DB.batch([
-        idempotencyInsert(c.env.DB, agentId, route, key, hash, 200, response, hoursAhead(policy.retention.idempotency_hours)),
+      results = await c.env.DB.batch([
+        c.env.DB.prepare(
+          `INSERT INTO votes (post_id, agent_id, value, cast_at)
+           SELECT posts.id, ?, ?, ? FROM posts WHERE posts.id = ? AND ${VISIBLE_POST}
+           ON CONFLICT (post_id, agent_id) DO UPDATE SET
+             cast_at = CASE WHEN votes.value = excluded.value THEN votes.cast_at ELSE excluded.cast_at END,
+             value = excluded.value`,
+        ).bind(agentId, value, utcSeconds(), postId),
+        c.env.DB.prepare(
+          `INSERT INTO idempotency_keys
+             (agent_id, route, idempotency_key, body_hash, status, response_json, expires_at)
+           SELECT ?, ?, ?, ?, 200,
+                  json_object('post_id', posts.id, 'vote', ?, 'score', ${scoreSql("posts.id")}, 'limits', json(?)),
+                  ?
+             FROM posts
+            WHERE posts.id = ? AND ${VISIBLE_POST}
+              AND EXISTS (SELECT 1 FROM votes WHERE votes.post_id = posts.id AND votes.agent_id = ?)`,
+        ).bind(
+          agentId, route, key, hash, body, JSON.stringify(charged.limits),
+          hoursAhead(policy.retention.idempotency_hours), postId, agentId,
+        ),
       ]);
     } catch (error) {
       if (!(error instanceof Error && error.message.includes("UNIQUE"))) throw error;
@@ -100,6 +110,14 @@ async function putVote(c: Ctx): Promise<Response> {
       if (raced.action === "replay") return jsonResponse(requestId, raced.body, raced.status);
       return agentError(c.env, policy, requestId, agentId, "idempotency_conflict");
     }
+    if (Number(results[0]?.meta.changes ?? 0) === 0 || Number(results[1]?.meta.changes ?? 0) === 0) {
+      await charged.refund();
+      return agentError(c.env, policy, requestId, agentId, "not_found");
+    }
+    const stored = await readIdempotency(c.env.DB, agentId, route, key, hash);
+    const response = stored.action === "replay"
+      ? stored.body
+      : { post_id: postId, vote: body, score: await postScore(c.env.DB, postId), limits: charged.limits };
     console.log(JSON.stringify({ message: "vote cast", post_id: postId }));
     return jsonResponse(requestId, response, 200);
   } catch (error) {

@@ -1,7 +1,6 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { PROHIBITED } from "../src/rules-copy";
 import { ADMIN, ADMIN2, BOARD_ID, OPERATOR, STAFF, UUID_V7, call, resetAndSeed } from "./harness";
 
 beforeAll(async () => {
@@ -78,7 +77,17 @@ describe("board catalog", () => {
     const rules = await expectSuccess(await call(`/v1/boards/${String(created.id)}/rules`, { email: OPERATOR }));
     expect(rules.slug).toBe("tech");
     expect(rules.board_id).toBe(created.id);
-    expect(rules.prohibited).toEqual([...PROHIBITED]);
+    // AT-38: the exact CT-12 descriptions.
+    expect(rules.prohibited).toEqual([
+      {
+        code: "id-document",
+        description: "Images or text of a government or personal identity document, such as a passport, driver's licence, national ID card, or social security card, real or forged.",
+      },
+      {
+        code: "csam",
+        description: "Any sexual depiction of a minor, including drawn, edited, or AI-generated images.",
+      },
+    ]);
 
     const duplicate = await expectError(await call("/v1/boards", {
       email: ADMIN,

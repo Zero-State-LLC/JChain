@@ -7,6 +7,7 @@ import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
+import { logHideToDecision } from "./latency";
 import { settleSeatFlags } from "./seats";
 import { applyOperatorAction, isOperatorAction, parseOperatorExtras } from "./operator-admin";
 import { mountEvidence } from "./evidence";
@@ -137,13 +138,14 @@ async function movePost(
 
   const post = await c.env.DB.prepare(
     `SELECT posts.state AS state, posts.legal_hold AS legal_hold, threads.state AS thread_state,
-            posts.asset_id AS asset_id, assets.state AS asset_state
+            posts.asset_id AS asset_id, assets.state AS asset_state, posts.hidden_by AS hidden_by
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
        LEFT JOIN assets ON assets.id = posts.asset_id
       WHERE posts.id = ?`,
   ).bind(action.targetId).first<{
     state: string;
+    hidden_by: string | null;
     legal_hold: number;
     thread_state: string;
     asset_id: string | null;
@@ -344,6 +346,7 @@ async function movePost(
     }
   }
   await settleSeatFlags(c.env.DB, action.targetId, name, occurredAt, actorEmail, policy);
+  await logHideToDecision(c.env.DB, action.targetId, post, name, occurredAt);
   const entry: Record<string, string> = { message: logMessage(name), post_id: action.targetId };
   if (primaryEventId !== null) entry.event_id = primaryEventId;
   console.log(JSON.stringify(entry));
@@ -512,6 +515,8 @@ async function upholdAppeal(
   await settleSeatFlags(c.env.DB, action.targetId, "uphold", at, actorEmail, policy);
   console.log(JSON.stringify({ message: "appeal upheld", post_id: action.targetId }));
   const post = await c.env.DB.prepare("SELECT state FROM posts WHERE id = ?").bind(action.targetId).first<{ state: string }>();
+  // NFR-10: uphold keeps the hide, so the Post as it is now names the original hide and its time.
+  await logHideToDecision(c.env.DB, action.targetId, null, "uphold", at);
   return moderationDone(
     requestId,
     format,
@@ -696,9 +701,19 @@ function tableFor(targetType: string): string {
   return "assets";
 }
 
-type MoveName = "approve" | "reject" | "hide" | "restore" | "remove" | "quarantine";
-type ThreadMove = "lock" | "unlock" | "archive";
-type AgentMove = "suspend_agent" | "resume_agent";
+// The non-Operator pairs this route accepts, by target type. The OpenAPI enums are built from these.
+export const POST_MOVES = ["approve", "reject", "hide", "restore", "remove", "quarantine"] as const;
+export const THREAD_MOVES = ["lock", "unlock", "archive"] as const;
+export const AGENT_MOVES = ["suspend_agent", "resume_agent"] as const;
+export const OTHER_PAIRS = {
+  post: ["uphold", "dismiss_flags"],
+  agent: ["revoke_handle"],
+  asset: ["quarantine_asset", "restore_asset"],
+} as const;
+
+type MoveName = (typeof POST_MOVES)[number];
+type ThreadMove = (typeof THREAD_MOVES)[number];
+type AgentMove = (typeof AGENT_MOVES)[number];
 
 function isMove(value: string): value is MoveName {
   return value === "approve" || value === "reject" || value === "hide" || value === "restore" || value === "remove" || value === "quarantine";

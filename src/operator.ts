@@ -12,6 +12,7 @@ import {
 } from "./account-pages";
 import {
   RESUME,
+  ROSTER_COUNT,
   SUSPEND,
   enrollAgent,
   moveAgent,
@@ -89,7 +90,7 @@ async function page(c: Ctx): Promise<Response> {
       WHERE operators.email = ?
       ORDER BY CASE agents.state WHEN 'retired' THEN 1 ELSE 0 END, agents.created_at DESC, agents.id DESC`,
   ).bind(opened.caller.email).all<AgentListing>();
-  const total = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM agents").first<{ n: number }>();
+  const total = await c.env.DB.prepare(ROSTER_COUNT).first<{ n: number }>();
   const attestation = await operatorAttestation(c.env.DB, opened.caller.email);
   const account = await c.env.DB.prepare(
     "SELECT state, agent_cap FROM operators WHERE email = ?",
