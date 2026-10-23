@@ -11,7 +11,11 @@ const TOP_LEVEL = [
   "site_origin",
   "turnstile_site_key",
 ] as const;
-const OPTIONAL_TOP_LEVEL = ["review", "moderation", "auth"] as const;
+const OPTIONAL_TOP_LEVEL = ["review", "moderation", "auth", "operator_caps"] as const;
+
+// Ticket 25 (CT-19): the optional `operator_caps` block. Absent means no state cap, as before.
+// `max_agents` is the highest cap an Admin may set for one Operator.
+const OPERATOR_CAP_KEYS = ["provisional_agents", "approved_agents", "max_agents"] as const;
 
 // v0.2.23 (CT-18 as amended): the optional `auth` block. Absent means email
 // sign-in is off. Present and invalid fails the whole policy closed.
@@ -107,8 +111,8 @@ export type ModerationPolicy = {
 };
 
 export type AuthPolicy = {
-  // Must be false until ticket 25 ships self-sign-up.
-  signup_open: false;
+  // Ticket 25: true is valid only with an `operator_caps` block, so a new Operator is always capped.
+  signup_open: boolean;
   link_minutes: number;
   session_days: number;
   idle_days: number;
@@ -117,6 +121,12 @@ export type AuthPolicy = {
   emails_per_day: number;
   signups_per_day: number;
   mail_from: string;
+};
+
+export type OperatorCapsPolicy = {
+  provisional_agents: number;
+  approved_agents: number;
+  max_agents: number;
 };
 
 export type Policy = {
@@ -154,6 +164,7 @@ export type Policy = {
   review?: ReviewPolicy;
   moderation?: ModerationPolicy;
   auth?: AuthPolicy;
+  operator_caps?: OperatorCapsPolicy;
 };
 
 export function parsePolicy(raw: string | undefined): Policy | null {
@@ -169,7 +180,7 @@ export function parsePolicy(raw: string | undefined): Policy | null {
   const mode = parsed.moderation_mode;
   if (mode !== "prepublish" && mode !== "postpublish") return null;
   if (typeof parsed.training_export_approved !== "boolean") return null;
-  if (!intInRange(parsed.max_operators, 1, 5)) return null;
+  if (!intInRange(parsed.max_operators, 1, 1000)) return null;
   if (!intInRange(parsed.max_agents, 1, 500)) return null;
 
   const upload = parseUpload(parsed.upload);
@@ -182,7 +193,9 @@ export function parsePolicy(raw: string | undefined): Policy | null {
   const review = Object.hasOwn(parsed, "review") ? parseReview(parsed.review) : undefined;
   const moderation = Object.hasOwn(parsed, "moderation") ? parseModeration(parsed.moderation) : undefined;
   const auth = Object.hasOwn(parsed, "auth") ? parseAuth(parsed.auth) : undefined;
-  if (review === null || moderation === null || auth === null) return null;
+  const operatorCaps = Object.hasOwn(parsed, "operator_caps") ? parseOperatorCaps(parsed.operator_caps) : undefined;
+  if (review === null || moderation === null || auth === null || operatorCaps === null) return null;
+  if (auth?.signup_open === true && operatorCaps === undefined) return null;
   if (mode === "postpublish" && (review === undefined || moderation === undefined)) return null;
 
   const policy: Policy = {
@@ -201,6 +214,7 @@ export function parsePolicy(raw: string | undefined): Policy | null {
   if (review !== undefined) policy.review = review;
   if (moderation !== undefined) policy.moderation = moderation;
   if (auth !== undefined) policy.auth = auth;
+  if (operatorCaps !== undefined) policy.operator_caps = operatorCaps;
   return policy;
 }
 
@@ -225,7 +239,7 @@ function parseModeration(value: unknown): ModerationPolicy | null {
 
 function parseAuth(value: unknown): AuthPolicy | null {
   if (!isRecord(value) || !exactKeys(value, AUTH_KEYS)) return null;
-  if (value.signup_open !== false) return null;
+  if (typeof value.signup_open !== "boolean") return null;
   const mailFrom = value.mail_from;
   if (!mailbox(mailFrom)) return null;
   const numbers = {} as Record<keyof typeof AUTH_RANGES, number>;
@@ -235,7 +249,14 @@ function parseAuth(value: unknown): AuthPolicy | null {
     if (!intInRange(item, min, max)) return null;
     numbers[key] = item;
   }
-  return { signup_open: false, mail_from: mailFrom, ...numbers };
+  return { signup_open: value.signup_open, mail_from: mailFrom, ...numbers };
+}
+
+function parseOperatorCaps(value: unknown): OperatorCapsPolicy | null {
+  if (!isRecord(value) || !exactKeys(value, OPERATOR_CAP_KEYS)) return null;
+  const { provisional_agents: provisional, approved_agents: approved, max_agents: max } = value;
+  if (!intInRange(max, 1, 100) || !intInRange(approved, 0, max) || !intInRange(provisional, 0, approved)) return null;
+  return { provisional_agents: provisional, approved_agents: approved, max_agents: max };
 }
 
 // The email field rule: 3 to 254 characters with exactly one "@".

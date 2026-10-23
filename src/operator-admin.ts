@@ -2,8 +2,16 @@
 import { sha256Hex } from "./credential";
 import { escapeHtml } from "./html";
 import { utcSeconds, uuidv7 } from "./ids";
+import type { OperatorCapsPolicy } from "./policy";
 
-export const OPERATOR_ACTIONS = ["suspend_operator", "resume_operator", "remove_operator", "set_agent_cap", "change_email"] as const;
+export const OPERATOR_ACTIONS = [
+  "approve_operator",
+  "suspend_operator",
+  "resume_operator",
+  "remove_operator",
+  "set_agent_cap",
+  "change_email",
+] as const;
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
 export const MAX_AGENT_CAP = 100;
 
@@ -11,21 +19,34 @@ export function isOperatorAction(value: string): value is OperatorAction {
   return (OPERATOR_ACTIONS as readonly string[]).includes(value);
 }
 
-// An Operator may add an Agent: not suspended or removed, and under its own cap when it has one.
-// `operatorIdSql` is a column or a bound `?` that names the Operator.
-export function operatorMayAddSql(operatorIdSql: string): string {
+// An Operator may add an Agent: not suspended or removed, and under its cap. The cap is its own
+// `agent_cap` when an Admin set one; otherwise, when the policy has `operator_caps` (ticket 25,
+// CT-19), the cap for its state; otherwise none. `operatorIdSql` is a column or a bound `?`.
+export function operatorMayAddSql(operatorIdSql: string, caps?: OperatorCapsPolicy): string {
+  // Policy values are validated integers, so they are inlined and the caller's binds do not change.
+  const stateCap = caps === undefined
+    ? "NULL"
+    : `CASE cap_operator.state WHEN 'provisional' THEN ${Math.trunc(caps.provisional_agents)} ELSE ${Math.trunc(caps.approved_agents)} END`;
   return `EXISTS (
     SELECT 1 FROM operators AS cap_operator
      WHERE cap_operator.id = ${operatorIdSql}
        AND cap_operator.state IN ('provisional', 'approved')
-       AND (cap_operator.agent_cap IS NULL
+       AND (COALESCE(cap_operator.agent_cap, ${stateCap}) IS NULL
          OR (SELECT COUNT(*) FROM agents AS cap_agents
-              WHERE cap_agents.operator_id = cap_operator.id AND cap_agents.state != 'retired') < cap_operator.agent_cap))`;
+              WHERE cap_agents.operator_id = cap_operator.id AND cap_agents.state != 'retired')
+            < COALESCE(cap_operator.agent_cap, ${stateCap})))`;
 }
 
-export async function operatorMayAdd(db: D1Database, operatorId: string): Promise<boolean> {
-  const row = await db.prepare(`SELECT ${operatorMayAddSql("?")} AS ok`).bind(operatorId).first<{ ok: number }>();
+export async function operatorMayAdd(db: D1Database, operatorId: string, caps?: OperatorCapsPolicy): Promise<boolean> {
+  const row = await db.prepare(`SELECT ${operatorMayAddSql("?", caps)} AS ok`).bind(operatorId).first<{ ok: number }>();
   return Number(row?.ok ?? 0) === 1;
+}
+
+// The cap an Operator's page shows: its own cap, else its state's cap, else null (no cap).
+export function effectiveCap(state: string, agentCap: number | null, caps?: OperatorCapsPolicy): number | null {
+  if (agentCap !== null) return agentCap;
+  if (caps === undefined) return null;
+  return state === "provisional" ? caps.provisional_agents : caps.approved_agents;
 }
 
 export type OperatorInput = { action: OperatorAction; operatorId: string; value?: number; email?: string };
@@ -39,11 +60,13 @@ const EMAIL = /^[^\s@<>"]{1,64}@[^\s@<>"]{1,190}\.[A-Za-z]{2,}$/;
 export function parseOperatorExtras(
   action: OperatorAction,
   body: Record<string, unknown>,
+  caps?: OperatorCapsPolicy,
 ): { ok: true; value?: number; email?: string } | { ok: false; code: "malformed" | "validation_failed" } {
   if (action === "set_agent_cap") {
     const raw = typeof body.value === "string" && /^\d{1,3}$/.test(body.value) ? Number(body.value) : body.value;
     if (typeof raw !== "number" || !Number.isInteger(raw)) return { ok: false, code: "malformed" };
-    if (raw < 0 || raw > MAX_AGENT_CAP) return { ok: false, code: "validation_failed" };
+    // CT-19: an Admin sets one Operator's cap from 0 to operator_caps.max_agents (100 without the block).
+    if (raw < 0 || raw > (caps?.max_agents ?? MAX_AGENT_CAP)) return { ok: false, code: "validation_failed" };
     return { ok: true, value: raw };
   }
   if (action === "change_email") {
@@ -80,6 +103,18 @@ export async function applyOperatorAction(
   const actionId = uuidv7();
   const at = utcSeconds();
   const after = AFTER(actionId);
+
+  if (input.action === "approve_operator") {
+    // CT-19: provisional to approved, which lifts the state cap. Any other state is a conflict.
+    if (operator.state !== "provisional") return { ok: false, code: "state_conflict" };
+    const results = await db.batch([
+      audit(db, actionId, actor, operator.id, input.action, reason, note, at, "state = 'provisional'", []),
+      db.prepare(`UPDATE operators SET state = 'approved' WHERE id = ? AND state = 'provisional' AND ${after}`).bind(operator.id),
+    ]);
+    if (Number(results[1]?.meta.changes ?? 0) !== 1) return { ok: false, code: "state_conflict" };
+    console.log(JSON.stringify({ message: "operator approved", operator_id: operator.id }));
+    return { ok: true, body: { operator_id: operator.id, state: "approved" }, sentence: `Operator ${operator.id} is approved.` };
+  }
 
   if (input.action === "suspend_operator" || input.action === "resume_operator") {
     const from = input.action === "suspend_operator" ? ["provisional", "approved"] : ["suspended"];
@@ -224,6 +259,7 @@ export function operatorsSection(rows: OperatorRow[]): string {
             + `<span class="hint">Seat holders change only by the deploy seed.</span>`;
         } else {
           actions = [
+            row.state === "provisional" ? form(row.id, "approve_operator", "Approve") : "",
             row.state === "suspended" ? form(row.id, "resume_operator", "Resume") : form(row.id, "suspend_operator", "Suspend", "", true),
             form(row.id, "set_agent_cap", "Set cap", `<label>Cap <input name="value" inputmode="numeric" pattern="[0-9]{1,3}" size="3" required></label> `),
             form(row.id, "change_email", "Change email", `<label>New email <input name="email" type="email" autocomplete="off" required></label> `),
