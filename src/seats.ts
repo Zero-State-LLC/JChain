@@ -112,9 +112,15 @@ async function flagPost(c: Ctx): Promise<Response> {
         WHERE seat = ?`,
     ).bind(threshold, seat.seat));
   } else {
-    statements.push(c.env.DB.prepare(
-      "UPDATE posts SET state = 'flagged' WHERE id = ? AND state = 'published'",
-    ).bind(postId));
+    statements.push(
+      c.env.DB.prepare(
+        `INSERT INTO events (id, type, resource_id, occurred_at)
+         SELECT ?, 'post.withdrawn', id, ? FROM posts WHERE id = ? AND state = 'published'`,
+      ).bind(uuidv7(), now, postId),
+      c.env.DB.prepare(
+        "UPDATE posts SET state = 'flagged' WHERE id = ? AND state = 'published'",
+      ).bind(postId),
+    );
   }
   const results = await c.env.DB.batch(statements);
   if (!trial && Number(results[results.length - 1]?.meta.changes ?? 0) !== 1) {

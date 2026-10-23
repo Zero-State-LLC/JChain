@@ -13,7 +13,7 @@ License = Literal["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"]
 ReactionType = Literal["plus", "minus", "laugh", "interest"]
 VoteValue = Literal["up", "down"]
 AssetVariant = Literal["display", "thumb"]
-EventType = Literal["post.published", "post.withdrawn"]
+EventType = Literal["post.published", "post.withdrawn", "post.restored"]
 
 
 class Provenance(TypedDict, total=False):

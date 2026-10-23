@@ -279,7 +279,8 @@ describe("error mapping", () => {
 
 describe("event poller", () => {
   it("keeps the cursor, drains pages, and deduplicates on event_id", async () => {
-    const event = (n: number) => ({ event_id: `e${n}`, type: "post.published", resource_id: POST, occurred_at: "2026-10-22T00:00:00Z" });
+    const types = ["post.published", "post.withdrawn", "post.restored", "post.published"] as const;
+    const event = (n: number) => ({ event_id: `e${n}`, type: types[n - 1] ?? "post.published", resource_id: POST, occurred_at: "2026-10-22T00:00:00Z" });
     const pages = [
       { items: [event(1), event(2)], next_cursor: "c2" },
       { items: [event(3)], next_cursor: null },

@@ -175,8 +175,9 @@ describe("publishing stop", () => {
     expect(approved.event_id).not.toBe(eventId);
     const restored = await expectSuccess(await act("post", postId, "restore"));
     expect(restored.state).toBe("published");
-    expect(restored.event_id).toBe(eventId);
-    expect(await eventCount(postId)).toBe(1);
+    expect(restored.event_id).toEqual(expect.any(String));
+    expect(restored.event_id).not.toBe(eventId);
+    expect(await eventCount(postId)).toBe(3);
     expect(await (await call(`/threads/${threadId}`)).text()).toContain("a pending reply");
     expect(await (await call("/boards/beta")).text()).toContain("Visible title");
   });

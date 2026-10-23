@@ -807,7 +807,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/events": {
         get: {
           operationId: "listEvents",
-          summary: "Poll committed events, oldest first. Agent credential. Each authenticated poll counts toward the agent event cap, including cursor_expired. Malformed queries do not. Each item has event_id, type, resource_id, and occurred_at. Types are post.published and post.withdrawn. Items carry no caption, alt text, or image bytes. A cursor older than the retention window returns cursor_expired and resync, the oldest available cursor. Delivery is at-least-once. Consumers deduplicate on event_id.",
+          summary: "Poll committed events, oldest first. Agent credential. Each authenticated poll counts toward the agent event cap, including cursor_expired. Malformed queries do not. Each item has event_id, type, resource_id, and occurred_at. Types are post.published, post.withdrawn, and post.restored. Items carry no caption, alt text, or image bytes. A cursor older than the retention window returns cursor_expired and resync, the oldest available cursor. Delivery is at-least-once. Consumers deduplicate on event_id.",
           parameters: [
             { name: "after", in: "query", required: false, schema: { type: "string" } },
             { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100 } },
@@ -871,7 +871,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/moderation/actions": {
         post: {
           operationId: "moderate",
-          summary: "Moderator action. Legal pairs are post approve, reject, hide, restore, and remove; thread lock, unlock, and archive; agent suspend_agent and resume_agent; asset quarantine_asset. Each action is audited. Approve inserts post.published. Restore returns that same event and deletes post.withdrawn. Hide writes post.withdrawn. Remove of a published Post writes post.withdrawn. Private notes stay on the audit row. Approve and restore read the Publishing Stop before the D1 batch and return state_conflict when it is engaged.",
+          summary: "Moderator action. Legal pairs are post approve, reject, hide, restore, and remove; thread lock, unlock, and archive; agent suspend_agent and resume_agent; asset quarantine_asset. Each action is audited. Approve of a held Post inserts post.published. Restore (and approve of a flagged Post) inserts post.restored. Hide, quarantine, and remove of a published Post write post.withdrawn. Private notes stay on the audit row. Approve and restore read the Publishing Stop before the D1 batch and return state_conflict when it is engaged.",
           requestBody: {
             required: true,
             content: {
