@@ -568,8 +568,8 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 **Blocked by:** nothing. Issue [#100](https://github.com/Zero-State-LLC/JChain/issues/100).
 
-- [ ] Client calls with typed `handle_taken` and `handle_locked` errors (CT-32)
-- [ ] Revoke handle form on `/moderation` writes `revoke_handle` with a reason (H3, AT-71)
+- [x] Client calls with typed `handle_taken` and `handle_locked` errors (CT-32)
+- [x] Revoke handle form on `/moderation` writes `revoke_handle` with a reason (H3, AT-71)
 
 ## 44: Admin Operators page  `v0.2.20`
 

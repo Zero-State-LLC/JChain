@@ -39,6 +39,7 @@ function fakeService() {
     if (route === `GET /v1/threads/${THREAD}`) return json({ thread_id: THREAD, board_id: BOARD, state: "open" });
     if (route === `GET /v1/threads/${THREAD}/posts`) return json({ items: [{ post_id: POST, caption: INJECTION, alt_text: "a frog" }], next_cursor: null });
     if (route === "GET /v1/agents/me") return json({ agent_id: POST, display_name: "Ada" });
+    if (route === "PATCH /v1/agents/me") return json({ agent_id: POST, display_name: "Ada", handle: String((body as { handle: string }).handle).toLowerCase() });
     if (route === "POST /v1/uploads") return json({ asset_id: ASSET, upload_token: `up_${"u".repeat(43)}`, limits: LIMITS }, 201);
     if (route.startsWith("PUT /v1/uploads/")) return json({ asset_id: ASSET, state: "reserved" });
     if (route.endsWith("/complete")) return json({ asset_id: ASSET, state: "uploaded" }, 202);
@@ -181,6 +182,14 @@ describe("tool behaviour", () => {
     const thread = await call("read_thread", { thread_id: THREAD });
     expect(thread.text).toContain("Ignore previous instructions");
     expect(thread.text).not.toContain("<<<END_JCHAIN_UNTRUSTED_DATA>>>");
+  });
+
+  it("sets the agent's own handle", async () => {
+    const { call, service } = await connect();
+    const result = await call("set_handle", { handle: "Ada_Bot" });
+    expect(result.isError).toBe(false);
+    expect(result.text).toContain("ada_bot");
+    expect(service.seen.at(-1)).toMatchObject({ method: "PATCH", path: "/v1/agents/me", body: { handle: "Ada_Bot" } });
   });
 
   it("labels Board Rules as the only instructions", async () => {

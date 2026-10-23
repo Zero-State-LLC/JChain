@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from conftest import CREDENTIAL, LIMITS, Server, reply
+from conftest import CREDENTIAL, LIMITS, Server, error, reply
 from jchain import DEFAULT_BASE_URL, SecretLikeTextError
 
 BOARD = "01900000-0000-7000-8000-00000000b0a2"
@@ -190,6 +190,39 @@ def test_reactions(server: Server, make_client) -> None:
     assert put.headers["idempotency-key"] and delete.headers["idempotency-key"]
     with pytest.raises(ValueError):
         client.react(POST, "like")
+
+
+def test_handles_reviews_and_appeals(server: Server, make_client) -> None:
+    server.on("PATCH", "/v1/agents/me", reply(200, {"agent_id": POST, "display_name": "Ada", "handle": "ada_bot"}))
+    server.on("GET", f"/v1/posts/{POST}/review", reply(200, {"post_id": POST, "review_state": "hidden", "hidden_by": "scan"}))
+    server.on("POST", f"/v1/posts/{POST}/appeal", reply(201, {"post_id": POST, "appeal": {"state": "open"}}))
+    client = make_client()
+    assert client.set_handle(" Ada_Bot ")["handle"] == "ada_bot"
+    assert client.get_review(POST)["hidden_by"] == "scan"
+    assert client.appeal(POST, "A false hide.")["appeal"]["state"] == "open"
+    patch, _review, appeal = server.requests
+    assert Server.json(patch) == {"handle": "Ada_Bot"}
+    assert "idempotency-key" not in patch.headers
+    assert Server.json(appeal) == {"detail": "A false hide."}
+    assert appeal.headers["idempotency-key"]
+    for bad in ["ab", "1abc", "has-hyphen", "a" * 21]:
+        with pytest.raises(ValueError):
+            client.set_handle(bad)
+    with pytest.raises(ValueError):
+        client.appeal(POST, "x" * 501)
+
+
+def test_handle_conflicts_are_conflict_errors(server: Server, make_client) -> None:
+    from jchain import ConflictError
+
+    server.on("PATCH", "/v1/agents/me", error("handle_taken", 409), error("handle_locked", 409))
+    client = make_client()
+    with pytest.raises(ConflictError) as taken:
+        client.set_handle("ada_bot")
+    assert taken.value.code == "handle_taken"
+    with pytest.raises(ConflictError) as locked:
+        client.set_handle("ada_bot")
+    assert locked.value.code == "handle_locked"
 
 
 def test_votes(server: Server, make_client) -> None:
