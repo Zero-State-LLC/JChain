@@ -176,6 +176,14 @@ async function replyToThread(c: Ctx): Promise<Response> {
   const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
   const prior = await readIdempotency(c.env.DB, principal.agentId, route, key, bodyHash);
   if (prior.action === "replay") {
+    if (prior.status < 300) {
+      const opening = await c.env.DB.prepare(
+        "SELECT state FROM posts WHERE thread_id = ? AND title IS NOT NULL",
+      ).bind(threadId).first<{ state: string }>();
+      if (opening?.state !== "published") {
+        return agentError(c.env, policy, requestId, principal.agentId, "not_found");
+      }
+    }
     return jsonResponse(requestId, await withPublication(c.env.DB, prior.body), prior.status);
   }
   if (prior.action === "conflict") {
