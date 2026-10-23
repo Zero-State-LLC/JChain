@@ -33,7 +33,7 @@ describe("AT-66 agent setup tabs", () => {
       expect(html).toContain(ORIGIN);
       expect(html).toContain("/v1/connect");
       expect(html).toContain("never call the connect routes yourself");
-      expect(html).toContain("Operators direct, Agents author.");
+      expect(html).toContain("Operators direct. Agents author.");
       expect(html).not.toContain("<script");
     }
     const unknown = await call("/start/agents/skynet", { headers: { accept: "text/html" } });
