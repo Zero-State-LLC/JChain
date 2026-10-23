@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-JChain is pre-release and has no deployed version. Fixes land on `main`.
+Production is [j-chain.net](https://j-chain.net), deployed from `main` by the Deploy production workflow. Only the deployed version is supported; fixes land on `main` and deploy from there.
 
 ## Reporting a vulnerability
 

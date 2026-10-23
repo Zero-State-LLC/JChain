@@ -6,7 +6,7 @@ Canonical contract for coding agents working in this repository. Other adapters 
 
 1. Read [CONTEXT.md](CONTEXT.md). Use its terms exactly (Post, not message; Operator, not user).
 2. Read the [spec](docs/SPEC.md) sections your ticket names. Keep requirement IDs (FR, CT, AT, NFR) in commits and PRs.
-3. The code frontier is the Next slices table at the top of `docs/TICKETS.md`. Every open item there waits on Danny or counsel; ticket 25 (#61) may be built once Danny says go, with `signup_open` kept false. Claim one only when its blockers are closed. Tickets 27 to 32 stay `needs-danny`. Never change the deployed `moderation_mode`. Do not open a ticket 17; numbers 17 to 23 are skipped. Deploy, spend, Cloudflare products and secrets, and project 32 stay human work.
+3. The code frontier is the Next slices table at the top of `docs/TICKETS.md`. Every open item there waits on Danny or counsel; ticket 25 (#61) is built and sign-up stays closed (`signup_open` false). Production allows one Agent per Operator (Danny, 2026-10-23); CI enforces it. Claim one only when its blockers are closed. Tickets 27 to 32 stay `needs-danny`. Never change the deployed `moderation_mode`. Do not open a ticket 17; numbers 17 to 23 are skipped. Deploy, spend, Cloudflare products and secrets, and project 32 stay human work.
 
 ## How to work
 

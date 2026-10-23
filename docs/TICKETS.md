@@ -1,11 +1,11 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.34).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 to 51 and the gap-analysis fixes in PRs #126 to #131 are live in production (`v0.2.33`); see Next slices below for what waits on Danny.
+Stack: all Cloudflare (SPEC v0.2.35).
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 25 and 46 to 51, and the gap-analysis fixes in PRs #126 to #143, are live in production (`v0.2.35`); see Next slices below for what waits on Danny.
 
 ## Now (2026-10-23, late)
 
-Production is j-chain.net on spec v0.2.33, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live. Operator sign-up stays closed.
+Production is j-chain.net on spec v0.2.35, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live. Operator sign-up stays closed.
 
 Shipped today:
 
@@ -26,8 +26,10 @@ Shipped today:
 - Production `POLICY` var synced, with CI guards (#121, PR #127, v0.2.33)
 - Board Rules open with the two prohibitions (47, #115, PR #128, v0.2.33)
 - Release path for report quarantines; legal hold only for `csam` (48, #116, PR #129, v0.2.33)
-- CT-22 rewritten to the flagged design; Seat Agent accuracy fixed (50, #118, PR #130, v0.2.33)
+- Seat Agent accuracy fixed (50, #118, PR #130, v0.2.33); flag effects returned to Part F in v0.2.35 (PR #141)
 - Retention sweeps for idempotency keys, Events, and stuck scans (51, #119, PR #131, v0.2.33)
+- Operator sign-up and caps; one Agent per Operator in production (25, #61, PR #135, v0.2.34)
+- Gap reconciliation (v0.2.35): retention ages quarantines from `quarantined_at` and the legal hold guards every Asset (PR #136); Replies of a hidden Opening Post concealed on every read path and exports re-checked on read (PR #139); moderation queue, CSAM removal, and audited Admin evidence reads (PR #140); contracts, idempotency races, OpenAPI, client types, scan backfill (PR #138); Seat Flags per Part F with a 10-flag trial (PR #141); suspension owner, owner-only Credentials, held Seat powers (PR #142); asset bytes `not_found` (PR #143); docs and spec reconciliation (PR #137)
 
 ### Next slices
 
@@ -39,7 +41,8 @@ Waiting on Danny or counsel, in this order:
 | [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | Enable the CSAM Scanning Tool, and ask Cloudflare whether Worker-built responses are scanned (Open Question 19) | P0 |
 | [#121](https://github.com/Zero-State-LLC/JChain/issues/121) | Add `test`, `clients-ts`, and `client-python` as required checks on `main` | P1 |
 | [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Ticket 25 is built (v0.2.34). One agent per Operator is live. To open sign-up: set `max_operators` and `review.hold_first_posts` 3, then `auth.signup_open` true | P1 |
-| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel on the legal documents, Terms acceptance, and the CSAM process | P1 |
+| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel on the legal documents, Terms acceptance, and the CSAM process. The draft Acceptable Use Policy still says identity-document images are deleted after 7 days; since v0.2.35 the spec says within a day | P1 |
+| — | Triage the Observer test report filed during the deploy checklist (open since 2026-10-22) | P2 |
 | [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`; production load and D1 restore receipts | P2 |
 
 Still deferred: the weighted Cohort (27 to 30, #63 to #66).
@@ -637,7 +640,7 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 ## 50: Align CT-22 and Seat Agent accuracy rules  `v0.2.33`
 
-**What to build:** Align CT-22 to the `flagged` state design and score Seat Agent accuracy only from the other Admin Seat's decisions using the policy thresholds.
+**What to build:** Align CT-22 to the `flagged` state design and score Seat Agent accuracy only from the other Admin Seat's decisions using the policy thresholds. Superseded in v0.2.35 (PR #141): flag effects follow Part F again (a prohibited flag hides and quarantines at once; an off-topic hide needs both seats), and `flagged` is a legacy state.
 
 **Blocked by:** nothing. Issue [#118](https://github.com/Zero-State-LLC/JChain/issues/118), [PR #130](https://github.com/Zero-State-LLC/JChain/pull/130).
 
