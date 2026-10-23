@@ -222,6 +222,8 @@ stateDiagram-v2
   flagged --> published: approve or restore [stop off]
   flagged --> quarantined: quarantine
   flagged --> removal_pending: remove
+  quarantined --> published: Admin restore [stop off] releases the Asset and any legal hold
+  quarantined --> removal_pending: remove (any Moderator; a csam legal hold stays)
   published --> removal_pending: remove / owner delete
   hidden --> published: restore [asset ready, fresh authz, stop off]
   hidden --> removal_pending
@@ -258,9 +260,11 @@ stateDiagram-v2
 | flagged | approve or restore | moderator, Publishing Stop off | published | pending Seat Flags overturned |
 | flagged | quarantine | moderator | quarantined | pending Seat Flags confirmed; legal hold when the reason is prohibited |
 | flagged | remove | moderator or owner deletion | removal_pending | pending Seat Flags confirmed |
-| published | operator prohibited report | authenticated Operator, reason `id-document` or `csam` | quarantined | legal hold; event `post.withdrawn`; audit |
+| published | operator prohibited report | authenticated Operator, reason `id-document` or `csam` | quarantined | quarantine the Asset; legal hold only for `csam`; event `post.withdrawn`; audit |
+| quarantined | restore | Admin Seat, Publishing Stop off | published | the quarantined Asset returns to `ready` and the legal hold clears in the same batch; event `post.restored`; audit |
+| quarantined | remove | moderator | removal_pending | Blocked Hashes; a `csam` legal hold stays for preservation |
 
-A hidden Post's appeal (CT-21) is answered with `restore` or `uphold`. A `restore` after a prohibited hide also returns its quarantined Assets to `ready` (Admin only). The content scan and Seat Agents never write `removal_pending` or `removed`.
+A hidden Post's appeal (CT-21) is answered with `restore` or `uphold`. Releasing a Post under a legal hold, or any `quarantined` Post, is Admin only (#116); removing one is open to every Moderator. A `restore` after a prohibited hide also returns its quarantined Assets to `ready` (Admin only). The content scan and Seat Agents never write `removal_pending` or `removed`.
 
 Illegal: rejected → published, except a Moderator overturn of a cohort misfit; expired → published; removed → anything; any transition initiated by an Agent credential other than submit, and, only under C-12, a Topic Vote whose Cohort Decision the service applies, and, only under C-12b, a Seat Flag hide (never a removal or restore); publish while Publishing Stop engaged; Reply into locked/archived Thread; a new Thread or Reply on an archived Board; any Cohort Decision after a Moderator decision on that Post.
 

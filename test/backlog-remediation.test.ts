@@ -17,7 +17,6 @@ import {
 } from "./harness";
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
-const SHA = "b".repeat(64);
 const CSP = "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'";
 
 beforeAll(async () => {
@@ -188,17 +187,12 @@ describe("prohibited reports and legal hold (AT-35, AT-38)", () => {
       email: OPERATOR,
       body: { target_type: "post", target_id: csam.postId, reason_code: "csam" },
     }), 201);
+    // A Moderator without an Admin Seat cannot release a legal hold.
     await expectError(await call("/v1/moderation/actions", {
       email: STAFF,
       body: { target_type: "post", target_id: csam.postId, action: "restore", reason_code: "rules" },
     }), 403, "forbidden");
-    const assetRow = await env.DB.prepare("SELECT asset_id FROM posts WHERE id = ?").bind(csam.postId).first<{ asset_id: string }>();
-    await env.DB.prepare("UPDATE posts SET legal_hold = 0, legal_hold_reason = NULL WHERE id = ?").bind(csam.postId).run();
-    await expectJson(await call("/v1/moderation/actions", {
-      email: ADMIN,
-      body: { target_type: "asset", target_id: assetRow?.asset_id, action: "restore_asset", reason_code: "rules" },
-    }), 200);
-    await env.DB.prepare("UPDATE posts SET legal_hold = 1, legal_hold_reason = 'csam' WHERE id = ?").bind(csam.postId).run();
+    // An Admin clears a false alarm in one action: the Post, its Asset, and the hold are released.
     const restored = await expectJson(await call("/v1/moderation/actions", {
       email: ADMIN,
       body: { target_type: "post", target_id: csam.postId, action: "restore", reason_code: "rules" },
@@ -207,6 +201,28 @@ describe("prohibited reports and legal hold (AT-35, AT-38)", () => {
     const cleared = await env.DB.prepare("SELECT state, legal_hold, legal_hold_reason FROM posts WHERE id = ?")
       .bind(csam.postId).first<{ state: string; legal_hold: number; legal_hold_reason: string | null }>();
     expect(cleared).toEqual({ state: "published", legal_hold: 0, legal_hold_reason: null });
+    const releasedAsset = await env.DB.prepare("SELECT state FROM assets WHERE id = ?")
+      .bind(csam.assetId).first<{ state: string }>();
+    expect(releasedAsset?.state).toBe("ready");
+    const restoredEvent = await env.DB.prepare(
+      "SELECT type FROM events WHERE resource_id = ? AND type = 'post.restored'",
+    ).bind(csam.postId).first<{ type: string }>();
+    expect(restoredEvent?.type).toBe("post.restored");
+
+    // Any Moderator may still remove a held Post; the hold stays for preservation.
+    const heldRemove = await seedPost(author.agentId);
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      body: { target_type: "post", target_id: heldRemove.postId, reason_code: "csam" },
+    }), 201);
+    const removedHeld = await expectJson(await call("/v1/moderation/actions", {
+      email: STAFF,
+      body: { target_type: "post", target_id: heldRemove.postId, action: "remove", reason_code: "csam" },
+    }), 200);
+    expect(removedHeld.state).toBe("removal_pending");
+    const stillHeld = await env.DB.prepare("SELECT legal_hold FROM posts WHERE id = ?")
+      .bind(heldRemove.postId).first<{ legal_hold: number }>();
+    expect(stillHeld?.legal_hold).toBe(1);
   });
 
   it("leaves an anonymous prohibited report open for triage", async () => {

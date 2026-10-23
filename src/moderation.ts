@@ -142,10 +142,15 @@ async function movePost(
     asset_state: string | null;
   }>();
   if (!post) return moderationError(requestId, format, "not_found");
-  if ((post.legal_hold === 1 || action.reasonCode === "csam") && (name === "restore" || name === "remove" || name === "quarantine")) {
+  // #116: any Moderator may remove or quarantine (the safe direction). Releasing a quarantined
+  // Post, or any Post under a legal hold, is Admin only, and it releases the quarantined Asset in
+  // the same batch, so a false report or false CSAM match can be cleared without editing D1.
+  const fromQuarantine = name === "restore" && post.state === "quarantined";
+  if (name === "restore" && (fromQuarantine || post.legal_hold === 1)) {
     if (!(await isAdminEmail(c.env, actorEmail))) return moderationError(requestId, format, "forbidden");
   }
-  const assetReady = post.asset_id === null || post.asset_state === "ready";
+  const assetReady = post.asset_id === null || post.asset_state === "ready"
+    || (fromQuarantine && post.asset_state === "quarantined");
   if (!legal(name, post.state, post.thread_state, assetReady)) {
     return moderationError(requestId, format, "state_conflict");
   }
@@ -194,7 +199,12 @@ async function movePost(
   const primaryEventId = publishedEventId ?? restoredEventId;
   const auditEventId = primaryEventId ?? withdrawnEventId;
 
-  const where = guard(name);
+  const where = fromQuarantine
+    ? `posts.id = ? AND posts.state = 'quarantined'
+    AND (posts.asset_id IS NULL OR EXISTS (
+      SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state IN ('ready', 'quarantined')
+    ))`
+    : guard(name);
   const statements: D1PreparedStatement[] = [];
   let writtenIndex: number | null = null;
   if (name === "approve" && publishedEventId !== null) {
@@ -252,6 +262,14 @@ async function movePost(
         WHERE post_id = ? AND outcome IS NULL
           AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
     ).bind(occurredAt, actorEmail, action.targetId, actionId));
+  }
+  if (fromQuarantine && post.asset_id !== null) {
+    // Runs after the Post update, so it keys on the audit row this batch wrote.
+    statements.push(c.env.DB.prepare(
+      `UPDATE assets SET state = 'ready'
+        WHERE id = ? AND state = 'quarantined'
+          AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+    ).bind(post.asset_id, actionId));
   }
   if (name === "remove" && post.asset_id !== null) {
     statements.push(blockAssetHashes(
