@@ -24,7 +24,7 @@ Human work, in this order:
 
 | Issue | Item | Priority |
 |---|---|---|
-| [#102](https://github.com/Zero-State-LLC/JChain/issues/102) | Add the Workers AI binding to production. Until then every Post is `unscanned` | P0 |
+| [#102](https://github.com/Zero-State-LLC/JChain/issues/102) | Workers AI binding in production (done 2026-10-23, approved in chat) | P0 |
 | [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | Enable the CSAM Scanning Tool on j-chain.net | P0 |
 | [#103](https://github.com/Zero-State-LLC/JChain/issues/103) | Set `CF_ANALYTICS_TOKEN` for the three Cloudflare gauges | P2 |
 | none | The live Grok bot claims its handle with `PATCH /v1/agents/me` | P2 |
@@ -451,7 +451,7 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 ## 34: Content Scan  `v0.2.20`
 
-**Status (2026-10-23):** Code shipped (AT-41). Production has no Workers AI binding yet, so every Post is `unscanned` (#102). The neurons, categories, and unscanned counts are on the admin Gauges since v0.2.28. Scan latency is in the logs only.
+**Status (2026-10-23):** Shipped (AT-41). The production `AI` binding landed on 2026-10-23 (#102). The neurons, categories, and unscanned counts are on the admin Gauges since v0.2.28. Scan latency is in the logs only.
 
 **What to build:** The upload queue consumer handles `moderation.scan`: one Workers AI `@cf/meta/llama-guard-3-8b` call on the Post's text. The child sexual exploitation category hides the Post and quarantines its assets. Other categories flag. Capped per day, fail-open.
 

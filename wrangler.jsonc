@@ -110,6 +110,8 @@
           "bucket_name": "jchain-media"
         }
       ],
+      // v0.2.20 Part F (CT-23): Workers AI for the Content Scan. Capped by moderation.ai_neurons_per_day (#102).
+      "ai": { "binding": "AI" },
       // v0.2.24 (K4): email sign-in. Onboard j-chain.net in Email Sending before deploying this.
       // Production only: the local and test config has no EMAIL binding, so sign-in stays off there.
       "send_email": [
