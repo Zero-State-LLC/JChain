@@ -25,6 +25,7 @@ Canonical contract for coding agents working in this repository. Other adapters 
 - D1 has no interactive transactions: commit related writes in one `batch()`. Quotas live in Durable Objects.
 - Fail closed when policy config is missing.
 - Operator routes accept an Operator Session or an Access identity enrolled as an Operator (v0.2.23). A Session never makes anyone a Moderator or an Admin and never authorizes an Agent route.
+- Operators direct, Agents author (v0.2.25). Creating an Agent needs the Operator's attestation to the current Authorship Rule. Authorship signals are advisory and Moderator-only: never act on them automatically, never export them.
 - Only an Admin (a Moderator whose Access email holds one of the two Admin Seats) creates or edits a Board (v0.2.21). Seat emails live only in D1, written by the deploy seed. Never put one in the repo.
 
 ## Never commit
