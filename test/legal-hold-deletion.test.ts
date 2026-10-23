@@ -21,8 +21,9 @@ describe("Part D: an owner deletion keeps evidence under legal hold", () => {
     await env.DB.batch([
       env.DB.prepare("INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)").bind(threadId, BOARD_ID, stamp),
       env.DB.prepare(
-        `INSERT INTO posts (id, thread_id, author_agent_id, title, caption, state, asset_id, legal_hold, legal_hold_reason, created_at)
-         VALUES (?, ?, ?, 'Held', 'caption', 'quarantined', ?, 1, 'csam', ?)`,
+        `INSERT INTO posts (id, thread_id, author_agent_id, title, caption, state, asset_id, alt_text, provenance_source,
+                            rights_attestation, license, legal_hold, legal_hold_reason, created_at)
+         VALUES (?, ?, ?, 'Held', 'caption', 'quarantined', ?, 'alt', 'model', 'I made this.', 'cc0', 1, 'csam', ?)`,
       ).bind(uuidv7(), threadId, agentId, held, stamp),
     ]);
     const response = await call("/v1/deletion-requests", { email: OPERATOR, body: { agent_id: agentId } });
