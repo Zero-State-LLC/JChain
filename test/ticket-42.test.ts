@@ -19,7 +19,15 @@ function section(html: string): string {
 
 describe("AT-31 the admin Policy section (ticket 42)", () => {
   it("shows the effective policy and binding presence, never a secret value", async () => {
-    const html = await (await call("/admin", { email: ADMIN })).text();
+    // The local policy has an auth block, so EMAIL is needed. Stub it so every needed binding is present.
+    const withEmail = new Proxy(env, {
+      get(target, property) {
+        if (property === "EMAIL") return { send: async () => undefined };
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as Env;
+    const html = await (await call("/admin", { email: ADMIN, env: withEmail })).text();
     const policy = section(html);
     expect(policy).toContain("Moderation mode <code>prepublish</code>");
     expect(policy).toContain("<code>DB</code>");
@@ -28,6 +36,11 @@ describe("AT-31 the admin Policy section (ticket 42)", () => {
     expect(policy).toContain("&quot;moderation_mode&quot;: &quot;prepublish&quot;");
     expect(policy).toContain("Every binding the policy relies on is present.");
     expect(html).not.toContain("turnstile-secret-test");
+  });
+
+  it("flags EMAIL as missing when the policy has an auth block", async () => {
+    const policy = section(await (await call("/admin", { email: ADMIN })).text());
+    expect(policy).toContain('<span class="flag">Missing</span> <code>EMAIL</code>');
   });
 
   it("flags a missing AI binding under postpublish", async () => {
