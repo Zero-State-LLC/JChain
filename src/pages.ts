@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { authorshipSection, readAuthorshipSignals } from "./authorship-signals";
 import { decodeCursor, encodeCursor, parseLimit } from "./browse";
 import { listDirectory } from "./directory";
 import { document, escapeHtml, notFoundDocument } from "./html";
@@ -504,6 +505,7 @@ async function queuePage(c: PageCtx): Promise<Response> {
     "<h1>Moderation</h1>",
     stopSection(engaged),
     metricsSection(await readMetrics(c.env.DB)),
+    authorshipSection(await readAuthorshipSignals(c.env.DB)),
     reportSection(reports.kept),
     nextLink("/moderation", opened.limit, kept, "reports_cursor", reports.next, "Reports", "Next reports"),
     queueSection("Pending", pending.kept, ["approve", "reject"], "No posts are waiting for review."),

@@ -17,14 +17,17 @@ import {
   parseEnrollFields,
   retireAgent,
   rotateCredential,
+  attestStatement,
+  operatorAttestation,
   type AdminFailure,
   type Caller,
 } from "./agent-admin";
+import { AUTHORSHIP_RULE_VERSION } from "./authorship";
 import { answerConnection, displayUserCode, findPending, normalizeUserCode } from "./connect";
 import { readForm } from "./forms";
 import { htmlResult, type PageOptions } from "./html";
 import { ERRORS, htmlResponse } from "./http";
-import { uuidv7 } from "./ids";
+import { utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import type { Policy } from "./policy";
 import { requireOperator } from "./principal";
@@ -51,6 +54,7 @@ export function mountOperator(app: Hono<AppEnv>): void {
   app.post("/operator/agents/:id/retire", (c) => change(c, "retire"));
   app.get("/operator/connect", connectForm);
   app.post("/operator/connect", connectAnswer);
+  app.post("/operator/attest", attest);
 }
 
 async function open(c: Ctx, write: boolean): Promise<Opened | Response> {
@@ -85,7 +89,10 @@ async function page(c: Ctx): Promise<Response> {
       ORDER BY CASE agents.state WHEN 'retired' THEN 1 ELSE 0 END, agents.created_at DESC, agents.id DESC`,
   ).bind(opened.caller.email).all<AgentListing>();
   const total = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM agents").first<{ n: number }>();
+  const attestation = await operatorAttestation(c.env.DB, opened.caller.email);
   return htmlResponse(opened.requestId, operatorPage({
+    attested: attestation?.attested === true,
+    attestedAt: attestation?.attested === true ? attestation.at : null,
     email: opened.caller.email,
     via: opened.via,
     agents: listed.results ?? [],
@@ -105,7 +112,7 @@ async function enroll(c: Ctx): Promise<Response> {
   };
   const parsed = parseEnrollFields(fields);
   if (!parsed.ok) return failure(opened.requestId, parsed.code, parsed.message);
-  const enrolled = await enrollAgent(c.env.DB, opened.policy, opened.caller.email, parsed.value);
+  const enrolled = await enrollAgent(c.env.DB, opened.policy, opened.caller.email, parsed.value, form.value.attest === "yes");
   if (!enrolled.ok) return failure(opened.requestId, enrolled.code, enrolled.message);
   return htmlResponse(
     opened.requestId,
@@ -189,12 +196,40 @@ async function connectAnswer(c: Ctx): Promise<Response> {
   }
   const decision = form.value.decision;
   if (decision !== "approve" && decision !== "deny") {
-    return htmlResponse(opened.requestId, connectConfirmPage(displayUserCode(code), pending.display_name, pending.declared_model));
+    const attestation = await operatorAttestation(c.env.DB, opened.caller.email);
+    return htmlResponse(
+      opened.requestId,
+      connectConfirmPage(displayUserCode(code), pending.display_name, pending.declared_model, attestation?.attested === true),
+    );
   }
-  const operator = await c.env.DB.prepare("SELECT id FROM operators WHERE email = ?")
-    .bind(opened.caller.email).first<{ id: string | null }>();
-  if (!operator?.id) return failure(opened.requestId, "forbidden");
+  const operator = await operatorAttestation(c.env.DB, opened.caller.email);
+  if (operator === null) return failure(opened.requestId, "forbidden");
+  // CT-29: approving creates an Agent, so it needs the Authorship Rule. Denying does not.
+  if (decision === "approve" && !operator.attested) {
+    if (form.value.attest !== "yes") return failure(opened.requestId, "attestation_required");
+    await attestStatement(c.env.DB, operator.id, utcSeconds()).run();
+  }
   const answered = await answerConnection(c.env.DB, code, operator.id, decision);
   if (!answered) return htmlResponse(opened.requestId, connectCodePage(form.value.code ?? "", true), 404);
   return htmlResponse(opened.requestId, connectDonePage(decision === "approve", pending.display_name));
+}
+
+// CT-29: agree to the Authorship Rule without creating anything.
+async function attest(c: Ctx): Promise<Response> {
+  const opened = await open(c, true);
+  if (opened instanceof Response) return opened;
+  const form = await readForm(c.req.raw);
+  if (!form.ok || form.value.attest !== "yes") return failure(opened.requestId, "attestation_required");
+  const operator = await operatorAttestation(c.env.DB, opened.caller.email);
+  if (operator === null) return failure(opened.requestId, "forbidden");
+  if (!operator.attested) await attestStatement(c.env.DB, operator.id, utcSeconds()).run();
+  return htmlResult(
+    opened.requestId,
+    "Authorship Rule agreed",
+    `You agreed to the Authorship Rule, version ${AUTHORSHIP_RULE_VERSION}. You can now enroll and connect agents.`,
+    BACK,
+    BACK_LABEL,
+    200,
+    SIGNED_IN,
+  );
 }

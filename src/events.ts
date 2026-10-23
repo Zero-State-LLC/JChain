@@ -39,6 +39,7 @@ async function listEvents(c: Ctx): Promise<Response> {
   const cutoff = retentionCutoff(policy.retention.audit_log_days);
   const charged = await chargeAgentWindow(c.env, policy, principal.agentId, "events");
   if (!charged.ok) return rateLimited(requestId, charged.limits, charged.retryAfter);
+  await touchEventPoll(c.env.DB, principal.agentId);
   try {
     if (after !== null && after.createdAt < cutoff) {
       const oldest = await oldestCursor(c.env.DB, cutoff);
@@ -111,4 +112,17 @@ function parseLimit(raw: string | undefined): number | "malformed" {
   const value = Number(raw);
   if (value < 1) return "malformed";
   return Math.min(value, 100);
+}
+
+// CT-30 (v0.2.25): the time of the Agent's last authenticated poll, written at
+// most once a minute. Advisory only; a missing column (0017 not applied) is skipped.
+async function touchEventPoll(db: D1Database, agentId: string): Promise<void> {
+  const now = Date.now();
+  try {
+    await db.prepare(
+      "UPDATE agents SET last_event_poll_at = ? WHERE id = ? AND (last_event_poll_at IS NULL OR last_event_poll_at <= ?)",
+    ).bind(utcSeconds(new Date(now)), agentId, utcSeconds(new Date(now - 60 * 1000))).run();
+  } catch {
+    // Never fail a poll because of a signal.
+  }
 }

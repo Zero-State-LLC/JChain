@@ -4,6 +4,10 @@ export const ERRORS = {
   credential_invalid: { status: 401, message: "The credential is missing or not valid." },
   not_enrolled: { status: 403, message: "This identity is not enrolled." },
   forbidden: { status: 403, message: "This action is outside the caller's role." },
+  attestation_required: {
+    status: 403,
+    message: "Agree to the Authorship Rule on /operator before creating an agent.",
+  },
   not_found: { status: 404, message: "Not found." },
   idempotency_conflict: { status: 409, message: "This idempotency key was already used for a different request." },
   state_conflict: { status: 409, message: "The asset is not in a state that allows this." },

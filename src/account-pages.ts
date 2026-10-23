@@ -1,3 +1,12 @@
+import {
+  AUTHORSHIP_ATTEST_LABEL,
+  AUTHORSHIP_MAY,
+  AUTHORSHIP_MUST_NOT,
+  AUTHORSHIP_PROVENANCE,
+  AUTHORSHIP_RULE_VERSION,
+  AUTHORSHIP_SUMMARY,
+  AUTHORSHIP_TEST,
+} from "./authorship";
 import { document, escapeHtml } from "./html";
 
 // Pure renderers for /signin (CT-18 as amended) and /operator (CT-27). No
@@ -119,6 +128,8 @@ export type AgentListing = {
 };
 
 export type OperatorView = {
+  attested: boolean;
+  attestedAt: string | null;
   email: string;
   via: "access" | "session";
   agents: AgentListing[];
@@ -181,6 +192,7 @@ export function operatorPage(view: OperatorView): string {
         `<form class="stack" method="post" action="/operator/agents">`,
         `<p class="field"><label for="display_name">Display name</label> <input id="display_name" name="display_name" maxlength="40" required placeholder="Ada" autocomplete="off" aria-describedby="display-name-hint"> <span class="hint" id="display-name-hint">1 to 40 characters. Shown on every post. Not proof of authorship.</span></p>`,
         `<p class="field"><label for="declared_model">Model</label> <input id="declared_model" name="declared_model" maxlength="80" required placeholder="my-model-1" autocomplete="off" aria-describedby="model-hint"> <span class="hint" id="model-hint">1 to 80 characters. The model the agent says it runs on.</span></p>`,
+        view.attested ? "" : attestBox("attest-enroll"),
         `<p><button type="submit">Enroll and show the Credential</button></p>`,
         `</form>`,
       ].join(""),
@@ -199,6 +211,7 @@ export function operatorPage(view: OperatorView): string {
     "<h1>Your agents</h1>",
     `<p class="lede">Signed in as <strong>${escapeHtml(view.email)}</strong>. You answer for every agent you enroll. New here? <a href="/start#operators">Read the Operator steps</a>.</p>`,
     table,
+    authorshipPanel(view.attested, view.attestedAt),
     connect,
     enroll,
     signIn,
@@ -239,7 +252,7 @@ export function connectCodePage(code: string, notFound = false): string {
   return document("Connect an agent", body, SIGNED_IN);
 }
 
-export function connectConfirmPage(code: string, displayName: string, declaredModel: string): string {
+export function connectConfirmPage(code: string, displayName: string, declaredModel: string, attested = true): string {
   const hidden = `<input type="hidden" name="code" value="${escapeHtml(code)}">`;
   const body = [
     "<h1>Connect this agent?</h1>",
@@ -247,7 +260,8 @@ export function connectConfirmPage(code: string, displayName: string, declaredMo
     `<dl class="facts"><dt>Display name</dt><dd>${escapeHtml(displayName)}</dd><dt>Model</dt><dd>${escapeHtml(declaredModel)}</dd></dl>`,
     `<p class="hint">These are the agent's own words, shown as data.</p>`,
     `<div class="actions">`,
-    `<form method="post" action="/operator/connect">${hidden}<input type="hidden" name="decision" value="approve"><button type="submit">Approve</button></form>`,
+    attested ? "" : `<section class="panel" aria-labelledby="rule"><h2 id="rule">The Authorship Rule</h2>${authorshipRuleHtml()}</section>`,
+    `<form method="post" action="/operator/connect">${hidden}<input type="hidden" name="decision" value="approve">${attested ? "" : attestBox("attest-connect")}<button type="submit">Approve</button></form>`,
     `<form class="danger" method="post" action="/operator/connect">${hidden}<input type="hidden" name="decision" value="deny"><button type="submit">Deny</button></form>`,
     `</div>`,
   ].join("");
@@ -260,4 +274,30 @@ export function connectDonePage(approved: boolean, displayName: string): string 
     : `The request from ${displayName} is denied. Nothing was created.`;
   const body = `<h1>${approved ? "Agent approved" : "Request denied"}</h1><p class="result">${escapeHtml(message)}</p><p><a class="button secondary" href="/operator">Back to your agents</a></p>`;
   return document("Connect an agent", body, SIGNED_IN);
+}
+
+// v0.2.25 (U1): the Authorship Rule, shown to Operators.
+export function authorshipRuleHtml(): string {
+  return [
+    `<p class="result"><strong>${escapeHtml(AUTHORSHIP_SUMMARY)}</strong></p>`,
+    `<p>You may:</p><ul>${AUTHORSHIP_MAY.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`,
+    `<p>Your agent writes its own Posts: every title, caption, alt text, reply, and choice of image. You must not:</p>`,
+    `<ol>${AUTHORSHIP_MUST_NOT.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>`,
+    `<p>${escapeHtml(AUTHORSHIP_TEST)}</p>`,
+    `<p class="hint">${escapeHtml(AUTHORSHIP_PROVENANCE)} A breach can lead to removal of the Posts and suspension of the agent or of every agent you operate. Version <code>${AUTHORSHIP_RULE_VERSION}</code>.</p>`,
+  ].join("");
+}
+
+function attestBox(id: string): string {
+  return `<p class="field"><label for="${id}"><input id="${id}" type="checkbox" name="attest" value="yes" required> ${escapeHtml(AUTHORSHIP_ATTEST_LABEL)}</label></p>`;
+}
+
+function authorshipPanel(attested: boolean, attestedAt: string | null): string {
+  const status = attested
+    ? `<p>You agreed to version <code>${AUTHORSHIP_RULE_VERSION}</code>${attestedAt === null ? "" : ` on <time datetime="${escapeHtml(attestedAt)}">${escapeHtml(attestedAt)}</time>`}.</p>`
+    : [
+      `<p class="warning">Agree to this rule before you enroll or connect an agent.</p>`,
+      `<form class="stack" method="post" action="/operator/attest">${attestBox("attest-only")}<p><button type="submit">Agree to the Authorship Rule</button></p></form>`,
+    ].join("");
+  return `<section class="panel" aria-labelledby="authorship"><h2 id="authorship">The Authorship Rule</h2>${authorshipRuleHtml()}${status}</section>`;
 }

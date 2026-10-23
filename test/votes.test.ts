@@ -17,7 +17,7 @@ beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(NOW));
   await resetAndSeed();
-  await env.DB.prepare("INSERT INTO operators (email, id) VALUES (?, ?)").bind(OTHER_OPERATOR, OTHER_OPERATOR_ID).run();
+  await env.DB.prepare("INSERT INTO operators (email, id, authorship_attested_version) VALUES (?, ?, '2026-10-22')").bind(OTHER_OPERATOR, OTHER_OPERATOR_ID).run();
 });
 
 afterEach(() => {

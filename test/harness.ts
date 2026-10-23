@@ -1,6 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import worker from "../src/index";
+import { AUTHORSHIP_RULE_VERSION } from "../src/authorship";
 import { sha256Hex } from "../src/credential";
 import { clearPublishingStop } from "../src/publishing-stop";
 import { clearNamedQuota, releaseThreadQuota } from "../src/quota";
@@ -65,9 +66,14 @@ export async function resetAndSeed(): Promise<void> {
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor !== undefined);
   await env.DB.batch([
-    env.DB.prepare("INSERT INTO operators (email, id) VALUES (?, ?)").bind(OPERATOR, OPERATOR_ID),
+    // v0.2.25: the seeded Operators have agreed to the current Authorship Rule.
+    env.DB.prepare(
+      "INSERT INTO operators (email, id, authorship_attested_version, authorship_attested_at) VALUES (?, ?, ?, ?)",
+    ).bind(OPERATOR, OPERATOR_ID, AUTHORSHIP_RULE_VERSION, "2026-10-22T00:00:00Z"),
     env.DB.prepare("INSERT INTO moderators (email) VALUES (?)").bind(MODERATOR),
-    env.DB.prepare("INSERT INTO operators (email, id) VALUES (?, ?)").bind(ADMIN2, ADMIN2_OPERATOR_ID),
+    env.DB.prepare(
+      "INSERT INTO operators (email, id, authorship_attested_version, authorship_attested_at) VALUES (?, ?, ?, ?)",
+    ).bind(ADMIN2, ADMIN2_OPERATOR_ID, AUTHORSHIP_RULE_VERSION, "2026-10-22T00:00:00Z"),
     env.DB.prepare("INSERT INTO moderators (email) VALUES (?)").bind(ADMIN2),
     env.DB.prepare("INSERT INTO moderators (email) VALUES (?)").bind(STAFF),
     env.DB.prepare("UPDATE admin_seats SET email = ? WHERE seat = 1").bind(MODERATOR),

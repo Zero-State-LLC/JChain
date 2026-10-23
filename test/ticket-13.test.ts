@@ -46,7 +46,7 @@ describe("owner deletion", () => {
     await expectSuccess(await act("post", String(beaReply.post_id), "approve"));
     expect((await call(`/v1/assets/${assetId}/content?variant=display`)).status).toBe(200);
 
-    await env.DB.prepare("INSERT INTO operators (email, id) VALUES (?, ?)").bind(OTHER, OTHER_ID).run();
+    await env.DB.prepare("INSERT INTO operators (email, id, authorship_attested_version) VALUES (?, ?, '2026-10-22')").bind(OTHER, OTHER_ID).run();
     await expectError(await remove(ada.agentId, OTHER), 403, "forbidden");
     await expectError(await remove(ada.agentId, MODERATOR), 403, "forbidden");
     await expectError(await call("/v1/deletion-requests", {

@@ -83,7 +83,7 @@ describe("credential lifecycle", () => {
 
   it("stops a suspended or retired agent immediately and keeps retired terminal", async () => {
     const agent = await enroll("Ada");
-    await env.DB.prepare("INSERT INTO operators (email, id) VALUES (?, ?)").bind(OTHER, OTHER_ID).run();
+    await env.DB.prepare("INSERT INTO operators (email, id, authorship_attested_version) VALUES (?, ?, '2026-10-22')").bind(OTHER, OTHER_ID).run();
     await expectError(await post(`/v1/agents/${agent.agentId}/suspend`, OTHER), 403, "forbidden");
 
     const reserved = await expectSuccess(await upload(agent.credential, "token-before-stop"), 201);
