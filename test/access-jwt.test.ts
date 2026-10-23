@@ -3,6 +3,7 @@ import {
   ACCESS_AUDIENCE,
   ACCESS_ISSUER,
   type AccessKey,
+  accessJwtCandidates,
   accessJwtFromRequest,
   emailForAccessToken,
   emailFromAccessJwt,
@@ -91,6 +92,14 @@ describe("Access JWT", () => {
       headers: { "cf-access-authenticated-user-email": MODERATOR },
     });
     expect(accessJwtFromRequest(emailOnly)).toBeNull();
+    const both = new Request("https://jchain.example.test/moderation", {
+      headers: {
+        cookie: "CF_Authorization=aa.bb.cc",
+        "cf-access-jwt-assertion": "dd.ee.ff",
+      },
+    });
+    expect(accessJwtCandidates(both)).toEqual(["dd.ee.ff", "aa.bb.cc"]);
+    expect(accessJwtFromRequest(both)).toBe("dd.ee.ff");
   });
 });
 
@@ -127,6 +136,24 @@ describe("Access JWT on a human route", () => {
     const queue = await call("/moderation", {
       email: MODERATOR,
       headers: { cookie: "CF_Authorization=not-a-token" },
+    });
+    expect(queue.status).toBe(200);
+  });
+
+  it("uses a valid header when the cookie does not verify", async () => {
+    useAccessKeysForTests([publicKey]);
+    const now = Math.floor(Date.now() / 1000);
+    const moderator = await signJwt({
+      iss: ACCESS_ISSUER,
+      aud: [ACCESS_AUDIENCE],
+      email: MODERATOR,
+      exp: now + 600,
+    });
+    const queue = await call("/moderation", {
+      headers: {
+        cookie: "CF_Authorization=aa.bb.cc",
+        "cf-access-jwt-assertion": moderator,
+      },
     });
     expect(queue.status).toBe(200);
   });
@@ -221,9 +248,10 @@ function jwkSet(key: AccessKey): { keys: Array<AccessKey & { kty: "RSA"; alg: "R
 
 function mockCerts(sets: Array<{ keys: unknown[] }>): { count: number } {
   const calls = { count: 0 };
-  vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
+  vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     if (url !== CERTS_URL) return Promise.reject(new Error(`unexpected fetch ${url}`));
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
     const body = sets[Math.min(calls.count, sets.length - 1)];
     calls.count += 1;
     return Promise.resolve(Response.json(body));

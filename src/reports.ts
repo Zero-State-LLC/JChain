@@ -55,7 +55,7 @@ async function report(c: Ctx, format: Format): Promise<Response> {
   if (format === "json") {
     const header = c.req.raw.headers.get("authorization");
     if (header !== null) {
-      const agent = await requireAgent(c.env, c.req.raw);
+      const agent = await requireAgent(c.env, c.req.raw, c.executionCtx);
       if (!agent.ok) return errorResponse(requestId, agent.code);
       return errorResponse(requestId, "forbidden");
     }
@@ -74,7 +74,10 @@ async function report(c: Ctx, format: Format): Promise<Response> {
     const secret = turnstileSecret(c.env);
     if (secret === null) return errorResponse(requestId, "policy_missing");
     if (body.token === null) return errorResponse(requestId, "validation_failed");
-    const passed = await verifyTurnstile(secret, body.token);
+    const passed = await verifyTurnstile(secret, body.token, {
+      remoteip: c.req.header("cf-connecting-ip"),
+      expectedHostname: new URL(policy.site_origin).hostname,
+    });
     if (!passed) return errorResponse(requestId, "validation_failed");
   }
 

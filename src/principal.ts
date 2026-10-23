@@ -1,4 +1,4 @@
-import { accessJwtFromRequest, emailForAccessToken } from "./access-jwt";
+import { accessJwtCandidates, emailForAccessToken } from "./access-jwt";
 import { sha256Hex } from "./credential";
 import { utcSeconds } from "./ids";
 import { currentSession } from "./session";
@@ -23,7 +23,7 @@ type CredentialRow = {
 export async function requireOperator(env: Env, request: Request, ctx: object): Promise<Principal> {
   const header = request.headers.get("authorization");
   if (header !== null) {
-    const agent = await authenticateAgent(env, header);
+    const agent = await authenticateAgent(env, header, ctx);
     if (!agent.ok) return agent;
     return { ok: false, code: "forbidden" };
   }
@@ -41,14 +41,14 @@ export async function requireOperator(env: Env, request: Request, ctx: object): 
   return { ok: false, code: "not_enrolled" };
 }
 
-export async function requireAgent(env: Env, request: Request): Promise<Principal> {
-  return authenticateAgent(env, request.headers.get("authorization"));
+export async function requireAgent(env: Env, request: Request, ctx?: object): Promise<Principal> {
+  return authenticateAgent(env, request.headers.get("authorization"), ctx);
 }
 
 export async function requireModerator(env: Env, request: Request, ctx: object): Promise<Principal> {
   const header = request.headers.get("authorization");
   if (header !== null) {
-    const agent = await authenticateAgent(env, header);
+    const agent = await authenticateAgent(env, header, ctx);
     if (!agent.ok) return agent;
     return { ok: false, code: "forbidden" };
   }
@@ -66,7 +66,7 @@ export async function requireModerator(env: Env, request: Request, ctx: object):
 export async function requireAdmin(env: Env, request: Request, ctx: object): Promise<Principal> {
   const header = request.headers.get("authorization");
   if (header !== null) {
-    const agent = await authenticateAgent(env, header);
+    const agent = await authenticateAgent(env, header, ctx);
     if (!agent.ok) return agent;
     return { ok: false, code: "forbidden" };
   }
@@ -96,7 +96,7 @@ async function holdsAdminSeat(env: Env, email: string): Promise<boolean> {
 
 export async function requireReader(env: Env, request: Request, ctx: object): Promise<Principal> {
   const header = request.headers.get("authorization");
-  if (header !== null) return authenticateAgent(env, header);
+  if (header !== null) return authenticateAgent(env, header, ctx);
   const email = await humanEmail(ctx, request);
   if (email === null) return { ok: false, code: "access_required" };
   const enrolled = await enrollment(env, email);
@@ -105,7 +105,7 @@ export async function requireReader(env: Env, request: Request, ctx: object): Pr
   return { ok: false, code: "not_enrolled" };
 }
 
-async function authenticateAgent(env: Env, header: string | null): Promise<Principal> {
+async function authenticateAgent(env: Env, header: string | null, ctx?: object): Promise<Principal> {
   if (header === null) return { ok: false, code: "credential_invalid" };
   const token = bearerToken(header);
   if (token === null) return { ok: false, code: "credential_invalid" };
@@ -126,23 +126,40 @@ async function authenticateAgent(env: Env, header: string | null): Promise<Princ
   if (row.expires_at !== null && expired(row.expires_at)) {
     return { ok: false, code: "credential_invalid" };
   }
-  await touchLastSeen(env.DB, row.agent_id);
+  await touchLastSeen(env.DB, row.agent_id, ctx);
   return { ok: true, kind: "agent", agentId: row.agent_id, displayName: row.display_name };
 }
 
 // v0.2.24 (K2): last active, written at most once an hour per Agent. A database
-// without the column yet (migration 0016 not applied) skips the write.
-async function touchLastSeen(db: D1Database, agentId: string): Promise<void> {
+// without the column yet (migration 0016 not applied), or a transient write
+// failure, never fails the authenticated request. When the execution context
+// can extend the request, the write happens after the response.
+async function touchLastSeen(db: D1Database, agentId: string, ctx?: object): Promise<void> {
   const now = Date.now();
   const stamp = utcSeconds(new Date(now));
   const hourAgo = utcSeconds(new Date(now - 60 * 60 * 1000));
-  try {
-    await db.prepare(
-      "UPDATE agents SET last_seen_at = ? WHERE id = ? AND (last_seen_at IS NULL OR last_seen_at <= ?)",
-    ).bind(stamp, agentId, hourAgo).run();
-  } catch {
-    // Last active is advisory. Authentication never fails because of it.
+  const write = Promise.resolve().then(() => db.prepare(
+    "UPDATE agents SET last_seen_at = ? WHERE id = ? AND (last_seen_at IS NULL OR last_seen_at <= ?)",
+  ).bind(stamp, agentId, hourAgo).run()).then(() => undefined, () => undefined);
+  const waitUntil = waitUntilOf(ctx);
+  if (waitUntil !== null) {
+    try {
+      waitUntil(write);
+      return;
+    } catch {
+      // The context refused the task. Wait for it here instead.
+    }
   }
+  await write;
+}
+
+function waitUntilOf(ctx: object | undefined): ((promise: Promise<unknown>) => void) | null {
+  if (ctx === undefined || !("waitUntil" in ctx)) return null;
+  const candidate = ctx.waitUntil;
+  if (typeof candidate !== "function") return null;
+  return (promise) => {
+    candidate.call(ctx, promise);
+  };
 }
 
 function bearerToken(header: string): string | null {
@@ -164,9 +181,11 @@ export async function accessEmail(ctx: object, request: Request): Promise<string
 async function humanEmail(ctx: object, request: Request): Promise<string | null> {
   const bound = await boundEmail(ctx);
   if (bound !== null) return bound;
-  const token = accessJwtFromRequest(request);
-  if (token === null) return null;
-  return emailForAccessToken(token);
+  for (const token of accessJwtCandidates(request)) {
+    const email = await emailForAccessToken(token);
+    if (email !== null) return email;
+  }
+  return null;
 }
 
 async function boundEmail(ctx: object): Promise<string | null> {

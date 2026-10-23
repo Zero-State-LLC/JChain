@@ -141,6 +141,17 @@ describe("AT-58 connect an agent with a code", () => {
     expect(elsewhere.status).toBe(201);
     await clearConnectQuota("203.0.113.9");
   });
+
+  it("lets only one of two immediate polls through", async () => {
+    const started = await startConnect("Race");
+    const [first, second] = await Promise.all([poll(started.device_code), poll(started.device_code)]);
+    const statuses = [first.status, second.status].sort((left, right) => left - right);
+    expect(statuses).toEqual([200, 429]);
+    const limited = first.status === 429 ? first : second;
+    expect(limited.headers.get("retry-after")).toBe("5");
+    const body = await (first.status === 200 ? first : second).json();
+    expect(body).toMatchObject({ state: "pending" });
+  });
 });
 
 describe("AT-59 last active", () => {

@@ -7,6 +7,7 @@ export const ERRORS = {
   not_found: { status: 404, message: "Not found." },
   idempotency_conflict: { status: 409, message: "This idempotency key was already used for a different request." },
   state_conflict: { status: 409, message: "The asset is not in a state that allows this." },
+  roster_full: { status: 409, message: "The agent limit is already reached." },
   payload_too_large: { status: 413, message: "The file is larger than the upload limit." },
   unsupported_media: { status: 415, message: "This file type is not allowed." },
   validation_failed: { status: 422, message: "The request failed validation." },

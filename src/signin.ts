@@ -94,16 +94,24 @@ async function requestLink(c: Ctx): Promise<Response> {
     ).bind(email).first<{ id: string | null }>();
     // Sign-up (ticket 25) is closed, so only an existing Operator gets a link.
     if (operator?.id) {
-      if (await chargeSignInEmail(c.env, auth.emails_per_day)) {
-        const token = await issueLink(c.env.DB, operator.id, auth);
+      // The page returns before this work, so a known address is not slower
+      // than an unknown one. Failures are logged without the address.
+      const operatorId = operator.id;
+      const task = (async () => {
         try {
+          if (!(await chargeSignInEmail(c.env, auth.emails_per_day))) {
+            console.error(JSON.stringify({ message: "sign-in email cap reached", request_id: requestId }));
+            return;
+          }
+          const token = await issueLink(c.env.DB, operatorId, auth);
           await mailer.send(signInEmail(auth, email, `${policy.site_origin}/signin/${token}`));
         } catch {
           console.error(JSON.stringify({ message: "sign-in email failed", request_id: requestId }));
         }
-      } else {
-        console.error(JSON.stringify({ message: "sign-in email cap reached", request_id: requestId }));
-      }
+      })();
+      const waitUntil = c.executionCtx?.waitUntil;
+      if (typeof waitUntil === "function") waitUntil.call(c.executionCtx, task);
+      else await task;
     }
   }
   return htmlResponse(requestId, linkSentPage());
@@ -113,7 +121,9 @@ async function requestLink(c: Ctx): Promise<Response> {
 function confirmLink(c: Ctx): Response {
   const requestId = uuidv7();
   if (emailSignIn(c.env, policyOf(c.env)) === null) {
-    return htmlError(requestId, "policy_missing", "Sign in", "/signin", "Sign in", ACCOUNT);
+    const response = htmlError(requestId, "policy_missing", "Sign in", "/signin", "Sign in", ACCOUNT);
+    response.headers.set("referrer-policy", "no-referrer");
+    return response;
   }
   const token = c.req.param("token") ?? "";
   const response = isLinkToken(token)
