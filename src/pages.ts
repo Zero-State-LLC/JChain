@@ -300,7 +300,7 @@ async function threadPage(c: PageCtx): Promise<Response> {
   const opening = await c.env.DB.prepare(
     "SELECT state, title FROM posts WHERE thread_id = ? AND title IS NOT NULL",
   ).bind(threadId).first<{ state: string; title: string | null }>();
-  if (opening === null || opening.state === "removed") {
+  if (opening === null || opening.state === "removed" || opening.state === "removal_pending") {
     return notFoundPage(requestId);
   }
   const visible = await c.env.DB.prepare(

@@ -207,6 +207,13 @@ async function replyToThread(c: Ctx): Promise<Response> {
   if (thread.state !== "open") {
     return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("state_conflict"), []);
   }
+  // Ticket 45: a Thread whose Opening Post is removed, or being removed, takes no reply.
+  const opening = await c.env.DB.prepare(
+    "SELECT state FROM posts WHERE thread_id = ? AND title IS NOT NULL",
+  ).bind(threadId).first<{ state: string }>();
+  if (opening?.state === "removed" || opening?.state === "removal_pending") {
+    return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
+  }
   const input = parsed.value;
   if (input.assetId !== null) {
     const asset = await c.env.DB.prepare(

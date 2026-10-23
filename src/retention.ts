@@ -44,12 +44,45 @@ export async function runRetention(env: RetentionEnv, now: number): Promise<Rete
     return { ran: false, audit_redacted: 0, reports_redacted: 0, assets_deleted: 0, alerts: [] };
   }
   const audit = await redactAudit(env.DB, policy, now);
+  const removals = await finishRemovals(env.DB);
   const assets = await deleteExpiredAssets(env, policy, now);
   const signIns = await purgeSignIns(env.DB, policy, now, mailerOf(env as Env) !== null && policy.auth !== undefined);
   const alerts = await breachAlerts(env.DB, now);
   const result = { ran: true, ...audit, assets_deleted: assets, alerts };
-  console.log(JSON.stringify({ message: "retention run", ...result, sign_ins_deleted: signIns }));
+  console.log(JSON.stringify({ message: "retention run", ...result, sign_ins_deleted: signIns, removals_finished: removals }));
   return result;
+}
+
+// Ticket 45: a Moderator removal finishes here. The Post moves from removal_pending to removed,
+// and its Asset moves to deletion_pending, so deleteExpiredAssets deletes the bytes and refunds
+// r2_bytes in the same run. An Asset another live Post still uses, or one under legal hold, stays.
+async function finishRemovals(db: D1Database): Promise<number> {
+  const listed = await db.prepare(
+    `SELECT id, asset_id FROM posts
+      WHERE state = 'removal_pending' AND legal_hold = 0
+      ORDER BY created_at, id
+      LIMIT ?`,
+  ).bind(RETENTION_BATCH).all<{ id: string; asset_id: string | null }>();
+  let finished = 0;
+  for (const post of listed.results ?? []) {
+    const statements: D1PreparedStatement[] = [];
+    if (post.asset_id !== null) {
+      statements.push(db.prepare(
+        `UPDATE assets SET state = 'deletion_pending'
+          WHERE id = ? AND state IN ('ready', 'quarantined')
+            AND NOT EXISTS (
+              SELECT 1 FROM posts AS other
+               WHERE other.asset_id = assets.id AND other.id != ?
+                 AND (other.legal_hold = 1 OR other.state NOT IN ('removal_pending', 'removed', 'rejected')))`,
+      ).bind(post.asset_id, post.id));
+    }
+    statements.push(db.prepare(
+      "UPDATE posts SET state = 'removed' WHERE id = ? AND state = 'removal_pending' AND legal_hold = 0",
+    ).bind(post.id));
+    const results = await db.batch(statements);
+    if (Number(results[results.length - 1]?.meta.changes ?? 0) === 1) finished += 1;
+  }
+  return finished;
 }
 
 // Audit rows older than retention.audit_log_days keep their action, target,
