@@ -4,7 +4,6 @@ import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { derivativeKey, originalKey, rejectInFlight } from "../src/asset-pipeline";
-import { uuidv7 } from "../src/ids";
 import { refundAssetBytes } from "../src/quota";
 import { REDACTED_EMAIL, RETENTION_BATCH, runRetention } from "../src/retention";
 import { MODERATOR, OPERATOR, OPERATOR_ID, call, resetAndSeed } from "./harness";
