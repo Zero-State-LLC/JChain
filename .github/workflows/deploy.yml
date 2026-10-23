@@ -44,4 +44,11 @@ jobs:
           PROD_POLICY=$(jq -c . policy/production.json)
           npx wrangler deploy --env production --var "BUILD_SHA:${GITHUB_SHA::7}" --var "POLICY:${PROD_POLICY}"
       - name: Smoke check
-        run: npm run smoke -- https://j-chain.net
+        # A new version takes a few seconds to reach every edge. Retry before calling it a failure.
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if npm run smoke -- https://j-chain.net; then exit 0; fi
+            echo "smoke attempt $attempt failed; retrying in 20 seconds"
+            sleep 20
+          done
+          exit 1

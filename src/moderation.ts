@@ -5,7 +5,7 @@ import { errorResponse, characterLength, jsonResponse, type ErrorCode } from "./
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
-import { requireModerator } from "./principal";
+import { isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { settleSeatFlags } from "./seats";
 
@@ -68,6 +68,16 @@ async function moderate(c: Ctx, format: Format): Promise<Response> {
   if (!parsed.ok) return moderationError(requestId, format, "malformed");
   const action = parseAction(parsed.value);
   if (!action.ok) return moderationError(requestId, format, action.code);
+  if (action.targetType === "post" && action.action === "uphold") {
+    return upholdAppeal(c, requestId, principal.email, action, format);
+  }
+  if (action.targetType === "post" && action.action === "dismiss_flags") {
+    return dismissFlags(c, requestId, principal.email, action, format);
+  }
+  if (action.targetType === "asset" && action.action === "restore_asset") {
+    if (!(await isAdminEmail(c.env, principal.email))) return moderationError(requestId, format, "forbidden");
+    return restoreAsset(c, requestId, principal.email, action, format);
+  }
   if (action.targetType === "post" && isMove(action.action)) {
     return movePost(c, requestId, principal.email, action, format);
   }
@@ -178,9 +188,19 @@ async function movePost(
     action.targetId,
   ));
   const updateIndex = statements.length;
+  // v0.2.29: a Moderator hide is final and never appealable. Restore and approve clear who hid it.
+  const hiddenBy = name === "hide" ? "'moderator'" : name === "restore" || name === "approve" ? "NULL" : "hidden_by";
   statements.push(c.env.DB.prepare(
-    `UPDATE posts SET state = ? WHERE ${where}`,
+    `UPDATE posts SET state = ?, hidden_by = ${hiddenBy} WHERE ${where}`,
   ).bind(destination(name), action.targetId));
+  if (name === "restore") {
+    // An open appeal is answered by the restore, in the same batch, only when the restore applied.
+    statements.push(c.env.DB.prepare(
+      `UPDATE post_appeals SET outcome = 'restore', decided_at = ?, decided_by = ?
+        WHERE post_id = ? AND outcome IS NULL
+          AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+    ).bind(occurredAt, actorEmail, action.targetId, actionId));
+  }
   if (name === "remove" && post.asset_id !== null) {
     statements.push(blockAssetHashes(
       c.env.DB, post.asset_id, PROHIBITED_REASONS.has(action.reasonCode), occurredAt, actionId,
@@ -306,6 +326,139 @@ async function revokeHandle(
     format,
     { agent_id: action.targetId, handle: null },
     `The handle of agent ${action.targetId} is revoked.`,
+  );
+}
+
+// v0.2.29 (CT-21): close an open appeal and keep the hide. Its Seat Flags count as confirmed.
+async function upholdAppeal(
+  c: Ctx,
+  requestId: string,
+  actorEmail: string,
+  action: ActionInput,
+  format: Format,
+): Promise<Response> {
+  const open = await c.env.DB.prepare(
+    "SELECT post_appeals.post_id AS post_id FROM post_appeals WHERE post_id = ? AND outcome IS NULL",
+  ).bind(action.targetId).first();
+  if (!open) {
+    const post = await c.env.DB.prepare("SELECT 1 AS one FROM posts WHERE id = ?").bind(action.targetId).first();
+    return moderationError(requestId, format, post ? "state_conflict" : "not_found");
+  }
+  const actionId = uuidv7();
+  const at = utcSeconds();
+  const results = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO moderation_actions (
+         id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+       )
+       SELECT ?, ?, 'post', post_id, 'uphold', ?, ?, NULL, ? FROM post_appeals WHERE post_id = ? AND outcome IS NULL`,
+    ).bind(actionId, actorEmail, action.reasonCode, action.privateNote, at, action.targetId),
+    c.env.DB.prepare(
+      `UPDATE post_appeals SET outcome = 'uphold', decided_at = ?, decided_by = ?
+        WHERE post_id = ? AND outcome IS NULL AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+    ).bind(at, actorEmail, action.targetId, actionId),
+    c.env.DB.prepare(
+      "UPDATE posts SET queue_first = 0 WHERE id = ? AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)",
+    ).bind(action.targetId, actionId),
+  ]);
+  if (Number(results[1]?.meta.changes ?? 0) !== 1) return moderationError(requestId, format, "state_conflict");
+  await settleSeatFlags(c.env.DB, action.targetId, "uphold", at);
+  console.log(JSON.stringify({ message: "appeal upheld", post_id: action.targetId }));
+  const post = await c.env.DB.prepare("SELECT state FROM posts WHERE id = ?").bind(action.targetId).first<{ state: string }>();
+  return moderationDone(
+    requestId,
+    format,
+    { post_id: action.targetId, state: post?.state ?? "hidden", appeal: "upheld" },
+    `The appeal on Post ${action.targetId} is upheld. The Post stays ${post?.state ?? "hidden"}.`,
+  );
+}
+
+// v0.2.29 (CT-21): clear the open Seat Flags and scan flags on a published Post, without hiding it.
+async function dismissFlags(
+  c: Ctx,
+  requestId: string,
+  actorEmail: string,
+  action: ActionInput,
+  format: Format,
+): Promise<Response> {
+  const post = await c.env.DB.prepare(
+    `SELECT posts.state AS state,
+            (SELECT COUNT(*) FROM seat_flags WHERE seat_flags.post_id = posts.id AND seat_flags.outcome = 'pending') AS seat,
+            (SELECT COUNT(*) FROM post_scans
+              WHERE post_scans.post_id = posts.id AND post_scans.result IN ('unsafe', 'unscanned')
+                AND post_scans.hidden = 0 AND post_scans.dismissed_at IS NULL) AS scan
+       FROM posts WHERE posts.id = ?`,
+  ).bind(action.targetId).first<{ state: string; seat: number; scan: number }>();
+  if (!post) return moderationError(requestId, format, "not_found");
+  if (post.state !== "published" || (Number(post.seat) === 0 && Number(post.scan) === 0)) {
+    return moderationError(requestId, format, "state_conflict");
+  }
+  const actionId = uuidv7();
+  const at = utcSeconds();
+  const results = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO moderation_actions (
+         id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+       )
+       SELECT ?, ?, 'post', id, 'dismiss_flags', ?, ?, NULL, ? FROM posts WHERE id = ? AND state = 'published'`,
+    ).bind(actionId, actorEmail, action.reasonCode, action.privateNote, at, action.targetId),
+    c.env.DB.prepare(
+      `UPDATE post_scans SET dismissed_at = ?
+        WHERE post_id = ? AND dismissed_at IS NULL AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+    ).bind(at, action.targetId, actionId),
+    c.env.DB.prepare(
+      "UPDATE posts SET queue_first = 0 WHERE id = ? AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)",
+    ).bind(action.targetId, actionId),
+  ]);
+  if (Number(results[0]?.meta.changes ?? 0) !== 1) return moderationError(requestId, format, "state_conflict");
+  await settleSeatFlags(c.env.DB, action.targetId, "dismiss_flags", at);
+  console.log(JSON.stringify({ message: "flags dismissed", post_id: action.targetId }));
+  return moderationDone(
+    requestId,
+    format,
+    { post_id: action.targetId, state: "published", flags: "dismissed" },
+    `The flags on Post ${action.targetId} are dismissed.`,
+  );
+}
+
+// v0.2.29 (CT-21): Admin only. A falsely quarantined Asset returns to ready and leaves the Blocked Hash list.
+async function restoreAsset(
+  c: Ctx,
+  requestId: string,
+  actorEmail: string,
+  action: ActionInput,
+  format: Format,
+): Promise<Response> {
+  const asset = await c.env.DB.prepare(
+    `SELECT state, EXISTS (SELECT 1 FROM posts WHERE posts.asset_id = assets.id AND posts.legal_hold = 1) AS held
+       FROM assets WHERE id = ?`,
+  ).bind(action.targetId).first<{ state: string; held: number }>();
+  if (!asset) return moderationError(requestId, format, "not_found");
+  if (asset.state !== "quarantined" || Number(asset.held) === 1) return moderationError(requestId, format, "state_conflict");
+  const guard = "id = ? AND state = 'quarantined' AND NOT EXISTS (SELECT 1 FROM posts WHERE posts.asset_id = assets.id AND posts.legal_hold = 1)";
+  const ok = await auditedUpdate(c.env.DB, {
+    actorEmail,
+    targetType: "asset",
+    targetId: action.targetId,
+    action: "restore_asset",
+    reasonCode: action.reasonCode,
+    privateNote: action.privateNote,
+    guard,
+    update: `UPDATE assets SET state = 'ready' WHERE ${guard}`,
+    updateValue: null,
+    extra: (actionId) => [
+      c.env.DB.prepare(
+        "DELETE FROM blocked_hashes WHERE asset_id = ? AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)",
+      ).bind(action.targetId, actionId),
+    ],
+  });
+  if (!ok) return moderationError(requestId, format, "state_conflict");
+  console.log(JSON.stringify({ message: "asset restored", asset_id: action.targetId }));
+  return moderationDone(
+    requestId,
+    format,
+    { asset_id: action.targetId, state: "ready" },
+    `Asset ${action.targetId} is ready again.`,
   );
 }
 
