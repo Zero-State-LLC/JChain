@@ -236,6 +236,14 @@ export async function settleSeatFlags(
       ? "overturned"
       : null;
   if (outcome === null) return;
+  const pending = await db.prepare(
+    "SELECT DISTINCT seat FROM seat_flags WHERE post_id = ? AND outcome = 'pending'",
+  ).bind(postId).all<{ seat: number }>();
+  const seats = pending.results ?? [];
+  if (seats.length === 0) return;
+  await db.prepare(
+    "UPDATE seat_flags SET outcome = ?, resolved_at = ? WHERE post_id = ? AND outcome = 'pending'",
+  ).bind(outcome, at, postId).run();
   let scorerSeat: number | null = null;
   if (actorEmail !== undefined) {
     const row = await db.prepare(
@@ -244,18 +252,9 @@ export async function settleSeatFlags(
     if (!row) return;
     scorerSeat = Number(row.seat);
   }
-  const pending = await db.prepare(
-    "SELECT DISTINCT seat FROM seat_flags WHERE post_id = ? AND outcome = 'pending'",
-  ).bind(postId).all<{ seat: number }>();
-  const seats = (pending.results ?? [])
-    .map((row) => Number(row.seat))
-    .filter((seat) => scorerSeat === null || seat !== scorerSeat);
-  if (seats.length === 0) return;
-  for (const seat of seats) {
-    await db.prepare(
-      "UPDATE seat_flags SET outcome = ?, resolved_at = ? WHERE post_id = ? AND seat = ? AND outcome = 'pending'",
-    ).bind(outcome, at, postId, seat).run();
-    await maybePauseSeat(db, seat, policy);
+  for (const row of seats) {
+    if (scorerSeat !== null && Number(row.seat) === scorerSeat) continue;
+    await maybePauseSeat(db, Number(row.seat), policy);
   }
 }
 
@@ -264,9 +263,21 @@ async function maybePauseSeat(db: D1Database, seat: number, policy?: Policy | nu
   const minReviewed = policy?.review?.seat_accuracy_min_reviewed ?? DEFAULT_ACCURACY_MIN_REVIEWED;
   const accuracyPercent = policy?.review?.seat_accuracy_percent ?? DEFAULT_ACCURACY_PERCENT;
   const listed = await db.prepare(
-    `SELECT outcome FROM seat_flags
-      WHERE seat = ? AND trial = 0 AND outcome IN ('confirmed', 'overturned')
-      ORDER BY resolved_at DESC, id DESC
+    `SELECT seat_flags.outcome AS outcome
+       FROM seat_flags
+      WHERE seat_flags.seat = ?
+        AND seat_flags.trial = 0
+        AND seat_flags.outcome IN ('confirmed', 'overturned')
+        AND EXISTS (
+          SELECT 1
+            FROM moderation_actions
+            JOIN admin_seats ON lower(admin_seats.email) = lower(moderation_actions.actor_email)
+           WHERE moderation_actions.target_type = 'post'
+             AND moderation_actions.target_id = seat_flags.post_id
+             AND moderation_actions.created_at = seat_flags.resolved_at
+             AND admin_seats.seat != seat_flags.seat
+        )
+      ORDER BY seat_flags.resolved_at DESC, seat_flags.id DESC
       LIMIT ?`,
   ).bind(seat, accuracyWindow).all<{ outcome: string }>();
   const rows = listed.results ?? [];
