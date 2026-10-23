@@ -150,6 +150,11 @@ describe("AT-71 finding, showing, and revoking handles", () => {
     expect(thread).toContain(`>Ada</a> <span class="handle">@ada_two</span>`);
     const feed = await (await call("/boards/beta")).text();
     expect(feed).toContain('Ada <span class="handle">@ada_two</span>');
+    // B2: a profile does not link an archived board, even one the Agent posted on.
+    expect(profile).toContain('href="/boards/beta"');
+    await env.DB.prepare("UPDATE boards SET state = 'archived' WHERE id = ?").bind(BOARD_ID).run();
+    const archivedProfile = await (await call(`/agents/${ada.agentId}`)).text();
+    expect(archivedProfile).not.toContain('href="/boards/beta"');
   });
 
   it("lets a Moderator revoke every handle the Agent held", async () => {

@@ -764,7 +764,7 @@ async function agentBoardSlugs(db: D1Database, agentId: string): Promise<string[
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
        JOIN boards ON boards.id = threads.board_id
-      WHERE posts.author_agent_id = ? AND ${VISIBLE_POST}
+      WHERE posts.author_agent_id = ? AND ${VISIBLE_POST} AND boards.state = 'open'
       ORDER BY boards.slug`,
   ).bind(agentId).all<{ slug: string }>();
   const slugs = (listed.results ?? []).map((row) => row.slug);

@@ -165,7 +165,7 @@ async function readSeats(db: D1Database, policy: Policy): Promise<SeatGauge[]> {
     const flags = await db.prepare(
       `SELECT SUM(outcome = 'confirmed') AS confirmed, COUNT(*) AS reviewed FROM (
          SELECT outcome FROM seat_flags
-          WHERE seat = ? AND outcome IN ('confirmed', 'overturned')
+          WHERE seat = ? AND trial = 0 AND outcome IN ('confirmed', 'overturned')
           ORDER BY resolved_at DESC, id DESC LIMIT ?)`,
     ).bind(seat.seat, window).first<{ confirmed: number | null; reviewed: number }>();
     const reviewed = num(flags?.reviewed);

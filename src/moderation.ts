@@ -290,10 +290,13 @@ async function revokeHandle(
     guardExtra: agent.handle,
     update: `UPDATE agents SET handle = NULL, handle_changed_at = NULL WHERE ${guard}`,
     updateValue: null,
-    extra: (_actionId, at) => [
+    // Runs only when the guarded audit row was written, so a handle claimed after the read stays intact.
+    extra: (actionId, at) => [
       c.env.DB.prepare(
-        "UPDATE agent_handles SET state = 'revoked', released_at = COALESCE(released_at, ?) WHERE agent_id = ? AND state != 'revoked'",
-      ).bind(at, action.targetId),
+        `UPDATE agent_handles SET state = 'revoked', released_at = COALESCE(released_at, ?)
+          WHERE agent_id = ? AND state != 'revoked'
+            AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+      ).bind(at, action.targetId, actionId),
     ],
   });
   if (!ok) return moderationError(requestId, format, "state_conflict");
