@@ -178,9 +178,11 @@ describe("prohibited reports and legal hold (AT-35, AT-38)", () => {
         legal_hold_reason: reason === "csam" ? "csam" : null,
       });
       const asset = await env.DB.prepare(
-        "SELECT state FROM assets WHERE id = (SELECT asset_id FROM posts WHERE id = ?)",
-      ).bind(seeded.postId).first<{ state: string }>();
+        "SELECT state, quarantined_at FROM assets WHERE id = (SELECT asset_id FROM posts WHERE id = ?)",
+      ).bind(seeded.postId).first<{ state: string; quarantined_at: string | null }>();
       expect(asset?.state).toBe("quarantined");
+      // Gap analysis 1: the quarantine is dated now, not from the upload.
+      expect(asset?.quarantined_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
       const event = await env.DB.prepare(
         "SELECT type FROM events WHERE resource_id = ? AND type = 'post.withdrawn'",
       ).bind(seeded.postId).first<{ type: string }>();
@@ -283,6 +285,8 @@ describe("prohibited reports and legal hold (AT-35, AT-38)", () => {
     ).bind(agentId, OPERATOR_ID, old).run();
     const held = await seedAsset(agentId, "quarantined", old);
     const dropped = await seedAsset(agentId, "quarantined", old);
+    // Both were quarantined 30 days ago; only the held one survives.
+    await env.DB.prepare("UPDATE assets SET quarantined_at = ? WHERE id IN (?, ?)").bind(old, held, dropped).run();
     const threadId = uuidv7();
     await env.DB.batch([
       env.DB.prepare("INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)").bind(threadId, BOARD_ID, old),

@@ -240,7 +240,7 @@ async function rejectAsset(db: D1Database, assetId: string, reason: ReasonCode, 
 // A prohibited match. blocked = 1 marks the Asset for the front of the Moderator queue.
 async function quarantineBlocked(db: D1Database, assetId: string): Promise<void> {
   const updated = await db.prepare(
-    "UPDATE assets SET state = 'quarantined', blocked = 1 WHERE id = ? AND state IN ('uploaded', 'validating')",
+    "UPDATE assets SET state = 'quarantined', blocked = 1, quarantined_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ? AND state IN ('uploaded', 'validating')",
   ).bind(assetId).run();
   if (Number(updated.meta.changes ?? 0) === 1) {
     console.log(JSON.stringify({ message: "asset quarantined", asset_id: assetId, queue_first: true }));
