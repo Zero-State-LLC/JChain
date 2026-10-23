@@ -757,7 +757,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/posts/{id}/flag": {
         put: {
           operationId: "flagPost",
-          summary: "Seat Flag from a bound Seat Agent. Trial flags leave the Post published. An active seat moves a published Post to flagged. A paused seat is forbidden.",
+          summary: "Seat Flag from a bound Seat Agent. Trial flags leave the Post published. For an active seat, an id-document or csam flag hides the Post and quarantines its image at once; one off-topic flag only queues it, and an off-topic flag from the other seat too hides it. No flag removes. A paused seat is forbidden.",
           requestBody: {
             required: true,
             content: {

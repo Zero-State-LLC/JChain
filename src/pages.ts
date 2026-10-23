@@ -517,7 +517,7 @@ async function queuePage(c: PageCtx): Promise<Response> {
   const hidden = await queueRows(c.env.DB, "hidden", cursors.hidden_cursor, opened.limit);
   const rejected = await queueRows(c.env.DB, "rejected", cursors.rejected_cursor, opened.limit);
   // v0.2.29: Seat Flag hides, and open appeals of automatic hides (CT-21).
-  const flagged = await queueRows(c.env.DB, "flagged", null, opened.limit);
+  const flagged = await seatHideRows(c.env.DB, opened.limit);
   const appeals = await appealRows(c.env.DB);
   const quarantined = await queueRows(c.env.DB, "quarantined", null, opened.limit);
   const first = await firstRows(c.env.DB);
@@ -546,7 +546,7 @@ async function queuePage(c: PageCtx): Promise<Response> {
     nextLink("/moderation", opened.limit, kept, "pending_cursor", pending.next, "Pending", "Next pending"),
     appealSection(appeals),
     flagsSection(flags),
-    queueSection("Flagged", flagged.kept, ["restore", "quarantine", "remove"], "No posts are flagged by the Seat Agents."),
+    queueSection("Flagged", flagged.kept, ["restore", "quarantine", "remove"], "No posts are hidden by the Seat Agents."),
     quarantineSection(quarantined.kept),
     queueSection("Published", published.kept, ["hide", "remove"], "No published posts."),
     nextLink("/moderation", opened.limit, kept, "published_cursor", published.next, "Published", "Next published"),
@@ -608,6 +608,16 @@ async function queueRows(
            posts.asset_id AS asset_id
       FROM posts
      WHERE posts.state = ?`, "ASC", [state], { cursor, limit });
+}
+
+// C-12b: Seat Flag hides (hidden_by seat_agents), plus any legacy 'flagged' Post.
+async function seatHideRows(db: D1Database, limit: number): Promise<{ kept: QueueRow[]; next: string | null }> {
+  return listedPage<QueueRow>(db, `
+    SELECT posts.id AS id, posts.created_at AS created_at, posts.id AS post_id,
+           posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
+           posts.asset_id AS asset_id
+      FROM posts
+     WHERE (posts.state = 'hidden' AND posts.hidden_by = 'seat_agents') OR posts.state = 'flagged'`, "ASC", [], { cursor: null, limit });
 }
 
 type QueueAction = "approve" | "reject" | "hide" | "restore" | "remove" | "quarantine" | "uphold" | "dismiss_flags";
@@ -731,7 +741,7 @@ function flagsSection(items: FlagQueueRow[]): string {
         queueItem(item, ["hide", "remove", "dismiss_flags"]),
       ].join("");
     }).join("");
-  return `<section class="queue" aria-labelledby="queue-flags"><h2 id="queue-flags">Flags</h2><p class="hint">Published posts the content scan marked unsafe or could not scan, or that a Seat Agent flagged in its trial. Hide, remove, or dismiss the flags.</p>${body}</section>`;
+  return `<section class="queue" aria-labelledby="queue-flags"><h2 id="queue-flags">Flags</h2><p class="hint">Published posts the content scan marked unsafe or could not scan, or that a Seat Agent flagged: in its trial, or with one off-topic flag, which also puts the post first in line. A second seat's off-topic flag, or one prohibited flag, hides the post instead. Hide, remove, or dismiss the flags.</p>${body}</section>`;
 }
 
 type GaugeRow = { n?: number | string; oldest?: string | null };
@@ -923,12 +933,19 @@ async function firstRows(db: D1Database): Promise<FirstRow[]> {
             CASE
               WHEN posts.legal_hold = 1 THEN 'legal hold'
               WHEN EXISTS (SELECT 1 FROM post_appeals WHERE post_appeals.post_id = posts.id AND post_appeals.outcome IS NULL) THEN 'appeal'
-              WHEN posts.state = 'flagged' THEN 'seat flag'
+              WHEN posts.state = 'flagged' OR posts.hidden_by = 'seat_agents' THEN 'seat hide'
+              WHEN posts.state = 'published' THEN 'seat flag'
               WHEN posts.hidden_by = 'scan' THEN 'scan hide'
               ELSE 'queued first'
             END AS reason
        FROM posts
-      WHERE posts.queue_first = 1 AND posts.state IN ('pending_review', 'hidden', 'flagged', 'quarantined')
+      WHERE posts.queue_first = 1 AND (
+        posts.state IN ('pending_review', 'hidden', 'flagged', 'quarantined')
+        -- AT-42: one off-topic Seat Flag leaves the Post published and puts it first in line.
+        OR (posts.state = 'published' AND EXISTS (
+          SELECT 1 FROM seat_flags WHERE seat_flags.post_id = posts.id AND seat_flags.outcome = 'pending' AND seat_flags.trial = 0
+        ))
+      )
       ORDER BY posts.legal_hold DESC, posts.created_at ASC, posts.id ASC
       LIMIT 50`,
   ).all<FirstRow>();

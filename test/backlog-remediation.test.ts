@@ -5,6 +5,7 @@ import { derivativeKey } from "../src/asset-pipeline";
 import { utcSeconds, uuidv7 } from "../src/ids";
 import { runRetention } from "../src/retention";
 import { LEGAL_LINKS } from "../src/rules-copy";
+import postpublishFixture from "./fixtures/policy-postpublish.json";
 import {
   ADMIN,
   ADMIN2,
@@ -16,6 +17,7 @@ import {
   resetAndSeed,
 } from "./harness";
 
+const POSTPUBLISH = JSON.stringify(postpublishFixture);
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const CSP = "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'";
 
@@ -410,21 +412,30 @@ describe("seat flags (AT-42, AT-43)", () => {
     await expectError(await flag((await seedPost(author.agentId, "pending_review")).postId, seat.credential), 404, "not_found");
     await expectError(await flag((await seedPost(author.agentId)).postId, author.credential), 403, "forbidden");
 
+    // Trial flags are shadow whatever the reason: the Post stays published and its image ready.
+    const trialReasons = ["off-topic", "id-document", "csam"] as const;
     for (let index = 1; index <= 10; index += 1) {
       const seeded = await seedPost(author.agentId);
-      const body = await expectJson(await flag(seeded.postId, seat.credential), 200);
+      const body = await expectJson(await flag(seeded.postId, seat.credential, trialReasons[index % 3]), 200);
       expect(body).toMatchObject({ state: "published", trial: 1, event_type: "post.flagged_trial" });
-      const post = await env.DB.prepare("SELECT state FROM posts WHERE id = ?").bind(seeded.postId).first<{ state: string }>();
-      expect(post?.state).toBe("published");
+      const post = await env.DB.prepare(
+        "SELECT posts.state AS state, posts.queue_first AS queue_first, assets.state AS asset_state FROM posts JOIN assets ON assets.id = posts.asset_id WHERE posts.id = ?",
+      ).bind(seeded.postId).first<{ state: string; queue_first: number; asset_state: string }>();
+      expect(post).toEqual({ state: "published", queue_first: 0, asset_state: "ready" });
+      const withdrawn = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM events WHERE resource_id = ? AND type = 'post.withdrawn'",
+      ).bind(seeded.postId).first<{ n: number }>();
+      expect(Number(withdrawn?.n)).toBe(0);
     }
     const promoted = await env.DB.prepare(
       "SELECT seat_state, seat_trial_count FROM admin_seats WHERE seat = 1",
     ).first<{ seat_state: string; seat_trial_count: number }>();
     expect(promoted).toEqual({ seat_state: "active", seat_trial_count: 10 });
 
+    // AT-42: one active off-topic flag only queues the Post; it stays published.
     const live = await seedPost(author.agentId);
     const active = await expectJson(await flag(live.postId, seat.credential), 200);
-    expect(active).toMatchObject({ state: "flagged", trial: 0, event_type: "post.flagged" });
+    expect(active).toMatchObject({ state: "published", trial: 0, event_type: "post.flagged" });
 
     await env.DB.prepare(
       "UPDATE admin_seats SET seat_state = 'active', seat_trial_count = 10 WHERE seat = 1",
@@ -432,7 +443,6 @@ describe("seat flags (AT-42, AT-43)", () => {
     // Duplicate flag by the same seat on the same Post is state_conflict.
     const dupPost = await seedPost(author.agentId);
     await expectJson(await flag(dupPost.postId, seat.credential), 200);
-    await env.DB.prepare("UPDATE posts SET state = 'published' WHERE id = ?").bind(dupPost.postId).run();
     await expectError(await flag(dupPost.postId, seat.credential), 409, "state_conflict");
 
     // Own-Admin (ADMIN) and non-seat Moderator (STAFF) decisions do not score Seat 1.
@@ -445,7 +455,7 @@ describe("seat flags (AT-42, AT-43)", () => {
           body: {
             target_type: "post",
             target_id: unscored.postId,
-            action: "approve",
+            action: "dismiss_flags",
             reason_code: "rules",
           },
         }), 200);
@@ -453,6 +463,10 @@ describe("seat flags (AT-42, AT-43)", () => {
     }
     const stillActive = await env.DB.prepare("SELECT seat_state FROM admin_seats WHERE seat = 1").first<{ seat_state: string }>();
     expect(stillActive?.seat_state).toBe("active");
+    // The accuracy gauge counts the same flags CT-22 does, so none of those twelve.
+    expect(await (await call("/admin", { email: ADMIN })).text()).toMatch(
+      /Seat 1<\/span> active, agent <code>[^<]+<\/code>\. Accuracy Not enough reviewed \(0\)/,
+    );
 
     // Other Admin (ADMIN2) scores Seat 1; after > 5 reviewed flags (6 overturned), Seat 1 pauses.
     for (let index = 0; index < 6; index += 1) {
@@ -463,11 +477,14 @@ describe("seat flags (AT-42, AT-43)", () => {
         body: {
           target_type: "post",
           target_id: seeded.postId,
-          action: "approve",
+          action: "dismiss_flags",
           reason_code: "rules",
         },
       }), 200);
     }
+    expect(await (await call("/admin", { email: ADMIN })).text()).toMatch(
+      /Seat 1<\/span> paused, agent <code>[^<]+<\/code>\. Accuracy 0% of 6 reviewed/,
+    );
     const paused = await env.DB.prepare("SELECT seat_state FROM admin_seats WHERE seat = 1").first<{ seat_state: string }>();
     expect(paused?.seat_state).toBe("paused");
     await expectError(await flag((await seedPost(author.agentId)).postId, seat.credential), 403, "forbidden");
@@ -484,6 +501,117 @@ describe("seat flags (AT-42, AT-43)", () => {
     expect(JSON.stringify(restored)).not.toContain("@");
     const again = await expectJson(await flag((await seedPost(author.agentId)).postId, seat.credential), 200);
     expect(again.trial).toBe(0);
+  });
+
+  it("hides a Post and quarantines its image at once on one prohibited flag, in one batch (AT-42, C-12b)", async () => {
+    await seatOperator(ADMIN);
+    const seat = await enroll("Seat", ADMIN);
+    const author = await enroll("Author", OPERATOR);
+    await bindActive(1, seat.agentId);
+
+    for (const reason of ["id-document", "csam"] as const) {
+      const seeded = await seedPost(author.agentId);
+      const body = await expectJson(await flag(seeded.postId, seat.credential, reason), 200);
+      expect(body).toMatchObject({ post_id: seeded.postId, state: "hidden", trial: 0 });
+      const post = await env.DB.prepare(
+        "SELECT state, hidden_by, queue_first, legal_hold FROM posts WHERE id = ?",
+      ).bind(seeded.postId).first<{ state: string; hidden_by: string; queue_first: number; legal_hold: number }>();
+      // A Seat Flag places no legal hold; a Moderator decides that (Part D item 5).
+      expect(post).toEqual({ state: "hidden", hidden_by: "seat_agents", queue_first: 1, legal_hold: 0 });
+      const asset = await env.DB.prepare("SELECT state, quarantined_at FROM assets WHERE id = ?")
+        .bind(seeded.assetId).first<{ state: string; quarantined_at: string | null }>();
+      expect(asset?.state).toBe("quarantined");
+      expect(asset?.quarantined_at).not.toBeNull();
+      const blocked = await env.DB.prepare("SELECT prohibited FROM blocked_hashes WHERE asset_id = ?")
+        .bind(seeded.assetId).all<{ prohibited: number }>();
+      expect(blocked.results).toEqual([{ prohibited: 1 }]);
+      const withdrawn = await env.DB.prepare(
+        "SELECT id FROM events WHERE resource_id = ? AND type = 'post.withdrawn'",
+      ).bind(seeded.postId).all<{ id: string }>();
+      expect(withdrawn.results).toHaveLength(1);
+      const audit = await env.DB.prepare(
+        "SELECT actor_email, action, reason_code, event_id FROM moderation_actions WHERE target_id = ?",
+      ).bind(seeded.postId).all<{ actor_email: string; action: string; reason_code: string; event_id: string }>();
+      expect(audit.results).toEqual([
+        { actor_email: "seat_agent", action: "hide", reason_code: reason, event_id: withdrawn.results?.[0]?.id },
+      ]);
+      const queue = await (await call("/moderation", { email: STAFF })).text();
+      const firstLine = queue.slice(queue.indexOf('id="queue-first"'), queue.indexOf('id="reports"'));
+      expect(firstLine).toContain(seeded.postId);
+      expect(firstLine).toContain("seat hide");
+    }
+  });
+
+  it("only queues a Post on one off-topic flag, and hides it when the other seat agrees (AT-42)", async () => {
+    await seatOperator(ADMIN);
+    const one = await enroll("SeatOne", ADMIN);
+    const two = await enroll("SeatTwo", ADMIN2);
+    const author = await enroll("Author", OPERATOR);
+    await bindActive(1, one.agentId);
+    await bindActive(2, two.agentId);
+    const seeded = await seedPost(author.agentId);
+
+    const first = await expectJson(await flag(seeded.postId, two.credential), 200);
+    expect(first).toMatchObject({ state: "published", trial: 0, event_type: "post.flagged" });
+    const queued = await env.DB.prepare("SELECT state, hidden_by, queue_first FROM posts WHERE id = ?")
+      .bind(seeded.postId).first<{ state: string; hidden_by: string | null; queue_first: number }>();
+    expect(queued).toEqual({ state: "published", hidden_by: null, queue_first: 1 });
+    const queue = await (await call("/moderation", { email: STAFF })).text();
+    const firstLine = queue.slice(queue.indexOf('id="queue-first"'), queue.indexOf('id="reports"'));
+    expect(firstLine).toContain(seeded.postId);
+    expect(firstLine).toContain("seat flag");
+    // The Flags section lists the same queued Post for Hide, Remove, or Dismiss flags.
+    const flagsSection = queue.slice(queue.indexOf('id="queue-flags"'), queue.indexOf('id="queue-flagged"'));
+    expect(flagsSection).toContain(seeded.postId);
+    expect(flagsSection).toContain("1 seat flag");
+    const quiet = await env.DB.prepare(
+      `SELECT (SELECT COUNT(*) FROM events WHERE resource_id = ? AND type = 'post.withdrawn') AS withdrawn,
+              (SELECT COUNT(*) FROM moderation_actions WHERE target_id = ?) AS audits`,
+    ).bind(seeded.postId, seeded.postId).first<{ withdrawn: number; audits: number }>();
+    expect({ withdrawn: Number(quiet?.withdrawn), audits: Number(quiet?.audits) }).toEqual({ withdrawn: 0, audits: 0 });
+
+    const second = await expectJson(await flag(seeded.postId, one.credential), 200);
+    expect(second).toMatchObject({ state: "hidden", trial: 0 });
+    const hidden = await env.DB.prepare(
+      "SELECT posts.state AS state, posts.hidden_by AS hidden_by, posts.queue_first AS queue_first, assets.state AS asset_state FROM posts JOIN assets ON assets.id = posts.asset_id WHERE posts.id = ?",
+    ).bind(seeded.postId).first<{ state: string; hidden_by: string; queue_first: number; asset_state: string }>();
+    // An off-topic hide quarantines nothing and blocks no hash.
+    expect(hidden).toEqual({ state: "hidden", hidden_by: "seat_agents", queue_first: 1, asset_state: "ready" });
+    const blocked = await env.DB.prepare("SELECT COUNT(*) AS n FROM blocked_hashes").first<{ n: number }>();
+    expect(Number(blocked?.n)).toBe(0);
+    const audit = await env.DB.prepare("SELECT actor_email, action FROM moderation_actions WHERE target_id = ?")
+      .bind(seeded.postId).all<{ actor_email: string; action: string }>();
+    expect(audit.results).toEqual([{ actor_email: "seat_agent", action: "hide" }]);
+    const withdrawn = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM events WHERE resource_id = ? AND type = 'post.withdrawn'",
+    ).bind(seeded.postId).first<{ n: number }>();
+    expect(Number(withdrawn?.n)).toBe(1);
+    const afterHide = await (await call("/moderation", { email: STAFF })).text();
+    const flaggedSection = afterHide.slice(afterHide.indexOf('id="queue-flagged"'), afterHide.indexOf('id="queue-quarantined"'));
+    expect(flaggedSection).toContain(seeded.postId);
+    expect(afterHide.slice(afterHide.indexOf('id="queue-flags"'), afterHide.indexOf('id="queue-flagged"'))).not.toContain(seeded.postId);
+
+    // The author appeals the seat hide (v0.2.29); a restore answers it and overturns both flags.
+    const review = await expectJson(await call(`/v1/posts/${seeded.postId}/review`, { bearer: author.credential, policy: POSTPUBLISH }), 200);
+    expect(review).toMatchObject({ state: "hidden", review_state: "hidden", hidden_by: "seat_agents" });
+    expect(typeof review.appealable_until).toBe("string");
+    const appealed = await call(`/v1/posts/${seeded.postId}/appeal`, {
+      bearer: author.credential,
+      headers: { "idempotency-key": "seat-hide-appeal" },
+      body: {},
+      policy: POSTPUBLISH,
+    });
+    expect(appealed.status).toBe(201);
+    await expectJson(await call("/v1/moderation/actions", {
+      email: STAFF,
+      body: { target_type: "post", target_id: seeded.postId, action: "restore", reason_code: "rules" },
+    }), 200);
+    const flags = await env.DB.prepare("SELECT outcome FROM seat_flags WHERE post_id = ? ORDER BY seat")
+      .bind(seeded.postId).all<{ outcome: string }>();
+    expect(flags.results).toEqual([{ outcome: "overturned" }, { outcome: "overturned" }]);
+    const answered = await env.DB.prepare("SELECT outcome FROM post_appeals WHERE post_id = ?")
+      .bind(seeded.postId).first<{ outcome: string }>();
+    expect(answered?.outcome).toBe("restore");
   });
 
   it("binds only the seat Admin's own Agent and restarts the trial on bind and readmit", async () => {
@@ -677,12 +805,25 @@ function threadBody(boardId: string): Record<string, unknown> {
   };
 }
 
-function flag(postId: string, credential: string): Promise<Response> {
+function flag(
+  postId: string,
+  credential: string,
+  reason: "off-topic" | "id-document" | "csam" = "off-topic",
+): Promise<Response> {
   return call(`/v1/posts/${postId}/flag`, {
     method: "PUT",
     bearer: credential,
-    body: { reason: "off-topic" },
+    body: { reason },
   });
+}
+
+// Bind a seat's Agent through the admin route, then end its trial so its flags act.
+async function bindActive(seat: 1 | 2, agentId: string): Promise<void> {
+  await expectJson(await call(`/v1/admin/seats/${seat}`, {
+    email: seat === 1 ? ADMIN2 : ADMIN,
+    body: { action: "bind_seat_agent", agent_id: agentId },
+  }), 200);
+  await env.DB.prepare("UPDATE admin_seats SET seat_state = 'active', seat_trial_count = 10 WHERE seat = ?").bind(seat).run();
 }
 
 function form(pathname: string, fields: Record<string, string>, email: string): Promise<Response> {

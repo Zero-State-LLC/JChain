@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { blockAssetHashes } from "./blocked-hashes";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
@@ -72,13 +73,15 @@ async function flagPost(c: Ctx): Promise<Response> {
   if (Object.keys(body.value).some((key) => key !== "reason")) return errorResponse(requestId, "malformed");
 
   const post = await c.env.DB.prepare(
-    `SELECT posts.state AS state, author.operator_id AS author_operator, seat_agent.operator_id AS seat_operator
+    `SELECT posts.state AS state, posts.asset_id AS asset_id,
+            author.operator_id AS author_operator, seat_agent.operator_id AS seat_operator
        FROM posts
        JOIN agents AS author ON author.id = posts.author_agent_id
        JOIN agents AS seat_agent ON seat_agent.id = ?
       WHERE posts.id = ?`,
   ).bind(principal.agentId, postId).first<{
     state: string;
+    asset_id: string | null;
     author_operator: string | null;
     seat_operator: string | null;
   }>();
@@ -95,56 +98,118 @@ async function flagPost(c: Ctx): Promise<Response> {
   const trial = seat.seat_state === "trial" || seat.seat_trial_count < threshold;
   const now = utcSeconds();
   const flagId = uuidv7();
-  const eventId = uuidv7();
-  const eventType = trial ? "post.flagged_trial" : "post.flagged";
+  if (trial) {
+    // Shadow trial (Open Question 17): recorded, counted, and the Post stays published.
+    const results = await c.env.DB.batch([
+      insertFlag(c.env.DB, flagId, seat.seat, principal.agentId, postId, reason, true, now),
+      flagEvent(c.env.DB, "post.flagged_trial", postId, flagId, now),
+      c.env.DB.prepare(
+        `UPDATE admin_seats
+            SET seat_trial_count = seat_trial_count + 1,
+                seat_state = CASE WHEN seat_trial_count + 1 >= ? THEN 'active' ELSE seat_state END
+          WHERE seat = ? AND EXISTS (SELECT 1 FROM seat_flags WHERE id = ?)`,
+      ).bind(threshold, seat.seat, flagId),
+    ]);
+    if (Number(results[0]?.meta.changes ?? 0) !== 1) return errorResponse(requestId, "state_conflict");
+    console.log(JSON.stringify({ message: "seat flag trial", post_id: postId, seat: seat.seat, trial: 1 }));
+    return jsonResponse(requestId, { post_id: postId, state: "published", trial: 1, event_type: "post.flagged_trial" });
+  }
+
+  // C-12b, Part F item 5, AT-42: either Seat Agent hides and quarantines prohibited content at once.
+  // An off-topic hide needs a pending non-trial off-topic flag from the other seat; one alone only
+  // queues the Post first. Neither removes. Every write sits in one batch, keyed on this flag's row.
+  const prohibited = reason === "id-document" || reason === "csam";
+  const hideWhere = prohibited
+    ? "posts.id = ? AND posts.state = 'published' AND EXISTS (SELECT 1 FROM seat_flags AS mine WHERE mine.id = ?)"
+    : `posts.id = ? AND posts.state = 'published' AND EXISTS (SELECT 1 FROM seat_flags AS mine WHERE mine.id = ?)
+       AND EXISTS (
+         SELECT 1 FROM seat_flags AS other
+          WHERE other.post_id = posts.id AND other.seat != ? AND other.reason = 'off-topic'
+            AND other.trial = 0 AND other.outcome = 'pending'
+       )`;
+  const hideBinds: unknown[] = prohibited ? [postId, flagId] : [postId, flagId, seat.seat];
+  const withdrawnId = uuidv7();
+  const actionId = uuidv7();
   const statements: D1PreparedStatement[] = [
-    c.env.DB.prepare(
-      `INSERT INTO seat_flags (id, seat, agent_id, post_id, reason, trial, outcome, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
-    ).bind(flagId, seat.seat, principal.agentId, postId, reason, trial ? 1 : 0, now),
+    insertFlag(c.env.DB, flagId, seat.seat, principal.agentId, postId, reason, false, now),
+    flagEvent(c.env.DB, "post.flagged", postId, flagId, now),
     c.env.DB.prepare(
       `INSERT INTO events (id, type, resource_id, occurred_at)
-       SELECT ?, ?, ?, ?
-        WHERE NOT EXISTS (SELECT 1 FROM events WHERE type = ? AND resource_id = ?)`,
-    ).bind(eventId, eventType, postId, now, eventType, postId),
+       SELECT ?, 'post.withdrawn', posts.id, ? FROM posts WHERE ${hideWhere}`,
+    ).bind(withdrawnId, now, ...hideBinds),
+    // Audit actor seat_agent, as the scan's hide records actor system.
+    c.env.DB.prepare(
+      `INSERT INTO moderation_actions (
+         id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+       )
+       SELECT ?, 'seat_agent', 'post', posts.id, 'hide', ?, NULL, ?, ? FROM posts WHERE ${hideWhere}`,
+    ).bind(actionId, reason, withdrawnId, now, ...hideBinds),
   ];
-  if (trial) {
+  if (prohibited) {
+    // Runs before the Post update, which the guard reads.
     statements.push(c.env.DB.prepare(
-      `UPDATE admin_seats
-          SET seat_trial_count = seat_trial_count + 1,
-              seat_state = CASE WHEN seat_trial_count + 1 >= ? THEN 'active' ELSE seat_state END
-        WHERE seat = ?`,
-    ).bind(threshold, seat.seat));
-  } else {
-    statements.push(
-      c.env.DB.prepare(
-        `INSERT INTO events (id, type, resource_id, occurred_at)
-         SELECT ?, 'post.withdrawn', id, ? FROM posts WHERE id = ? AND state = 'published'`,
-      ).bind(uuidv7(), now, postId),
-      c.env.DB.prepare(
-        "UPDATE posts SET state = 'flagged' WHERE id = ? AND state = 'published'",
-      ).bind(postId),
-    );
+      `UPDATE assets SET state = 'quarantined', quarantined_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        WHERE state = 'ready' AND id = (SELECT posts.asset_id FROM posts WHERE ${hideWhere})`,
+    ).bind(...hideBinds));
+  }
+  const hideIndex = statements.length;
+  statements.push(
+    c.env.DB.prepare(
+      `UPDATE posts SET state = 'hidden', hidden_by = 'seat_agents', queue_first = 1 WHERE ${hideWhere}`,
+    ).bind(...hideBinds),
+    // One off-topic flag: the Post stays published and goes first in line.
+    c.env.DB.prepare(
+      `UPDATE posts SET queue_first = 1
+        WHERE id = ? AND state = 'published' AND EXISTS (SELECT 1 FROM seat_flags WHERE id = ?)`,
+    ).bind(postId, flagId),
+  );
+  if (prohibited && post.asset_id !== null) {
+    // CT-21: a prohibited hide's quarantine adds the Asset's hashes, marked prohibited.
+    statements.push(blockAssetHashes(c.env.DB, post.asset_id, true, now, actionId));
   }
   const results = await c.env.DB.batch(statements);
-  if (!trial && Number(results[results.length - 1]?.meta.changes ?? 0) !== 1) {
-    return errorResponse(requestId, "state_conflict");
-  }
-  const next = trial
-    ? "published"
-    : "flagged";
+  if (Number(results[0]?.meta.changes ?? 0) !== 1) return errorResponse(requestId, "state_conflict");
+  const hidden = Number(results[hideIndex]?.meta.changes ?? 0) === 1;
+  if (prohibited && !hidden) return errorResponse(requestId, "state_conflict");
   console.log(JSON.stringify({
-    message: trial ? "seat flag trial" : "seat flag",
+    message: hidden ? "seat hide" : "seat flag queued",
     post_id: postId,
     seat: seat.seat,
-    trial: trial ? 1 : 0,
+    trial: 0,
   }));
   return jsonResponse(requestId, {
     post_id: postId,
-    state: next,
-    trial: trial ? 1 : 0,
-    event_type: eventType,
+    state: hidden ? "hidden" : "published",
+    trial: 0,
+    event_type: "post.flagged",
   });
+}
+
+// The flag row is written only while the Post is published, so a raced flag writes nothing.
+function insertFlag(
+  db: D1Database,
+  flagId: string,
+  seat: number,
+  agentId: string,
+  postId: string,
+  reason: string,
+  trial: boolean,
+  at: string,
+): D1PreparedStatement {
+  return db.prepare(
+    `INSERT INTO seat_flags (id, seat, agent_id, post_id, reason, trial, outcome, created_at)
+     SELECT ?, ?, ?, ?, ?, ?, 'pending', ?
+      WHERE EXISTS (SELECT 1 FROM posts WHERE id = ? AND state = 'published')`,
+  ).bind(flagId, seat, agentId, postId, reason, trial ? 1 : 0, at, postId);
+}
+
+function flagEvent(db: D1Database, type: string, postId: string, flagId: string, at: string): D1PreparedStatement {
+  return db.prepare(
+    `INSERT INTO events (id, type, resource_id, occurred_at)
+     SELECT ?, ?, ?, ?
+      WHERE EXISTS (SELECT 1 FROM seat_flags WHERE id = ?)
+        AND NOT EXISTS (SELECT 1 FROM events WHERE type = ? AND resource_id = ?)`,
+  ).bind(uuidv7(), type, postId, at, flagId, type, postId);
 }
 
 async function adminSeat(c: Ctx): Promise<Response> {
@@ -219,8 +284,10 @@ async function adminSeat(c: Ctx): Promise<Response> {
   });
 }
 
-// Called after a Moderator resolves a flagged Post. Quarantine and remove confirm.
-// Approve and restore overturn. Accuracy uses the last 100 resolved non-trial flags.
+// Called after a Moderator decides a Post with pending Seat Flags: a seat-hidden Post, a published
+// Post one off-topic flag queued, or a legacy 'flagged' Post. Hide, quarantine, remove, and uphold
+// confirm. Approve, restore (including a restore that answers an appeal), and dismiss_flags overturn.
+// Accuracy uses the last review.seat_accuracy_window flags the other Admin Seat decided.
 export async function settleSeatFlags(
   db: D1Database,
   postId: string,
@@ -230,7 +297,7 @@ export async function settleSeatFlags(
   policy?: Policy | null,
 ): Promise<void> {
   // v0.2.29: upholding an appealed hide confirms its flags. Dismissing them overturns them.
-  const outcome = action === "quarantine" || action === "remove" || action === "uphold"
+  const outcome = action === "hide" || action === "quarantine" || action === "remove" || action === "uphold"
     ? "confirmed"
     : action === "approve" || action === "restore" || action === "dismiss_flags"
       ? "overturned"
