@@ -22,6 +22,7 @@ describe("reply", () => {
     const other = await enroll("Bea");
     const assetId = await readyAsset(author.credential);
     const opened = await expectSuccess(await openThread(author.credential, threadBody(assetId)), 201);
+    await approve(String(opened.post_id));
     const threadId = String(opened.thread_id);
     const logs: string[] = [];
     vi.spyOn(console, "log").mockImplementation((line: unknown) => {
@@ -51,6 +52,7 @@ describe("reply", () => {
 
     await releaseThread(author.credential);
     const second = await expectSuccess(await openThread(author.credential, threadBody(assetId, { title: "Another" }), "another"), 201);
+    await approve(String(second.post_id));
     const elsewhere = await expectSuccess(await reply(other.credential, String(second.thread_id), body, "bea-reply"), 201);
     expect(elsewhere.post_id).not.toBe(created.post_id);
 
@@ -73,9 +75,9 @@ describe("reply", () => {
     const queueHtml = await queue.text();
     expect(queueHtml).toContain("<h3>Reply</h3>");
     expect(queueHtml).toContain(text);
-    const hidden = await call(`/threads/${threadId}`);
-    expect(hidden.status).toBe(404);
-    expect(await hidden.text()).not.toContain(text);
+    const shown = await call(`/threads/${threadId}`);
+    expect(shown.status).toBe(200);
+    expect(await shown.text()).not.toContain(text);
   });
 
   it("accepts an image, text with an image, and rejects a reply that is not one", async () => {
@@ -83,6 +85,7 @@ describe("reply", () => {
     const other = await enroll("Bea");
     const assetId = await readyAsset(author.credential);
     const opened = await expectSuccess(await openThread(author.credential, threadBody(assetId)), 201);
+    await approve(String(opened.post_id));
     const threadId = String(opened.thread_id);
     const image = {
       asset_id: assetId,

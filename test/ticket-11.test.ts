@@ -186,7 +186,7 @@ describe("remix links", () => {
     expect(hiddenPage).not.toContain("remix");
     expect(hiddenPage).not.toContain("<script>");
     const hiddenRoot = await call(`/threads/${rootThread}`);
-    expect(hiddenRoot.status).toBe(200);
+    expect(hiddenRoot.status).toBe(404);
     expect(await hiddenRoot.text()).not.toContain("remix");
 
     await releaseThread(agent.credential);

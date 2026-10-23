@@ -131,7 +131,7 @@ async function threadResource(c: Ctx): Promise<Response> {
     `SELECT threads.id AS id, threads.board_id AS board_id, threads.state AS state
        FROM threads
       WHERE threads.id = ?
-        AND EXISTS (SELECT 1 FROM posts WHERE posts.thread_id = threads.id AND ${VISIBLE_POST})`,
+        AND EXISTS (SELECT 1 FROM posts WHERE posts.thread_id = threads.id AND posts.title IS NOT NULL AND ${VISIBLE_POST})`,
   ).bind(threadId).first<{ id: string; board_id: string; state: string }>();
   if (!thread) return errorResponse(requestId, "not_found");
   return jsonResponse(requestId, { thread_id: thread.id, board_id: thread.board_id, state: thread.state });
@@ -156,7 +156,7 @@ async function threadPosts(c: Ctx): Promise<Response> {
   }
   const visible = await c.env.DB.prepare(
     `SELECT id FROM threads
-      WHERE id = ? AND EXISTS (SELECT 1 FROM posts WHERE posts.thread_id = threads.id AND ${VISIBLE_POST})`,
+      WHERE id = ? AND EXISTS (SELECT 1 FROM posts WHERE posts.thread_id = threads.id AND posts.title IS NOT NULL AND ${VISIBLE_POST})`,
   ).bind(threadId).first();
   if (!visible) return errorResponse(opened.requestId, "not_found");
   const rows = await listPosts(

@@ -247,7 +247,6 @@ describe("moderation actions", () => {
       caption,
     })), 201);
     const postId = String(opened.post_id);
-    const threadId = String(opened.thread_id);
 
     const pendingQueue = await (await call("/moderation", { email: MODERATOR })).text();
     expect(pendingQueue).toContain(`value="reject"`);
@@ -335,8 +334,10 @@ describe("moderation actions", () => {
     const stayed = await env.DB.prepare("SELECT state FROM posts WHERE id = ?").bind(hideId).first<{ state: string }>();
     expect(stayed?.state).toBe("hidden");
 
+    await env.DB.prepare("UPDATE assets SET state = 'ready' WHERE id = ?").bind(assetId).run();
+    await act(hideId, "restore");
     const replyText = "text-only restore words";
-    const textReply = await expectSuccess(await reply(author.credential, threadId, { text: replyText }), 201);
+    const textReply = await expectSuccess(await reply(author.credential, String(second.thread_id), { text: replyText }), 201);
     const textApproved = await expectSuccess(await act(String(textReply.post_id), "approve"));
     await act(String(textReply.post_id), "hide");
     const textRestored = await expectSuccess(await act(String(textReply.post_id), "restore"));
@@ -344,7 +345,7 @@ describe("moderation actions", () => {
     expect(await eventCount(String(textReply.post_id))).toBe(1);
     const feed = await (await call("/boards/beta")).text();
     expect(feed).not.toContain(replyText);
-    const page = await (await call(`/threads/${threadId}`)).text();
+    const page = await (await call(`/threads/${String(second.thread_id)}`)).text();
     expect(page).toContain(replyText);
     expect(page).toContain("<h2>Reply</h2>");
   });
