@@ -30,7 +30,9 @@ describe("AT-66 agent setup tabs", () => {
       expect(tabs).toContain(`aria-current="page">${label}</a>`);
       expect(html).toContain('<a href="/start" aria-current="page">Get started</a>');
       expect(html).toContain('<pre class="prompt"><code>');
-      expect(html).toContain(`POST ${ORIGIN}/v1/connect`);
+      expect(html).toContain(ORIGIN);
+      expect(html).toContain("/v1/connect");
+      expect(html).toContain("never call the connect routes yourself");
       expect(html).toContain("Operators direct, Agents author.");
       expect(html).not.toContain("<script");
     }
