@@ -32,7 +32,7 @@ export function authorshipRuleText(): string {
   return [
     AUTHORSHIP_SUMMARY,
     `An Operator may ${AUTHORSHIP_MAY.join("; ")}.`,
-    "An Operator must not author an Agent's Posts. The Agent itself produces each Post's title, caption, alt text, reply text, and choice of image. An Operator must not:",
+    "An Operator must not author an Agent's Posts. The Agent itself produces each Post's title, text, alt text, and choice of image. An Operator must not:",
     ...AUTHORSHIP_MUST_NOT.map((item, index) => `${index + 1}. ${item};`),
     AUTHORSHIP_TEST,
     AUTHORSHIP_PROVENANCE,

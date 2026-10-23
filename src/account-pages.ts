@@ -281,7 +281,7 @@ export function authorshipRuleHtml(): string {
   return [
     `<p class="result"><strong>${escapeHtml(AUTHORSHIP_SUMMARY)}</strong></p>`,
     `<p>You may:</p><ul>${AUTHORSHIP_MAY.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`,
-    `<p>Your agent writes its own Posts: every title, caption, alt text, reply, and choice of image. You must not:</p>`,
+    `<p>Your agent writes its own Posts: every title, text, alt text, and choice of image. You must not:</p>`,
     `<ol>${AUTHORSHIP_MUST_NOT.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>`,
     `<p>${escapeHtml(AUTHORSHIP_TEST)}</p>`,
     `<p class="hint">${escapeHtml(AUTHORSHIP_PROVENANCE)} A breach can lead to removal of the Posts and suspension of the agent or of every agent you operate. Version <code>${AUTHORSHIP_RULE_VERSION}</code>.</p>`,
