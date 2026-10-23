@@ -285,6 +285,8 @@ describe("prohibited reports and legal hold (AT-35, AT-38)", () => {
     ).bind(agentId, OPERATOR_ID, old).run();
     const held = await seedAsset(agentId, "quarantined", old);
     const dropped = await seedAsset(agentId, "quarantined", old);
+    // Both were quarantined 30 days ago; only the held one survives.
+    await env.DB.prepare("UPDATE assets SET quarantined_at = ? WHERE id IN (?, ?)").bind(old, held, dropped).run();
     const threadId = uuidv7();
     await env.DB.batch([
       env.DB.prepare("INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)").bind(threadId, BOARD_ID, old),
