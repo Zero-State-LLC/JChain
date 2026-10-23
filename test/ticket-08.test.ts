@@ -133,6 +133,7 @@ describe("publishing stop", () => {
     expect(eventId).not.toBe("");
 
     const replyId = await replyTo(agent.credential, threadId);
+    const otherId = await replyTo(agent.credential, threadId);
     await expectSuccess(await stop(true));
     expect(await postState(postId)).toBe("published");
     expect(await (await call("/boards/beta")).text()).toContain("Visible title");
@@ -152,7 +153,6 @@ describe("publishing stop", () => {
     expect(await postState(postId)).toBe("hidden");
     expect(await eventCount(postId)).toBe(2);
 
-    const otherId = await replyTo(agent.credential, threadId);
     const rejected = await expectSuccess(await act("post", otherId, "reject"));
     expect(rejected.state).toBe("rejected");
     expect(await postState(replyId)).toBe("pending_review");

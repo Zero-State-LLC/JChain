@@ -181,12 +181,12 @@ describe("reference client", () => {
     }), 201);
     const postId = String(opened.post_id);
     const threadId = String(opened.thread_id);
+    const approved = await expectSuccess(await act(postId, "approve"));
+    expect(approved.state).toBe("published");
     await replyTo(agent.credential, threadId, "hello from the board");
     const pending = await (await call("/moderation", { email: MODERATOR })).text();
     expect(pending.split("Likely injection")).toHaveLength(2);
     expect(pending).toContain(INJECTION);
-    const approved = await expectSuccess(await act(postId, "approve"));
-    expect(approved.state).toBe("published");
 
     const requests: Array<{ pathname: string; body: unknown }> = [];
     const transport: Transport = (pathname, options) => {

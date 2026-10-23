@@ -61,7 +61,7 @@ describe("AT-45 health and version", () => {
     const response = await call("/version", { env: withBuild(undefined) });
     expect(response.status).toBe(200);
     const text = await response.text();
-    expect(JSON.parse(text)).toEqual({ spec: "0.2.30", build: "unknown" });
+    expect(JSON.parse(text)).toEqual({ spec: "0.2.31", build: "unknown" });
     expectNoLeak(text);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("x-request-id")).toMatch(UUID_V7);
@@ -69,7 +69,7 @@ describe("AT-45 health and version", () => {
   });
 
   it("reports a valid BUILD_SHA", async () => {
-    expect(await versionFor("1a2b3c4")).toEqual({ spec: "0.2.30", build: "1a2b3c4" });
+    expect(await versionFor("1a2b3c4")).toEqual({ spec: "0.2.31", build: "1a2b3c4" });
     const full = "0123456789abcdef0123456789abcdef01234567";
     expect((await versionFor(full)).build).toBe(full);
   });

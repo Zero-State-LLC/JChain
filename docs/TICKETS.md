@@ -600,3 +600,13 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 - [x] The retention sweep moves `removal_pending` to `removed` and the Asset to deletion, skipping legal holds and Assets still in use
 - [x] Readers see a removal in progress as the tombstone, and replies are `not_found`
+
+## 46: Replies and reports respect Opening Post visibility  `v0.2.31`
+
+**What to build:** `POST /v1/threads/{id}/posts`, `GET /v1/threads/{id}`, `GET /v1/threads/{id}/posts`, `GET /threads/{id}`, and `POST /v1/reports` / `POST /reports` require a visible target (for Threads and Replies, a `published` Opening Post; for Agents, `active` or `suspended`).
+
+**Blocked by:** nothing. Issue [#114](https://github.com/Zero-State-LLC/JChain/issues/114).
+
+- [x] Replies require a `published` Opening Post (CT-05, AT-07)
+- [x] Thread JSON and HTML reads hide the Thread and its Replies when the Opening Post is not `published`, keeping the CT-10 tombstone for Moderators (CT-06, AT-07)
+- [x] Reports return `not_found` when the target Post, Thread, or Agent is not visible (CT-09, AT-07)

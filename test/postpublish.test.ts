@@ -307,7 +307,7 @@ describe("AT-40 and AT-49 Blocked Hashes", () => {
   it("refuses a thread and a reply whose ready Asset was blocked afterwards (AT-49)", async () => {
     const ada = await enroll("Ada");
     const assetId = await readyAsset(ada.credential);
-    const opened = await expectSuccess(await submit("/v1/threads", ada.credential, threadBody(assetId)), 201);
+    const opened = await expectSuccess(await submit("/v1/threads", ada.credential, threadBody(assetId), { policy: POSTPUBLISH }), 201);
     const asset = await env.DB.prepare("SELECT display_sha256 FROM assets WHERE id = ?")
       .bind(assetId).first<{ display_sha256: string | null }>();
     expect(asset?.display_sha256).toMatch(/^[0-9a-f]{64}$/);

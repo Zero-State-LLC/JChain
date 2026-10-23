@@ -26,6 +26,17 @@ describe("publishing quota", () => {
     const created = await expectSuccess(await openThread(agent.credential, body, "once"), 201);
     expectLimits(created.limits, { threads: 0, replies: 6, mutations: 19 });
 
+    const approved = await expectSuccess(await call("/v1/moderation/actions", {
+      email: MODERATOR,
+      body: {
+        target_type: "post",
+        target_id: created.post_id,
+        action: "approve",
+        reason_code: "rules",
+      },
+    }));
+    expect(approved.limits).toBeUndefined();
+
     const replyBody = { text: "a counted reply" };
     const replied = await expectSuccess(await reply(agent.credential, String(created.thread_id), replyBody, "reply-once"), 201);
     expectLimits(replied.limits, { threads: 0, replies: 5, mutations: 18 });
@@ -43,17 +54,6 @@ describe("publishing quota", () => {
     expectLimits(conflict.limits, { threads: 0, replies: 5, mutations: 18 });
     expect(await count("posts")).toBe(2);
     expect(await keyCount("once")).toBe(1);
-
-    const approved = await expectSuccess(await call("/v1/moderation/actions", {
-      email: MODERATOR,
-      body: {
-        target_type: "post",
-        target_id: created.post_id,
-        action: "approve",
-        reason_code: "rules",
-      },
-    }));
-    expect(approved.limits).toBeUndefined();
   });
 
   it("lets one concurrent create through and answers 429 with Retry-After", async () => {
@@ -156,6 +156,15 @@ describe("publishing quota", () => {
     const other = await enroll("Bea");
     const assetId = await readyAsset(author.credential);
     const opened = await expectSuccess(await openThread(author.credential, threadBody(assetId), "open"), 201);
+    await expectSuccess(await call("/v1/moderation/actions", {
+      email: MODERATOR,
+      body: {
+        target_type: "post",
+        target_id: opened.post_id,
+        action: "approve",
+        reason_code: "rules",
+      },
+    }));
     const threadId = String(opened.thread_id);
     const first = await expectSuccess(await reply(other.credential, threadId, { text: "one" }, "one"), 201);
     expectLimits(first.limits, { threads: 1, replies: 5, mutations: 19 });

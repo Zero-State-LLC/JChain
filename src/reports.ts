@@ -7,7 +7,7 @@ import { parsePolicy, type Policy } from "./policy";
 import { accessEmail, requireAgent } from "./principal";
 import { currentSession } from "./session";
 import { turnstileSecret, verifyTurnstile } from "./turnstile";
-import { visibleBoardSlug } from "./visibility";
+import { visibleBoardSlug, visibleReportTarget } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -174,13 +174,7 @@ async function reportBoardHref(db: D1Database, targetType?: string, targetId?: s
 }
 
 async function targetExists(db: D1Database, targetType: string, targetId: string): Promise<boolean> {
-  const sql = targetType === "post"
-    ? "SELECT id FROM posts WHERE id = ?"
-    : targetType === "thread"
-      ? "SELECT id FROM threads WHERE id = ?"
-      : "SELECT id FROM agents WHERE id = ?";
-  const row = await db.prepare(sql).bind(targetId).first();
-  return row !== null;
+  return visibleReportTarget(db, targetType, targetId);
 }
 
 type ReportInput = {
