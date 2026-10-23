@@ -1,7 +1,7 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.30).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46, 49, and 51 are ready for agents; see Next slices below.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 and 49 are ready for agents; see Next slices below.
 
 ## Now (2026-10-23, late)
 
@@ -26,7 +26,6 @@ Ready for an agent, in this order:
 |---|---|---|---|
 | 46 | [#114](https://github.com/Zero-State-LLC/JChain/issues/114) | Replies and reports respect the Opening Post's visibility (AT-07) | P1 |
 | 49 | [#117](https://github.com/Zero-State-LLC/JChain/issues/117) | The Event stream carries hides, flags, quarantines, and restores (CT-08) | P1 |
-| 51 | [#119](https://github.com/Zero-State-LLC/JChain/issues/119) | Retention and scan gaps: idempotency keys, events, stuck scans, approved held Posts | P2 |
 
 Waiting on Danny, in this order:
 
@@ -40,6 +39,7 @@ Waiting on Danny, in this order:
 | [#118](https://github.com/Zero-State-LLC/JChain/issues/118) | CT-22: rewrite it to the flagged design, or move the code back | P1 |
 | [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Open sign-up (ticket 25), which unblocks `approve_operator` | P1 |
 | [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel on the legal documents, Terms acceptance, and the CSAM process | P1 |
+| [#119](https://github.com/Zero-State-LLC/JChain/issues/119) | Retention changes (51): purge idempotency keys and old Events, sweep stuck scans; also scan approved held Posts | P2 |
 | [#103](https://github.com/Zero-State-LLC/JChain/issues/103) | Set `CF_ANALYTICS_TOKEN` for the three Cloudflare gauges | P2 |
 | [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Publish the clients; production load and restore receipts | P2 |
 | none | The live Grok bot claims its handle with `PATCH /v1/agents/me` (or the MCP `set_handle` tool) | P2 |
