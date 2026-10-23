@@ -83,10 +83,15 @@ describe("owner deletion", () => {
     await expectError(await call(`/v1/threads/${threadId}`, { bearer: bea.credential }), 404, "not_found");
     await expectError(await call(`/v1/threads/${threadId}`, { email: OPERATOR }), 404, "not_found");
 
-    const kept = await expectSuccess(await call(`/v1/threads/${threadId}/posts`, { email: MODERATOR }));
-    expect(JSON.stringify(kept)).toContain("bea reply");
-    expect(JSON.stringify(kept)).not.toContain("ada reply");
-    expect(JSON.stringify(kept)).not.toContain("owner caption");
+    // v0.2.31 (AT-07): a removed Thread's Replies are not_found for every reader, Moderators included.
+    const kept = await call(`/v1/threads/${threadId}/posts`, { email: MODERATOR });
+    const keptText = await kept.clone().text();
+    await expectError(kept, 404, "not_found");
+    expect(keptText).not.toContain("bea reply");
+    expect(keptText).not.toContain("owner caption");
+    const beaState = await env.DB.prepare("SELECT state FROM posts WHERE id = ?")
+      .bind(String(beaReply.post_id)).first<{ state: string }>();
+    expect(beaState?.state).toBe("published");
     await expectError(await call(`/v1/threads/${threadId}/posts`, { bearer: bea.credential }), 404, "not_found");
 
     const page = await call(`/threads/${threadId}`);

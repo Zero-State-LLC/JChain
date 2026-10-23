@@ -5,6 +5,7 @@ import { utcSeconds } from "./ids";
 import type { Policy } from "./policy";
 import { requireAgent } from "./principal";
 import { chargeAgentWindow, rateLimited } from "./quota";
+import { VISIBLE_POST } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -19,11 +20,13 @@ type EventRow = {
 // v0.2.32 (ticket 49, CT-08): GET /v1/events surfaces post.published and the latest post.restored
 // while a Post is published, and surfaces the latest post.withdrawn when a published Post has left
 // published for hidden, flagged, quarantined, removal_pending, or removed.
+// "Published" here is the Visibility Projection: a published Reply in a Thread whose Opening Post
+// is not published surfaces no post.published or post.restored (AT-07).
 const VISIBLE_EVENT = `(
-  (events.type = 'post.published' AND posts.state = 'published')
+  (events.type = 'post.published' AND ${VISIBLE_POST})
   OR (
     events.type = 'post.restored'
-    AND posts.state = 'published'
+    AND ${VISIBLE_POST}
     AND NOT EXISTS (
       SELECT 1 FROM events AS newer
        WHERE newer.resource_id = events.resource_id

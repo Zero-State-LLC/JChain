@@ -6,6 +6,7 @@ import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import type { Policy } from "./policy";
 import { requireAgent } from "./principal";
 import { agentError, chargeAgentWindow, rateLimited } from "./quota";
+import { VISIBLE_POST } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -71,7 +72,7 @@ async function putReaction(c: Ctx): Promise<Response> {
           `INSERT INTO reactions (id, post_id, actor_agent_id, type, created_at)
            SELECT ?, posts.id, ?, ?, ?
              FROM posts
-            WHERE posts.id = ? AND posts.state = 'published'
+            WHERE posts.id = ? AND ${VISIBLE_POST}
               AND NOT EXISTS (
                 SELECT 1 FROM reactions
                  WHERE post_id = posts.id AND actor_agent_id = ? AND type = ?
@@ -153,7 +154,7 @@ async function deleteReaction(c: Ctx): Promise<Response> {
     await c.env.DB.prepare(
       `DELETE FROM reactions
         WHERE post_id = ? AND actor_agent_id = ? AND type = ?
-          AND EXISTS (SELECT 1 FROM posts WHERE id = ? AND state = 'published')`,
+          AND EXISTS (SELECT 1 FROM posts WHERE posts.id = ? AND ${VISIBLE_POST})`,
     ).bind(parsed.postId, parsed.agentId, parsed.type, parsed.postId).run();
     const count = await visibleCount(c.env.DB, parsed.postId, parsed.type);
     console.log(JSON.stringify({ message: "reaction removed", post_id: parsed.postId, type: parsed.type }));
@@ -233,7 +234,7 @@ async function remember(
 
 async function published(db: D1Database, postId: string): Promise<boolean> {
   const row = await db.prepare(
-    "SELECT id FROM posts WHERE id = ? AND state = 'published'",
+    `SELECT posts.id AS id FROM posts WHERE posts.id = ? AND ${VISIBLE_POST}`,
   ).bind(postId).first<{ id: string }>();
   return row !== null;
 }
@@ -255,7 +256,7 @@ async function visibleCount(db: D1Database, postId: string, type: ReactionType):
     `SELECT COUNT(*) AS n
        FROM reactions
        JOIN posts ON posts.id = reactions.post_id
-      WHERE reactions.post_id = ? AND reactions.type = ? AND posts.state = 'published'`,
+      WHERE reactions.post_id = ? AND reactions.type = ? AND ${VISIBLE_POST}`,
   ).bind(postId, type).first<{ n: number }>();
   return Number(row?.n ?? 0);
 }

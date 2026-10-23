@@ -142,18 +142,8 @@ async function threadPosts(c: Ctx): Promise<Response> {
   if (opened instanceof Response) return opened;
   const threadId = c.req.param("id");
   if (threadId === undefined || !isUuidV7(threadId)) return errorResponse(opened.requestId, "not_found");
-  if (await openingRemoved(c.env.DB, threadId)) {
-    if (!opened.moderator) return errorResponse(opened.requestId, "not_found");
-    const rows = await listPosts(
-      c.env.DB,
-      `WHERE posts.thread_id = ? AND ${VISIBLE_POST}`,
-      "ASC",
-      threadId,
-      opened.cursor,
-      opened.limit,
-    );
-    return jsonResponse(opened.requestId, await postPage(c.env.DB, rows, opened.limit));
-  }
+  // v0.2.31 (AT-07): not_found whenever the Opening Post is not published, for every reader.
+  // Only GET /v1/threads/{id} keeps the removed tombstone for a Moderator.
   const visible = await c.env.DB.prepare(
     `SELECT id FROM threads
       WHERE id = ? AND EXISTS (SELECT 1 FROM posts WHERE posts.thread_id = threads.id AND posts.title IS NOT NULL AND ${VISIBLE_POST})`,
@@ -208,7 +198,6 @@ type Opened = {
   requestId: string;
   limit: number;
   cursor: { createdAt: string; id: string } | null;
-  moderator: boolean;
 };
 
 async function openList(c: Ctx): Promise<Opened | Response> {
@@ -218,11 +207,10 @@ async function openList(c: Ctx): Promise<Opened | Response> {
   const limit = parseLimit(c.req.query("limit"));
   if (limit === "malformed") return errorResponse(requestId, "malformed");
   const rawCursor = c.req.query("cursor");
-  const moderator = principal.kind === "moderator";
-  if (rawCursor === undefined) return { requestId, limit, cursor: null, moderator };
+  if (rawCursor === undefined) return { requestId, limit, cursor: null };
   const cursor = decodeCursor(rawCursor);
   if (cursor === null) return errorResponse(requestId, "malformed");
-  return { requestId, limit, cursor, moderator };
+  return { requestId, limit, cursor };
 }
 
 function page<T extends { id: string; created_at: string }>(
