@@ -2,6 +2,7 @@
 
 Stack: all Cloudflare (SPEC v0.2.28).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. This file has no further ready code ticket.
+
 ## Now (2026-10-23)
 
 Production is j-chain.net on spec v0.2.28, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `moderation_mode` `postpublish` (#73): Posts publish on submit, and moderation hides and restores afterwards. Email sign-in is live. Operator sign-up stays closed (`signup_open` false).
