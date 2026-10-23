@@ -1255,9 +1255,9 @@ The hide's time is the latest `post.withdrawn` Event for the Post (or `post.flag
 
 `/moderation` gains four sections:
 
-- **First in line:** Posts with the queue-first mark that are held, hidden, flagged, or quarantined, and published Posts one `off-topic` Seat Flag queued, legal holds first.
+- **First in line:** Posts with the queue-first mark that are held, hidden, flagged, or quarantined, and published Posts one `off-topic` Seat Flag queued, legal holds first. Each row shows its image state, and a scan or Seat Flag hide whose image is quarantined, and not under legal hold, carries the Admin-only Restore image form.
 - **Appeals:** open appeals with the author's detail, Restore and Uphold buttons, and Restore image for a quarantined image.
-- **Flagged:** Seat Flag hides, with Restore, Quarantine, and Remove.
+- **Flagged:** Seat Flag hides, with Restore, Quarantine, and Remove. A quarantined image is shown as such with the Admin-only Restore image form (not under legal hold), as is a quarantined image in the Hidden section, since a Post restore needs a ready image.
 - **Quarantined:** listed for the legal process, with no buttons.
 
 The gap analysis of 2026-10-23 adds two more, and orders the Reports section:

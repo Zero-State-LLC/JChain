@@ -539,7 +539,35 @@ describe("seat flags (AT-42, AT-43)", () => {
       const firstLine = queue.slice(queue.indexOf('id="queue-first"'), queue.indexOf('id="reports"'));
       expect(firstLine).toContain(seeded.postId);
       expect(firstLine).toContain("seat hide");
+      expect(firstLine).toContain("image quarantined");
+      expect(firstLine).toContain(`name="target_id" value="${seeded.assetId}"`);
+      // The Flagged section offers the Admin-only image restore, since a Post restore needs a ready image.
+      const flaggedSection = queue.slice(queue.indexOf('id="queue-flagged"'), queue.indexOf('id="queue-quarantined"'));
+      expect(flaggedSection).toContain(seeded.postId);
+      expect(flaggedSection).toContain(`name="target_id" value="${seeded.assetId}"`);
+      expect(flaggedSection).toContain('name="action" value="restore_asset"');
+      expect(flaggedSection).toContain("Restore image (Admin)");
     }
+
+    // A false positive is reversible from /moderation without an appeal: image first, then the Post.
+    const falsePositive = await seedPost(author.agentId);
+    await expectJson(await flag(falsePositive.postId, seat.credential, "id-document"), 200);
+    await expectError(await call("/v1/moderation/actions", {
+      email: ADMIN2,
+      body: { target_type: "post", target_id: falsePositive.postId, action: "restore", reason_code: "other" },
+    }), 409, "state_conflict");
+    await expectJson(await call("/v1/moderation/actions", {
+      email: ADMIN2,
+      body: { target_type: "asset", target_id: falsePositive.assetId, action: "restore_asset", reason_code: "other" },
+    }), 200);
+    const restored = await expectJson(await call("/v1/moderation/actions", {
+      email: ADMIN2,
+      body: { target_type: "post", target_id: falsePositive.postId, action: "restore", reason_code: "other" },
+    }), 200);
+    expect(restored.state).toBe("published");
+    const settled = await env.DB.prepare("SELECT outcome FROM seat_flags WHERE post_id = ?")
+      .bind(falsePositive.postId).first<{ outcome: string }>();
+    expect(settled?.outcome).toBe("overturned");
   });
 
   it("only queues a Post on one off-topic flag, and hides it when the other seat agrees (AT-42)", async () => {

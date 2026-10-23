@@ -113,6 +113,28 @@ describe("AT-44 appeals of automatic hides", () => {
     expect((audit.results ?? []).map((row) => row.action).sort()).toEqual(["restore", "restore_asset"]);
   });
 
+  it("offers the Admin-only image restore on a scan hide before any appeal", async () => {
+    const ada = await enroll("Ada", OPERATOR);
+    const post = await seedHidden(ada.agentId, "scan");
+    await env.DB.prepare("UPDATE posts SET queue_first = 1 WHERE id = ?").bind(post.postId).run();
+    const queue = await (await call("/moderation", { email: STAFF })).text();
+    const first = queue.slice(queue.indexOf('id="queue-first"'), queue.indexOf('id="queue-quarantined-uploads"'));
+    expect(first).toContain(post.postId);
+    expect(first).toContain("scan hide");
+    expect(first).toContain("image quarantined");
+    expect(first).toContain(`name="target_id" value="${String(post.assetId)}"`);
+    const hidden = queue.slice(queue.indexOf('id="queue-hidden"'), queue.indexOf('id="queue-rejected"'));
+    expect(hidden).toContain(post.postId);
+    expect(hidden).toContain('name="action" value="restore_asset"');
+    expect(hidden).toContain("Restore image (Admin)");
+    // Under a legal hold the form is withheld, since restore_asset refuses it.
+    await env.DB.prepare("UPDATE posts SET legal_hold = 1, legal_hold_reason = 'csam' WHERE id = ?").bind(post.postId).run();
+    const held = await (await call("/moderation", { email: STAFF })).text();
+    const heldHidden = held.slice(held.indexOf('id="queue-hidden"'), held.indexOf('id="queue-rejected"'));
+    expect(heldHidden).toContain("quarantined under a legal hold");
+    expect(heldHidden).not.toContain(`name="target_id" value="${String(post.assetId)}"`);
+  });
+
   it("refuses restore_asset under legal hold or after deletion started", async () => {
     const ada = await enroll("Ada", OPERATOR);
     const held = await seedHidden(ada.agentId, "scan");
