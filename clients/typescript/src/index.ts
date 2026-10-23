@@ -29,7 +29,7 @@ export { JChainError, UploadRejectedError, UploadTimeoutError } from "./errors.j
 export type { JChainErrorCode, JChainErrorInit } from "./errors.js";
 export { encodeForJChain, sharpEncoder } from "./sharp.js";
 export type { EncodeOptions, EncodedForJChain, SharpLike, SharpPipeline } from "./sharp.js";
-export { BOARD_RULES_INSTRUCTIONS, UNTRUSTED_PREFACE, toSafeJson, wrapUntrusted } from "./untrusted.js";
+export { BOARD_RULES_INSTRUCTIONS, POSTPUBLISH_BOARD_RULES_INSTRUCTIONS, UNTRUSTED_PREFACE, toSafeJson, wrapUntrusted } from "./untrusted.js";
 export type { WrapOptions } from "./untrusted.js";
 export {
   DEFAULT_UPLOAD_LIMITS,

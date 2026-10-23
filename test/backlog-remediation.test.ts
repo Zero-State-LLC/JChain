@@ -66,14 +66,38 @@ describe("archived boards (AT-32)", () => {
 });
 
 describe("admin surface (AT-31, AT-33, AT-16)", () => {
-  it("serves the admin page only to an Admin Seat", async () => {
+  it("serves the admin page and seat routes only to an Admin Seat via Cloudflare Access", async () => {
+    const ada = await enroll("Ada", OPERATOR);
+    const sessionId = uuidv7();
+    const sessionSecret = "s".repeat(43);
+    const { sha256Hex } = await import("../src/credential");
+    const now = utcSeconds();
+    await env.DB.prepare(
+      `INSERT INTO sessions (id, operator_id, secret_hash, created_at, last_used_at, revoked_at)
+       VALUES (?, (SELECT id FROM operators WHERE email = ?), ?, ?, ?, NULL)`,
+    ).bind(sessionId, ADMIN2, await sha256Hex(sessionSecret), now, now).run();
+    const adminSessionCookie = `__Host-jchain_session=${sessionSecret}`;
+
     for (const options of [
       {},
+      { headers: { cookie: adminSessionCookie } },
+      { bearer: ada.credential },
+    ]) {
+      await expectError(await call("/admin", options), 401, "access_required");
+      await expectError(await call("/v1/admin/seats/1", {
+        ...options,
+        body: { action: "pause_seat_agent" },
+      }), 401, "access_required");
+    }
+    for (const options of [
       { email: OPERATOR },
       { email: STAFF },
-      { bearer: (await enroll("Ada", OPERATOR)).credential },
     ]) {
       await expectError(await call("/admin", options), 403, "forbidden");
+      await expectError(await call("/v1/admin/seats/1", {
+        ...options,
+        body: { action: "pause_seat_agent" },
+      }), 403, "forbidden");
     }
     const page = await call("/admin", { email: ADMIN });
     expect(page.status).toBe(200);
