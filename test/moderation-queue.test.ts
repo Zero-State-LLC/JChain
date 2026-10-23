@@ -72,6 +72,77 @@ describe("prohibited reports are queued first (gap row 11, AT-35)", () => {
   });
 });
 
+describe("prohibited reports page ahead of the rest (gap row 11, review 4364659822)", () => {
+  async function seedReports(prefix: string, reason: string, count: number, day: string): Promise<void> {
+    await env.DB.batch(Array.from({ length: count }, (_, index) => env.DB.prepare(
+      `INSERT INTO reports (id, actor_email, target_type, target_id, reason_code, detail, state, created_at)
+       VALUES (?, NULL, 'agent', ?, ?, ?, 'open', ?)`,
+    ).bind(
+      uuidv7(),
+      uuidv7(),
+      reason,
+      `${prefix}-${String(index).padStart(3, "0")}`,
+      `2026-01-${day}T00:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}Z`,
+    )));
+  }
+
+  function details(html: string): string[] {
+    const reports = section(html, "reports");
+    return [...reports.matchAll(/<p>((?:prohibited|other)-\d{3})<\/p>/g)].map((match) => String(match[1]));
+  }
+
+  async function walk(start: string): Promise<string[][]> {
+    const pages: string[][] = [];
+    let href: string | null = start;
+    while (href !== null && pages.length < 10) {
+      const html = await moderationPage(STAFF, href);
+      pages.push(details(html));
+      href = nextReportsHref(html);
+    }
+    return pages;
+  }
+
+  it("reaches every report when the prohibited reports span more than one page", async () => {
+    // Prohibited reports are newer than the others, and still come first.
+    await seedReports("other", "spam", 30, "01");
+    await seedReports("prohibited", "csam", 20, "02");
+    await env.DB.batch(Array.from({ length: 12 }, (_, index) => env.DB.prepare(
+      `INSERT INTO reports (id, actor_email, target_type, target_id, reason_code, detail, state, created_at)
+       VALUES (?, NULL, 'agent', ?, 'id-document', ?, 'open', ?)`,
+    ).bind(uuidv7(), uuidv7(), `prohibited-${String(20 + index).padStart(3, "0")}`, `2026-01-03T00:00:${String(index).padStart(2, "0")}Z`)));
+
+    const pages = await walk("/moderation?limit=10");
+    const prohibited = Array.from({ length: 32 }, (_, index) => `prohibited-${String(index).padStart(3, "0")}`);
+    const other = Array.from({ length: 30 }, (_, index) => `other-${String(index).padStart(3, "0")}`);
+    expect(pages.flat()).toEqual([...prohibited, ...other]);
+    expect(pages.map((page) => page.length)).toEqual([10, 10, 10, 10, 10, 10, 2]);
+    // Page 4 holds the last two prohibited reports, then the oldest other reports.
+    expect(pages[3]?.slice(0, 3)).toEqual(["prohibited-030", "prohibited-031", "other-000"]);
+  });
+
+  it("starts the other reports on the next page when the prohibited reports fill a page exactly", async () => {
+    await seedReports("prohibited", "csam", 10, "02");
+    await seedReports("other", "rules", 3, "01");
+    const pages = await walk("/moderation?limit=10");
+    expect(pages).toEqual([
+      Array.from({ length: 10 }, (_, index) => `prohibited-${String(index).padStart(3, "0")}`),
+      ["other-000", "other-001", "other-002"],
+    ]);
+  });
+
+  it("shows no next link when only prohibited reports exist and they fit", async () => {
+    await seedReports("prohibited", "csam", 10, "02");
+    const html = await moderationPage(STAFF, "/moderation?limit=10");
+    expect(details(html)).toHaveLength(10);
+    expect(nextReportsHref(html)).toBeNull();
+  });
+});
+
+function nextReportsHref(html: string): string | null {
+  const found = html.match(/<nav aria-label="Reports"><a href="([^"]+)">Next reports<\/a><\/nav>/);
+  return found?.[1]?.replaceAll("&amp;", "&") ?? null;
+}
+
 describe("csam removal and the evidence read (gap row 12, AT-35, Part D item 5)", () => {
   it("suspends every active Agent of the Operator, quarantines the Asset, and keeps the hold", async () => {
     const ada = await enroll("Ada", OPERATOR);
@@ -285,8 +356,8 @@ describe("owner deletion keeps a legal-hold removal (moderation P3)", () => {
   });
 });
 
-async function moderationPage(email: string): Promise<string> {
-  const response = await call("/moderation", { email });
+async function moderationPage(email: string, path = "/moderation"): Promise<string> {
+  const response = await call(path, { email });
   expect(response.status).toBe(200);
   return response.text();
 }

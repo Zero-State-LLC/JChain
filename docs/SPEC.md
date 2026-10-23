@@ -1263,7 +1263,7 @@ The gap analysis of 2026-10-23 adds two more, and orders the Reports section:
 
 - **Quarantined uploads:** uploads quarantined because their bytes matched a prohibited Blocked Hash, before any Post used them, oldest first with their age, each with the Admin-only Restore image form. It sits right after First in line.
 - **Flags:** published Posts with an undismissed `unsafe` or `unscanned` scan result, or a pending trial Seat Flag, each with Hide, Remove, and Dismiss flags.
-- **Reports:** reports naming `id-document` or `csam`, signed-in or anonymous, come first, then the rest oldest first.
+- **Reports:** reports naming `id-document` or `csam`, signed-in or anonymous, come first, then the rest, each group oldest first. The section stays one paged list at `limit`, so every report is reachable: the next link carries a cursor into the prohibited reports while any remain, then one into the rest.
 
 ### Acceptance tests
 

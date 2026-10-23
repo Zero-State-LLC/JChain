@@ -496,12 +496,15 @@ async function queuePage(c: PageCtx): Promise<Response> {
   if (principal.kind !== "moderator") return errorResponse(requestId, "forbidden");
   const opened = openPage(c, requestId);
   if (opened instanceof Response) return opened;
-  const names = ["pending_cursor", "published_cursor", "hidden_cursor", "rejected_cursor", "reports_cursor"] as const;
+  const names = [
+    "pending_cursor", "published_cursor", "hidden_cursor", "rejected_cursor", "prohibited_reports_cursor", "reports_cursor",
+  ] as const;
   const cursors: Record<(typeof names)[number], Stamp | null> = {
     pending_cursor: null,
     published_cursor: null,
     hidden_cursor: null,
     rejected_cursor: null,
+    prohibited_reports_cursor: null,
     reports_cursor: null,
   };
   for (const name of names) {
@@ -520,9 +523,11 @@ async function queuePage(c: PageCtx): Promise<Response> {
   const first = await firstRows(c.env.DB);
   const uploads = await quarantinedUploadRows(c.env.DB);
   const flags = await flagRows(c.env.DB);
-  const reports = await reportRows(c.env.DB, cursors.reports_cursor, opened.limit);
+  const reports = await reportRows(c.env.DB, cursors.prohibited_reports_cursor, cursors.reports_cursor, opened.limit);
   const engaged = await publishingStopEngaged(c.env);
   const kept = Object.fromEntries(names.map((name) => [name, c.req.query(name)])) as Record<string, string | undefined>;
+  // The Reports link carries one report cursor: the tier it names replaces both.
+  const reportsKept = { ...kept, prohibited_reports_cursor: undefined, reports_cursor: undefined };
   const body = [
     boardLinks(await boardSlugs(c.env.DB)),
     "<h1>Moderation</h1>",
@@ -533,7 +538,10 @@ async function queuePage(c: PageCtx): Promise<Response> {
     firstSection(first),
     quarantinedUploadsSection(uploads),
     reportSection(reports.kept),
-    nextLink("/moderation", opened.limit, kept, "reports_cursor", reports.next, "Reports", "Next reports"),
+    nextLink(
+      "/moderation", opened.limit, reportsKept, reports.next?.key ?? "reports_cursor", reports.next?.value ?? null,
+      "Reports", "Next reports",
+    ),
     queueSection("Pending", pending.kept, ["approve", "reject"], "No posts are waiting for review."),
     nextLink("/moderation", opened.limit, kept, "pending_cursor", pending.next, "Pending", "Next pending"),
     appealSection(appeals),
@@ -604,28 +612,50 @@ async function queueRows(
 
 type QueueAction = "approve" | "reject" | "hide" | "restore" | "remove" | "quarantine" | "uphold" | "dismiss_flags";
 
-// Gap row 11 (AT-35): reports naming a prohibited code, signed-in or anonymous, come first and
-// unpaged; the other reports page oldest first behind them.
-async function reportRows(
-  db: D1Database,
-  cursor: Stamp | null,
-  limit: number,
-): Promise<{ kept: ReportRow[]; next: string | null }> {
-  const first = cursor === null
-    ? (await db.prepare(
-      `SELECT id, created_at, target_type, target_id, reason_code, detail
-         FROM reports
-        WHERE reason_code IN ('id-document', 'csam')
-        ORDER BY created_at ASC, id ASC
-        LIMIT 100`,
-    ).all<ReportRow>()).results ?? []
-    : [];
-  const rest = await listedPage<ReportRow>(db, `
+// Gap row 11 (AT-35): reports naming a prohibited code, signed-in or anonymous, come first. The
+// Reports section is one ordered list, prohibited then the rest, each oldest first, paged at
+// `limit`. The cursor names its tier: `prohibited_reports_cursor` while still inside the
+// prohibited reports, `reports_cursor` once past them, so every report stays reachable.
+type ReportPage = { kept: ReportRow[]; next: { key: ReportCursorKey; value: string } | null };
+type ReportCursorKey = "prohibited_reports_cursor" | "reports_cursor";
+
+const PROHIBITED_REPORTS = `
     SELECT id, created_at, target_type, target_id, reason_code, detail
       FROM reports
-     WHERE reason_code NOT IN ('id-document', 'csam')`, "ASC", [], { cursor, limit });
-  return { kept: [...first, ...rest.kept], next: rest.next };
+     WHERE reason_code IN ('id-document', 'csam')`;
+const OTHER_REPORTS = `
+    SELECT id, created_at, target_type, target_id, reason_code, detail
+      FROM reports
+     WHERE reason_code NOT IN ('id-document', 'csam')`;
+
+async function reportRows(
+  db: D1Database,
+  prohibitedCursor: Stamp | null,
+  cursor: Stamp | null,
+  limit: number,
+): Promise<ReportPage> {
+  if (cursor !== null) {
+    const rest = await listedPage<ReportRow>(db, OTHER_REPORTS, "ASC", [], { cursor, limit });
+    return { kept: rest.kept, next: rest.next === null ? null : { key: "reports_cursor", value: rest.next } };
+  }
+  const first = await listedPage<ReportRow>(db, PROHIBITED_REPORTS, "ASC", [], { cursor: prohibitedCursor, limit });
+  if (first.next !== null) return { kept: first.kept, next: { key: "prohibited_reports_cursor", value: first.next } };
+  const room = limit - first.kept.length;
+  if (room === 0) {
+    // The prohibited reports ended exactly on this page; the next page starts the rest.
+    const peek = await listedPage<ReportRow>(db, OTHER_REPORTS, "ASC", [], { cursor: null, limit: 1 });
+    if (peek.kept.length === 0) return { kept: first.kept, next: null };
+    return { kept: first.kept, next: { key: "reports_cursor", value: START_OF_OTHER_REPORTS } };
+  }
+  const rest = await listedPage<ReportRow>(db, OTHER_REPORTS, "ASC", [], { cursor: null, limit: room });
+  return {
+    kept: [...first.kept, ...rest.kept],
+    next: rest.next === null ? null : { key: "reports_cursor", value: rest.next },
+  };
 }
+
+// A reports_cursor before every real report: (created_at, id) are both compared strictly greater.
+const START_OF_OTHER_REPORTS = encodeCursor("0000-01-01T00:00:00Z", "00000000-0000-7000-8000-000000000000");
 
 // Gap row 10: an upload that matched a prohibited Blocked Hash, quarantined before any Post used it.
 type QuarantinedUploadRow = { id: string; agent_id: string; quarantined_at: string | null; created_at: string };
