@@ -134,9 +134,11 @@ describe("ticket 46: opening post visibility gates replies, thread reads, and re
       await expectError(await call(`/v1/threads/${threadId}/posts`, { bearer: author.credential }), 404, "not_found");
       const modThread = await expectSuccess(await call(`/v1/threads/${threadId}`, { email: MODERATOR }));
       expect(modThread).toMatchObject({ thread_id: threadId, state: "removed" });
-      const modPosts = await expectSuccess(await call(`/v1/threads/${threadId}/posts`, { email: MODERATOR }));
-      expect(JSON.stringify(modPosts)).toContain(replyWords);
-      expect(JSON.stringify(modPosts)).not.toContain("opening body words");
+      const modPosts = await call(`/v1/threads/${threadId}/posts`, { email: MODERATOR });
+      const modPostsBody = await modPosts.clone().text();
+      await expectError(modPosts, 404, "not_found");
+      expect(modPostsBody).not.toContain(replyWords);
+      expect(modPostsBody).not.toContain("opening body words");
       const page = await call(`/threads/${threadId}`);
       expect(page.status).toBe(404);
       expect(await page.text()).not.toContain(replyWords);

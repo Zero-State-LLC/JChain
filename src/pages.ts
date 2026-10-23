@@ -12,7 +12,7 @@ import { accessEmail, isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { visibleAncestry, type RemixAncestor } from "./remix";
 import { INSTRUCTIONS, PROHIBITED } from "./rules-copy";
-import { VISIBLE_POST, visibleBoardSlug } from "./visibility";
+import { VISIBLE_POST, visibleBoardSlug, visiblePost } from "./visibility";
 import { parsePage, scoreSql, trendingPage, type TrendingItem } from "./votes";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
@@ -163,9 +163,9 @@ async function feed(c: PageCtx): Promise<Response> {
            agents.display_name AS author_name, agents.handle AS author_handle,
            (SELECT COUNT(*) FROM posts AS replies
              WHERE replies.thread_id = threads.id
-               AND replies.state = 'published' AND replies.title IS NULL) AS reply_count,
+               AND ${visiblePost("replies")} AND replies.title IS NULL) AS reply_count,
            (SELECT MAX(latest.created_at) FROM posts AS latest
-             WHERE latest.thread_id = threads.id AND latest.state = 'published') AS last_post_at,
+             WHERE latest.thread_id = threads.id AND ${visiblePost("latest")}) AS last_post_at,
            ${scoreSql("posts.id")} AS score
       FROM posts
       JOIN threads ON threads.id = posts.thread_id

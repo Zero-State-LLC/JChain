@@ -1,14 +1,18 @@
-// The only predicate for a Post a board reader may see. Pending, rejected,
-// hidden, and removed content stays off every read path.
-export const VISIBLE_POST = "posts.state = 'published'";
+// The only predicate for a Post a board reader may see: the Post is published
+// AND its Thread's Opening Post is published (v0.2.31, AT-07). Pending, rejected,
+// hidden, flagged, quarantined, and removed content stays off every read path,
+// and so does every Reply in a Thread whose Opening Post is any of those.
+// `alias` names the posts row being tested.
+export function visiblePost(alias: string): string {
+  return `(${alias}.state = 'published' AND EXISTS (
+    SELECT 1 FROM posts AS visible_opening
+     WHERE visible_opening.thread_id = ${alias}.thread_id
+       AND visible_opening.title IS NOT NULL
+       AND visible_opening.state = 'published'
+  ))`;
+}
 
-// v0.2.31 (ticket 46, AT-07): a Thread is visible only while its Opening Post is published.
-export const VISIBLE_THREAD_OPENING = `EXISTS (
-  SELECT 1 FROM posts AS opening
-   WHERE opening.thread_id = threads.id
-     AND opening.title IS NOT NULL
-     AND opening.state = 'published'
-)`;
+export const VISIBLE_POST = visiblePost("posts");
 
 // A board slug is readable only when the target is visible to a reader.
 // Pending, hidden, flagged, quarantined, rejected, and removed targets look like an unknown id.
@@ -22,7 +26,7 @@ export async function visibleBoardSlug(
          FROM posts
          JOIN threads ON threads.id = posts.thread_id
          JOIN boards ON boards.id = threads.board_id
-        WHERE posts.id = ? AND ${VISIBLE_POST} AND ${VISIBLE_THREAD_OPENING}`
+        WHERE posts.id = ? AND ${VISIBLE_POST}`
     : targetType === "thread"
       ? `SELECT boards.slug AS slug
            FROM threads
@@ -62,9 +66,9 @@ export type AssetReader =
 export type AssetDecision = "allow" | "not_found" | "credential_invalid";
 
 type AssetRow = { agent_id: string; state: string };
-type PostStateRow = { state: string };
+type PostStateRow = { state: string; visible: number };
 
-// Published bytes are public. A ready Asset with no Post is owner-only.
+// Visible bytes are public (a published Post in a Thread whose Opening Post is published). A ready Asset with no Post is owner-only.
 // A pending Post lets its owner and a Moderator preview the image, including
 // when an older Post on the same Asset was rejected or hidden. Dedup reuses
 // that Asset. With no pending and no published Post, those states hide the bytes.
@@ -77,11 +81,14 @@ export async function projectAsset(
     "SELECT agent_id, state FROM assets WHERE id = ?",
   ).bind(assetId).first<AssetRow>();
   const posts = await db.prepare(
-    "SELECT state FROM posts WHERE asset_id = ?",
+    `SELECT posts.state AS state, CASE WHEN ${VISIBLE_POST} THEN 1 ELSE 0 END AS visible
+       FROM posts WHERE posts.asset_id = ?`,
   ).bind(assetId).all<PostStateRow>();
-  const states = (posts.results ?? []).map((row) => row.state);
+  const rows = posts.results ?? [];
+  const states = rows.map((row) => row.state);
   if (asset?.state === "quarantined") return "not_found";
-  if (states.includes("published")) return "allow";
+  // A published Reply in a Thread whose Opening Post is not published counts as concealed.
+  if (rows.some((row) => Number(row.visible) === 1)) return "allow";
   if (!asset) return reader.kind === "anonymous" ? "credential_invalid" : "not_found";
   const ready = asset.state === "ready";
   const owner = reader.kind === "agent" && reader.agentId === asset.agent_id && ready;

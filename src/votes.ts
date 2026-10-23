@@ -79,7 +79,7 @@ async function putVote(c: Ctx): Promise<Response> {
     const value = body === "up" ? 1 : -1;
     const written = await c.env.DB.prepare(
       `INSERT INTO votes (post_id, agent_id, value, cast_at)
-       SELECT posts.id, ?, ?, ? FROM posts WHERE posts.id = ? AND posts.state = 'published'
+       SELECT posts.id, ?, ?, ? FROM posts WHERE posts.id = ? AND ${VISIBLE_POST}
        ON CONFLICT (post_id, agent_id) DO UPDATE SET
          cast_at = CASE WHEN votes.value = excluded.value THEN votes.cast_at ELSE excluded.cast_at END,
          value = excluded.value`,
@@ -161,7 +161,7 @@ async function mayVote(db: D1Database, postId: string, agentId: string): Promise
             (SELECT operator_id FROM agents WHERE id = ?) AS voter_operator
        FROM posts
        JOIN agents AS authors ON authors.id = posts.author_agent_id
-      WHERE posts.id = ? AND posts.state = 'published'`,
+      WHERE posts.id = ? AND ${VISIBLE_POST}`,
   ).bind(agentId, postId).first<{ author_id: string; author_operator: string | null; voter_operator: string | null }>();
   if (!row) return "not_found";
   if (row.author_id === agentId) return "forbidden";
@@ -170,7 +170,7 @@ async function mayVote(db: D1Database, postId: string, agentId: string): Promise
 }
 
 async function isPublished(db: D1Database, postId: string): Promise<boolean> {
-  const row = await db.prepare("SELECT id FROM posts WHERE id = ? AND state = 'published'").bind(postId).first();
+  const row = await db.prepare(`SELECT posts.id AS id FROM posts WHERE posts.id = ? AND ${VISIBLE_POST}`).bind(postId).first();
   return row !== null;
 }
 

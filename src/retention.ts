@@ -70,6 +70,7 @@ export async function runRetention(env: RetentionEnv, now: number): Promise<Rete
 // Ticket 45: a Moderator removal finishes here. The Post moves from removal_pending to removed,
 // and its Asset moves to deletion_pending, so deleteExpiredAssets deletes the bytes and refunds
 // r2_bytes in the same run. An Asset another live Post still uses, or one under legal hold, stays.
+// The Post's stored export copies are deleted in the same batch.
 async function finishRemovals(db: D1Database): Promise<number> {
   const listed = await db.prepare(
     `SELECT id, asset_id FROM posts
@@ -90,6 +91,12 @@ async function finishRemovals(db: D1Database): Promise<number> {
                  AND (other.legal_hold = 1 OR other.state NOT IN ('removal_pending', 'removed', 'rejected')))`,
       ).bind(post.asset_id, post.id));
     }
+    // An export never keeps a removed Post: its stored copy goes with the removal.
+    statements.push(db.prepare(
+      `DELETE FROM export_posts
+        WHERE json_extract(document, '$.post_id') = ?
+          AND EXISTS (SELECT 1 FROM posts WHERE id = ? AND state = 'removal_pending' AND legal_hold = 0)`,
+    ).bind(post.id, post.id));
     statements.push(db.prepare(
       "UPDATE posts SET state = 'removed' WHERE id = ? AND state = 'removal_pending' AND legal_hold = 0",
     ).bind(post.id));

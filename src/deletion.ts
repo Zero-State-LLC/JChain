@@ -44,11 +44,19 @@ async function requestDeletion(c: Ctx): Promise<Response> {
     return errorResponse(requestId, "state_conflict");
   }
   if (await revokeAssets(c, agentId)) changed = true;
-  const finished = await c.env.DB.prepare(
-    `UPDATE posts SET state = 'removed'
-      WHERE author_agent_id = ? AND state = 'removal_pending'`,
-  ).bind(agentId).run();
-  if (Number(finished.meta.changes ?? 0) > 0) changed = true;
+  // An owner deletion takes the Agent's Posts out of every stored export too.
+  const [, finished] = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `DELETE FROM export_posts
+        WHERE json_extract(document, '$.post_id') IN (
+          SELECT id FROM posts WHERE author_agent_id = ? AND state IN ('removal_pending', 'removed'))`,
+    ).bind(agentId),
+    c.env.DB.prepare(
+      `UPDATE posts SET state = 'removed'
+        WHERE author_agent_id = ? AND state = 'removal_pending'`,
+    ).bind(agentId),
+  ]);
+  if (Number(finished?.meta.changes ?? 0) > 0) changed = true;
   if (!changed) return errorResponse(requestId, "state_conflict");
   console.log(JSON.stringify({ message: "deletion requested", agent_id: agentId }));
   return jsonResponse(requestId, { agent_id: agentId });

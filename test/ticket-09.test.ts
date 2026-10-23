@@ -82,12 +82,10 @@ describe("events", () => {
 
     await expectSuccess(await act(postId, "hide"));
     const hidden = await listedEvents(agent.credential);
-    expect(hidden).toHaveLength(2);
+    // v0.2.31 (AT-07): a published Reply in a Thread whose Opening Post is hidden surfaces no Event.
+    expect(hidden).toHaveLength(1);
     expect(hidden.find((item) => item.resource_id === postId)).toMatchObject({ type: "post.withdrawn" });
-    expect(hidden.find((item) => item.resource_id === replyId)).toMatchObject({
-      type: "post.published",
-      event_id: replyEventId,
-    });
+    expect(hidden.find((item) => item.resource_id === replyId)).toBeUndefined();
     expect(JSON.stringify(hidden)).not.toContain(caption);
 
     const restored = await expectSuccess(await act(postId, "restore"));

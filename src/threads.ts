@@ -206,6 +206,14 @@ async function replyToThread(c: Ctx): Promise<Response> {
   if (!thread) {
     return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
   }
+  // v0.2.31 (ticket 46, AT-07): a Thread takes a reply only while its Opening Post is published.
+  // Checked before the archived and locked checks, so a concealed Thread never answers state_conflict.
+  const opening = await c.env.DB.prepare(
+    "SELECT state FROM posts WHERE thread_id = ? AND title IS NOT NULL",
+  ).bind(threadId).first<{ state: string }>();
+  if (opening?.state !== "published") {
+    return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
+  }
   if (thread.board_state !== "open") {
     return remember(
       c.env, requestId, policy, principal.agentId, route, key, bodyHash,
@@ -214,13 +222,6 @@ async function replyToThread(c: Ctx): Promise<Response> {
   }
   if (thread.state !== "open") {
     return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("state_conflict"), []);
-  }
-  // v0.2.31 (ticket 46, AT-07): a Thread takes a reply only while its Opening Post is published.
-  const opening = await c.env.DB.prepare(
-    "SELECT state FROM posts WHERE thread_id = ? AND title IS NOT NULL",
-  ).bind(threadId).first<{ state: string }>();
-  if (opening?.state !== "published") {
-    return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
   }
   const input = parsed.value;
   if (input.assetId !== null) {
