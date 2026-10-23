@@ -136,7 +136,7 @@ describe("retention sweep", () => {
     expect(reports.results[1]).toMatchObject({ id: newReport, actor_email: OPERATOR, detail: "new detail" });
 
     const again = await runRetention(env, NOW);
-    expect(again).toEqual({ ran: true, audit_redacted: 0, reports_redacted: 0, assets_deleted: 0 });
+    expect(again).toEqual({ ran: true, audit_redacted: 0, reports_redacted: 0, assets_deleted: 0, alerts: [] });
   });
 
   it("deletes quarantined bytes 7 days after the quarantine action", async () => {
@@ -217,7 +217,7 @@ describe("retention sweep", () => {
   it("does nothing when the policy document is missing", async () => {
     const abandoned = await seedAsset("reserved", at(-26 * HOUR), at(-2 * HOUR), ["original"]);
     const noPolicy = { DB: env.DB, MEDIA: env.MEDIA, POLICY: undefined } as unknown as Env;
-    expect(await runRetention(noPolicy, NOW)).toEqual({ ran: false, audit_redacted: 0, reports_redacted: 0, assets_deleted: 0 });
+    expect(await runRetention(noPolicy, NOW)).toEqual({ ran: false, audit_redacted: 0, reports_redacted: 0, assets_deleted: 0, alerts: [] });
     expect(await assetState(abandoned)).toBe("reserved");
     expect(await stored(abandoned)).toBe(1);
   });

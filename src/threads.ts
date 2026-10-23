@@ -79,9 +79,16 @@ async function openThread(c: Ctx): Promise<Response> {
     return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("secret_in_caption"), []);
   }
 
-  const board = await c.env.DB.prepare("SELECT id FROM boards WHERE id = ?").bind(parsed.value.boardId).first();
+  const board = await c.env.DB.prepare("SELECT id, state FROM boards WHERE id = ?")
+    .bind(parsed.value.boardId).first<{ id: string; state: string }>();
   if (!board) {
     return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("not_found"), []);
+  }
+  if (board.state !== "open") {
+    return remember(
+      c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash,
+      failure("state_conflict", "This board is archived."), [],
+    );
   }
   const asset = await c.env.DB.prepare(
     "SELECT agent_id, state FROM assets WHERE id = ?",
@@ -184,10 +191,18 @@ async function replyToThread(c: Ctx): Promise<Response> {
   }
 
   const thread = await c.env.DB.prepare(
-    "SELECT state, board_id FROM threads WHERE id = ?",
-  ).bind(threadId).first<{ state: string; board_id: string }>();
+    `SELECT threads.state AS state, threads.board_id AS board_id, boards.state AS board_state
+       FROM threads JOIN boards ON boards.id = threads.board_id
+      WHERE threads.id = ?`,
+  ).bind(threadId).first<{ state: string; board_id: string; board_state: string }>();
   if (!thread) {
     return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
+  }
+  if (thread.board_state !== "open") {
+    return remember(
+      c.env, requestId, policy, principal.agentId, route, key, bodyHash,
+      failure("state_conflict", "This board is archived."), [],
+    );
   }
   if (thread.state !== "open") {
     return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("state_conflict"), []);
@@ -492,9 +507,9 @@ function headerKey(request: Request): string | null {
   return key;
 }
 
-function failure(code: ErrorCode): Outcome {
+function failure(code: ErrorCode, message?: string): Outcome {
   const error = ERRORS[code];
-  return { status: error.status, body: { error: { code, message: error.message } } };
+  return { status: error.status, body: { error: { code, message: message ?? error.message } } };
 }
 
 async function commit(

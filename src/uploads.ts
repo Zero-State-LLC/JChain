@@ -317,14 +317,15 @@ async function assetContent(c: Ctx): Promise<Response> {
   const variant = c.req.query("variant");
   if (variant !== "display" && variant !== "thumb") return errorResponse(requestId, "malformed");
   const reader = await assetReader(c);
+  const published = await projectAsset(c.env.DB, assetId, { kind: "anonymous" });
+  const cacheControl = published === "allow" ? "public, max-age=300" : "no-store";
   if ("error" in reader) {
-    const published = await projectAsset(c.env.DB, assetId, { kind: "anonymous" });
-    if (published === "allow") return derivativeResponse(c.env, requestId, assetId, variant);
+    if (published === "allow") return derivativeResponse(c.env, requestId, assetId, variant, cacheControl);
     return errorResponse(requestId, reader.error);
   }
   const decision = await projectAsset(c.env.DB, assetId, reader);
   if (decision !== "allow") return errorResponse(requestId, decision);
-  return derivativeResponse(c.env, requestId, assetId, variant);
+  return derivativeResponse(c.env, requestId, assetId, variant, cacheControl);
 }
 
 async function assetReader(c: Ctx): Promise<AssetReader | { error: ErrorCode }> {
@@ -344,10 +345,13 @@ async function derivativeResponse(
   requestId: string,
   assetId: string,
   variant: "display" | "thumb",
+  cacheControl: string,
 ): Promise<Response> {
   const object = await env.MEDIA.get(derivativeKey(assetId, variant));
   if (!object) return errorResponse(requestId, "not_found");
-  return bytesResponse(requestId, new Uint8Array(await object.arrayBuffer()), "image/webp");
+  const response = bytesResponse(requestId, new Uint8Array(await object.arrayBuffer()), "image/webp");
+  response.headers.set("cache-control", cacheControl);
+  return response;
 }
 
 type Reservation = {

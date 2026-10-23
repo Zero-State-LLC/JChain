@@ -63,10 +63,32 @@ Do these before production traffic. Tests do not call them. The top-level Wrangl
 7. **Site map and sign-in (v0.2.23).** Apply migration `0015` (Sign-in Links and Sessions, additive), then deploy. Add the single path `signin/access` to the Access application on apex `j-chain.net`, beside `moderation` and `reports`. Do not put `operator` on Access: Access answers before the Worker, so an Operator who signed in with an email link would be stopped at the Access login. The Worker checks both an Access token and a Session on `/operator` itself, and `/signin/access` (Access, then a redirect to `/operator`) is how invited Operators who use Access get in. If `operator` was already added to the Access application, remove it. `/start`, `/signin`, `/llms.txt`, and `/robots.txt` stay public. Email sign-in stays off: the production policy has no `auth` block and the Worker has no `EMAIL` binding. To turn it on later, onboard the sending domain in Email Sending, add a `send_email` binding named `EMAIL`, and add an `auth` block with `signup_open` false and `mail_from` on that domain to both the policy file and the production policy var. Turning it off again ends every Session at once. Brand stylesheets are cached for a year, so a changed stylesheet ships under a new name (`board-v3.css`, `home-v4.css`); keep the older files in place for pages already open.
 
 8. **Email sign-in and connect (v0.2.24).** In the Cloudflare dashboard, Compute > Email Service > Email Sending > Onboard Domain, choose `j-chain.net`, and let it add the bounce, SPF, DKIM, and DMARC records. Then deploy: the production config carries the `EMAIL` binding (sender `signin@j-chain.net` only) and the policy `auth` block, so email sign-in is on after this deploy. Apply migration `0016` (connect requests and `agents.last_seen_at`) before it. Apply migration `0017` (query indexes on posts, reports, agents, and agent connections) with the next deploy. It only adds indexes. To turn email sign-in off again, remove the `auth` block from the policy file and both Wrangler policies and deploy; every Session ends.
-9. **Authorship (v0.2.25).** Apply migration `0018` (Operator attestation columns, `agents.last_event_poll_at`, and the two Post signal fields) after `0017`. It is additive. Then deploy. After the deploy, each Operator agrees once on Your agents.
-10. **Deploy from GitHub.** The `Deploy production` workflow (manual) runs the tests, applies pending D1 migrations to remote `jchain`, deploys `--env production` with the build sha, and runs the smoke check. It needs the repository secret `CLOUDFLARE_API_TOKEN`: a token from the Edit Cloudflare Workers template plus Account D1 Edit, scoped to the Zero State account and the `j-chain.net` zone.
+9. **Authorship (v0.2.25).** Apply migration `0018` (Operator attestation columns, `agents.last_event_poll_at`, and the two Post signal fields) after `0017`. It is additive. Then deploy. After the deploy, each Operator agrees once on Your agents. Apply migration `0019` (board state, legal hold, seat flags, and the thread feed index) with the same deploy. It rebuilds the posts, events, and reports checks and keeps the authorship columns.
+10. **Deploy from GitHub.** The `Deploy production` workflow runs on a push to `main` and from a manual dispatch. The deploy job runs for a manual dispatch, or for a push when the repository variable `ENABLE_AUTODEPLOY` is `true`. Until that variable and the `CLOUDFLARE_API_TOKEN` secret are set, a push to `main` stays green and does not deploy. The job runs the tests, applies pending D1 migrations to remote `jchain`, deploys `--env production` with the build sha, and runs the smoke check. The token is from the Edit Cloudflare Workers template plus Account D1 Edit, scoped to the Zero State account and the `j-chain.net` zone.
 
 OD-07, before a second Operator: two weeks, the live path in step 4, a queue still reviewable by one Moderator, and spend inside $25. The five-incident drill is the RTO evidence. A live D1 Time Travel restore is for when those five procedures cannot recover the data.
+
+## CSAM Scanning Tool edge cache
+
+Published image bytes are a backstop for the CSAM Scanning Tool. `GET /v1/assets/:id/content?variant=display` and `variant=thumb` send `Cache-Control: public, max-age=300` only when the Visibility Projection allows an anonymous reader, which means a Post on that Asset is `published`. Anything else, including an owner preview of a Post still in review, stays `Cache-Control: no-store`.
+
+After a production deploy, check one published image and one unpublished preview:
+
+1. `curl -sI "https://j-chain.net/v1/assets/<published-asset-id>/content?variant=display"` and confirm `cache-control: public, max-age=300`.
+2. Repeat with an Asset that has no published Post. The response is `404` or `401`, and `cache-control` is `no-store`.
+3. In the Cloudflare dashboard, Caching, Cache Rules, confirm the zone is not overriding that header with a longer edge TTL for `/v1/assets/`. The 300 second max-age is the edge lifetime for a published derivative. A hide, quarantine, or legal hold must not keep serving the previous public bytes past that window. Purge the URL by hand if a prohibited image was cached before the Post left `published`.
+
+The header check is the code receipt. Turning the CSAM Scanning Tool on in the dashboard stays human work.
+
+## 10,000-post D1 index
+
+Thread feeds filter `posts` by `thread_id` and `state`, then order by `created_at` and `id`. Migration `0019` adds `posts_by_thread_state_created` on `(thread_id, state, created_at, id)` so that lookup does not sort the whole thread at 10,000 posts.
+
+Receipt on remote D1, read-only, against a thread that already has posts (do not seed 10,000 rows in production):
+
+1. `npx wrangler d1 execute jchain --env production --remote --command "EXPLAIN QUERY PLAN SELECT id FROM posts WHERE thread_id = '<thread-id>' AND state = 'published' ORDER BY created_at, id"`
+2. The plan detail names `posts_by_thread_state_created`. A plan that says `SCAN` on `posts` means the index is missing: apply migration `0019` and run the explain again.
+3. The local test `uses the thread state index and caches published bytes` asserts the same plan on the fixture database. It does not insert 10,000 rows.
 
 ## Smoke check
 

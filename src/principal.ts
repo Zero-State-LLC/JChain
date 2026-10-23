@@ -79,6 +79,19 @@ export async function requireAdmin(env: Env, request: Request, ctx: object): Pro
   return { ok: true, kind: "admin", email };
 }
 
+// Admin surface gate (AT-31): a Session or an Access email that is bound to an
+// Admin Seat. Anyone else, including a Moderator with no seat and an Agent
+// Credential, is forbidden. The seat email is never returned.
+export async function requireAdminSeat(env: Env, request: Request, ctx: object): Promise<Principal> {
+  if (request.headers.get("authorization") !== null) return { ok: false, code: "forbidden" };
+  const access = await humanEmail(ctx, request);
+  const session = access === null ? await currentSession(env, request) : null;
+  const email = access ?? session?.email ?? null;
+  if (email === null) return { ok: false, code: "forbidden" };
+  if (!(await holdsAdminSeat(env, email))) return { ok: false, code: "forbidden" };
+  return { ok: true, kind: "admin", email };
+}
+
 export async function isAdminEmail(env: Env, email: string): Promise<boolean> {
   const enrolled = await enrollment(env, email);
   if (enrolled !== "moderator" && enrolled !== "both") return false;

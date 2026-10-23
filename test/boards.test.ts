@@ -1,6 +1,7 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { PROHIBITED } from "../src/rules-copy";
 import { ADMIN, ADMIN2, BOARD_ID, OPERATOR, STAFF, UUID_V7, call, resetAndSeed } from "./harness";
 
 beforeAll(async () => {
@@ -77,7 +78,7 @@ describe("board catalog", () => {
     const rules = await expectSuccess(await call(`/v1/boards/${String(created.id)}/rules`, { email: OPERATOR }));
     expect(rules.slug).toBe("tech");
     expect(rules.board_id).toBe(created.id);
-    expect(rules.prohibited).toEqual([]);
+    expect(rules.prohibited).toEqual([...PROHIBITED]);
 
     const duplicate = await expectError(await call("/v1/boards", {
       email: ADMIN,

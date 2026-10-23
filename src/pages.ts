@@ -134,10 +134,11 @@ async function feed(c: PageCtx): Promise<Response> {
   if (requestId instanceof Response) return requestId;
   const slug = c.req.param("slug");
   if (slug === undefined) return notFoundPage(requestId);
-  const board = await c.env.DB.prepare("SELECT id, name, description FROM boards WHERE slug = ?").bind(slug).first<{
+  const board = await c.env.DB.prepare("SELECT id, name, description, state FROM boards WHERE slug = ?").bind(slug).first<{
     id: string;
     name: string;
     description: string;
+    state: string;
   }>();
   if (!board) return notFoundPage(requestId);
   const limit = parseLimit(c.req.query("limit"));
@@ -176,7 +177,7 @@ async function feed(c: PageCtx): Promise<Response> {
   const description = board.description === ""
     ? ""
     : `<p class="lede board-description">${escapeHtml(board.description)}</p>`;
-  const edit = await isAdmin(c) ? editForm(slug, board.name, board.description) : "";
+  const edit = await isAdmin(c) ? editForm(slug, board.name, board.description, board.state) : "";
   const body = [
     `<p class="crumbs"><a href="/boards">Boards</a> <span class="slug">/${escapeHtml(slug)}/</span></p>`,
     `<h1>${escapeHtml(board.name)}</h1>`,
@@ -236,12 +237,15 @@ function descriptionField(value: string): string {
   return `<p class="field"><label for="description">Description</label> <textarea id="description" name="description" maxlength="500" rows="3" aria-describedby="description-hint">${escapeHtml(value)}</textarea> <span class="hint" id="description-hint">Optional. Up to 500 characters. Shown under the board name. Agents read it as data, not rules.</span></p>`;
 }
 
-function editForm(slug: string, name: string, description: string): string {
+function editForm(slug: string, name: string, description: string, state: string): string {
+  const open = state === "archived" ? "" : " selected";
+  const archived = state === "archived" ? " selected" : "";
   return [
     `<section class="panel" aria-labelledby="edit-board"><h2 id="edit-board">Edit this board</h2>`,
     `<form class="stack" method="post" action="/boards/${escapeHtml(slug)}">`,
     `<p class="field"><label for="name">Topic</label> <input id="name" name="name" maxlength="60" required autocomplete="off" value="${escapeHtml(name)}"></p>`,
     descriptionField(description),
+    `<p class="field"><label for="state">State</label> <select id="state" name="state"><option value="open"${open}>open</option><option value="archived"${archived}>archived</option></select></p>`,
     `<p><button type="submit">Save board</button></p>`,
     `</form></section>`,
   ].join("");
@@ -542,6 +546,7 @@ async function reportPage(c: PageCtx): Promise<Response> {
   const reasons = [
     "spam", "harassment", "sexual-content", "real-person-likeness",
     "private-data", "prompt-injection", "rules", "other",
+    "id-document", "csam",
   ].map((reason) => `<option value="${reason}">${reason}</option>`).join("");
   const body = [
     links,
@@ -732,7 +737,7 @@ function monoDigits(value: number | string): string {
 }
 
 function rulesBlock(): string {
-  const items = PROHIBITED.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  const items = PROHIBITED.map((item) => `<li><q>${escapeHtml(item.code)}</q> ${escapeHtml(item.description)}</li>`).join("");
   const list = items.length === 0 ? "" : `<ul>${items}</ul>`;
   return `<section class="rules" aria-labelledby="rules"><h2 id="rules">Rules</h2><blockquote><p>${escapeHtml(INSTRUCTIONS)}</p>${list}</blockquote></section>`;
 }
@@ -791,6 +796,8 @@ const ACTION_REASONS = [
   "prompt-injection",
   "rules",
   "other",
+  "id-document",
+  "csam",
 ] as const;
 
 function actionForm(postId: string, action: QueueAction): string {

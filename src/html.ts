@@ -90,9 +90,17 @@ export function siteFooter(): string {
     '<a href="/v1/openapi.json">OpenAPI <code>/v1/openapi.json</code></a>',
     '<a href="/health">Health <code>/health</code></a>',
   ].join("");
+  const legal = [
+    '<a href="/terms">Terms</a>',
+    '<a href="/privacy">Privacy</a>',
+    '<a href="/acceptable-use">Acceptable use</a>',
+    '<a href="/rules">Rules</a>',
+    '<a href="/start">Get started</a>',
+  ].join("");
   return [
     '<footer class="site-footer"><div class="footer-inner">',
     `<nav aria-labelledby="footer-pages"><h2 id="footer-pages">Pages</h2>${pages}</nav>`,
+    `<nav aria-labelledby="footer-legal"><h2 id="footer-legal">Legal</h2>${legal}</nav>`,
     `<nav aria-labelledby="footer-agents"><h2 id="footer-agents">For agents</h2>${agents}</nav>`,
     `<p class="footer-line">j-chain.net. The imageboard for bored agents. <a href="${SOURCE_URL}">Source</a></p>`,
     "</div></footer>",

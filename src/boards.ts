@@ -16,9 +16,11 @@ type Failure = { ok: false; code: "malformed" | "validation_failed"; message?: s
 
 type Parsed = { ok: true; slug: string; name: string; description: string } | Failure;
 
-type ParsedEdit = { ok: true; name?: string; description?: string } | Failure;
+type ParsedEdit = { ok: true; name?: string; description?: string; state?: BoardState } | Failure;
 
-type BoardRow = { id: string; slug: string; name: string; description: string };
+type BoardState = "open" | "archived";
+
+export type BoardRow = { id: string; slug: string; name: string; description: string; state: BoardState };
 
 const NAME_RULE = "name must be 1 to 60 characters.";
 const DESCRIPTION_RULE = "description must be at most 500 characters.";
@@ -74,7 +76,7 @@ async function editJson(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "admin") return errorResponse(requestId, "forbidden");
   if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
-  const board = await c.env.DB.prepare("SELECT id, slug, name, description FROM boards WHERE id = ?")
+  const board = await c.env.DB.prepare("SELECT id, slug, name, description, state FROM boards WHERE id = ?")
     .bind(c.req.param("id") ?? "").first<BoardRow>();
   if (!board) return errorResponse(requestId, "not_found");
   const body = await readObject(c.req.raw);
@@ -99,7 +101,7 @@ async function editHtml(c: Ctx): Promise<Response> {
   if (!sameOrigin(c.req.raw, policy.site_origin)) {
     return htmlError(requestId, "forbidden", "Board", "/boards", "Boards");
   }
-  const board = await c.env.DB.prepare("SELECT id, slug, name, description FROM boards WHERE slug = ?")
+  const board = await c.env.DB.prepare("SELECT id, slug, name, description, state FROM boards WHERE slug = ?")
     .bind(slug).first<BoardRow>();
   if (!board) return htmlError(requestId, "not_found", "Board", "/boards", "Boards");
   const body = await readForm(c.req.raw);
@@ -113,7 +115,7 @@ async function editHtml(c: Ctx): Promise<Response> {
   return htmlResult(requestId, "Board updated", `${updated.name} is saved.`, back, label, 200);
 }
 
-function parseBoardCreate(body: Record<string, unknown>): Parsed {
+export function parseBoardCreate(body: Record<string, unknown>): Parsed {
   const keys = Object.keys(body);
   const allowed = keys.every((key) => key === "slug" || key === "name" || key === "description");
   if (!allowed || !keys.includes("slug") || !keys.includes("name")) {
@@ -140,13 +142,19 @@ function parseBoardCreate(body: Record<string, unknown>): Parsed {
 }
 
 // The JSON edit takes name, description, or both. The HTML form always sends both.
-function parseBoardEdit(body: Record<string, unknown>, form: boolean): ParsedEdit {
+export function parseBoardEdit(body: Record<string, unknown>, form: boolean): ParsedEdit {
   const keys = Object.keys(body);
-  if (keys.length === 0 || !keys.every((key) => key === "name" || key === "description")) {
+  if (keys.length === 0 || !keys.every((key) => key === "name" || key === "description" || key === "state")) {
     return { ok: false, code: "malformed" };
   }
-  if (form && keys.length !== 2) return { ok: false, code: "malformed" };
-  const result: { ok: true; name?: string; description?: string } = { ok: true };
+  if (form && (body.name === undefined || body.description === undefined)) return { ok: false, code: "malformed" };
+  const result: { ok: true; name?: string; description?: string; state?: BoardState } = { ok: true };
+  if (body.state !== undefined) {
+    if (body.state !== "open" && body.state !== "archived") {
+      return { ok: false, code: "validation_failed", message: "state must be open or archived." };
+    }
+    result.state = body.state;
+  }
   if (body.name !== undefined) {
     if (typeof body.name !== "string") return { ok: false, code: "malformed" };
     const name = parseName(body.name);
@@ -176,27 +184,33 @@ function parseDescription(raw: string): string | null {
   return description;
 }
 
-async function updateBoard(
+export async function updateBoard(
   db: D1Database,
   actor: string,
   board: BoardRow,
-  edit: { name?: string; description?: string },
+  edit: { name?: string; description?: string; state?: BoardState },
 ): Promise<BoardRow> {
   const next: BoardRow = {
     ...board,
     name: edit.name ?? board.name,
     description: edit.description ?? board.description,
+    state: edit.state ?? board.state,
   };
+  const action = next.state === board.state
+    ? "edit_board"
+    : next.state === "archived"
+      ? "archive_board"
+      : "unarchive_board";
   await db.batch([
-    db.prepare("UPDATE boards SET name = ?, description = ? WHERE id = ?")
-      .bind(next.name, next.description, board.id),
-    auditBoard(db, actor, board.id, "edit_board"),
+    db.prepare("UPDATE boards SET name = ?, description = ?, state = ? WHERE id = ?")
+      .bind(next.name, next.description, next.state, board.id),
+    auditBoard(db, actor, board.id, action),
   ]);
   return next;
 }
 
 function boardBody(board: BoardRow): Record<string, string> {
-  return { id: board.id, slug: board.slug, name: board.name, description: board.description };
+  return { id: board.id, slug: board.slug, name: board.name, description: board.description, state: board.state };
 }
 
 function hasControl(value: string): boolean {
@@ -207,7 +221,12 @@ function hasControl(value: string): boolean {
 }
 
 // Board writes are Admin-only and audited as Moderation Actions (CT-20).
-function auditBoard(db: D1Database, actor: string, boardId: string, action: "create_board" | "edit_board"): D1PreparedStatement {
+function auditBoard(
+  db: D1Database,
+  actor: string,
+  boardId: string,
+  action: "create_board" | "edit_board" | "archive_board" | "unarchive_board",
+): D1PreparedStatement {
   return db.prepare(
     `INSERT INTO moderation_actions (
        id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
@@ -215,7 +234,7 @@ function auditBoard(db: D1Database, actor: string, boardId: string, action: "cre
   ).bind(uuidv7(), actor, boardId, action, utcSeconds());
 }
 
-async function insertBoard(
+export async function insertBoard(
   db: D1Database,
   actor: string,
   slug: string,
@@ -234,7 +253,7 @@ async function insertBoard(
     if (message.includes("UNIQUE")) return { ok: false, code: "state_conflict" };
     throw error;
   }
-  return { ok: true, id, slug, name, description };
+  return { ok: true, id, slug, name, description, state: "open" };
 }
 
 async function readObject(request: Request): Promise<ReadResult> {
