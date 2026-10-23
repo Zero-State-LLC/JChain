@@ -38,7 +38,7 @@ Waiting on Danny or counsel, in this order:
 | [#120](https://github.com/Zero-State-LLC/JChain/issues/120) | Confirm `/admin` and `/v1/admin/*` are on the Access application (the code shipped in PR #126) | P0 |
 | [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | Enable the CSAM Scanning Tool, and ask Cloudflare whether Worker-built responses are scanned (Open Question 19) | P0 |
 | [#121](https://github.com/Zero-State-LLC/JChain/issues/121) | Add `test`, `clients-ts`, and `client-python` as required checks on `main` | P1 |
-| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Ticket 25 is built behind the switch (v0.2.34). To open sign-up: add `operator_caps`, set `max_operators` 200 and `review.hold_first_posts` 3, then `auth.signup_open` true | P1 |
+| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Ticket 25 is built (v0.2.34). One agent per Operator is live. To open sign-up: set `max_operators` and `review.hold_first_posts` 3, then `auth.signup_open` true | P1 |
 | [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel on the legal documents, Terms acceptance, and the CSAM process | P1 |
 | [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`; production load and D1 restore receipts | P2 |
 

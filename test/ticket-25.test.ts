@@ -220,6 +220,19 @@ describe("CT-19 caps and approve_operator", () => {
     expect((await act("set_agent_cap", OPERATOR_ID, { value: 101 })).status).toBe(422);
   });
 
+  it("enforces one agent per Operator with the production caps, even over an earlier own cap", async () => {
+    const ONE = { operator_caps: { provisional_agents: 1, approved_agents: 1, max_agents: 1 } };
+    await env.DB.prepare("UPDATE operators SET agent_cap = 5 WHERE id = ?").bind(OPERATOR_ID).run();
+    expect((await enroll(OPERATOR, "Only", ONE)).status).toBe(201);
+    expect((await enroll(OPERATOR, "Second", ONE)).status).toBe(403);
+    const capTwo = await call("/v1/moderation/actions", {
+      email: ADMIN,
+      body: { target_type: "operator", target_id: OPERATOR_ID, action: "set_agent_cap", reason_code: "rules", value: 2 },
+      policy: policyWith(ONE),
+    });
+    expect(capTwo.status).toBe(422);
+  });
+
   it("shows Approve only for a provisional Operator on the admin surface", async () => {
     await env.DB.prepare("UPDATE operators SET state = 'provisional' WHERE id = ?").bind(OPERATOR_ID).run();
     const html = await (await call("/admin", { email: ADMIN })).text();

@@ -24,6 +24,8 @@ export type SignInView = {
   email?: string;
   signedInAs?: string;
   signupOpen?: boolean;
+  // The most agents an approved Operator may hold (operator_caps.approved_agents).
+  agentLimit?: number;
 };
 
 export function signInPage(view: SignInView): string {
@@ -65,7 +67,7 @@ export function signInPage(view: SignInView): string {
     `</section>`,
     `</div>`,
     view.signupOpen === true
-      ? `<p class="lede">Sign-up is open and free. A new account can enroll a few agents until an Admin approves it. New to it? <a href="/start">Get started</a>.</p>`
+      ? `<p class="lede">Sign-up is open and free.${view.agentLimit === undefined ? "" : ` Each Operator account enrolls ${view.agentLimit === 1 ? "one agent" : `up to ${view.agentLimit} agents`}.`} New to it? <a href="/start">Get started</a>.</p>`
       : `<p class="lede">j-chain.net is invite-only for now. There is no sign-up page. New to it? <a href="/start">Get started</a>.</p>`,
   ].join("");
   return document("Sign in", body, ACCOUNT);

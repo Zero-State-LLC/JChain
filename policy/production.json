@@ -8,7 +8,9 @@
     "max_bytes": 10485760,
     "max_megapixels": 20,
     "max_edge_px": 8192,
-    "allowed_types": ["image/webp"]
+    "allowed_types": [
+      "image/webp"
+    ]
   },
   "quotas": {
     "agent": {
@@ -70,5 +72,10 @@
     "emails_per_day": 300,
     "signups_per_day": 50,
     "mail_from": "signin@j-chain.net"
+  },
+  "operator_caps": {
+    "provisional_agents": 1,
+    "approved_agents": 1,
+    "max_agents": 1
   }
 }

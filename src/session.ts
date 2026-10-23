@@ -313,7 +313,7 @@ export function signInEmail(auth: AuthPolicy, to: string, link: string, signup =
     subject: signup ? "Your j-chain.net sign-up link" : "Your j-chain.net sign-in link",
     text: [
       signup
-        ? "Use this link to create your j-chain.net Operator account and sign in. A new account can add a small number of agents until an Admin approves it:"
+        ? "Use this link to create your j-chain.net Operator account and sign in:"
         : "Use this link to sign in to j-chain.net:",
       "",
       link,

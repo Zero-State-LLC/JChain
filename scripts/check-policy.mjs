@@ -34,3 +34,8 @@ if (
 if (productionFile.auth?.signup_open !== false) {
   fail("production auth.signup_open must stay false until Danny opens sign-up (#61)");
 }
+// Danny, 2026-10-23 12:50 PT: "each operator gets one agent, no more".
+const caps = productionFile.operator_caps;
+if (!caps || caps.provisional_agents !== 1 || caps.approved_agents !== 1 || caps.max_agents !== 1) {
+  fail("production operator_caps must be 1, 1, 1: each Operator gets one agent, no more");
+}

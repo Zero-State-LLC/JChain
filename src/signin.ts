@@ -62,6 +62,7 @@ async function signInForm(c: Ctx): Promise<Response> {
     linkMinutes: enabled?.auth.link_minutes,
     signedInAs: session?.email,
     signupOpen: enabled?.auth.signup_open === true && policyOf(c.env)?.operator_caps !== undefined,
+    agentLimit: policyOf(c.env)?.operator_caps?.approved_agents,
   }));
 }
 
@@ -86,6 +87,7 @@ async function requestLink(c: Ctx): Promise<Response> {
       emailOn: true,
       linkMinutes: enabled.auth.link_minutes,
       signupOpen: enabled.auth.signup_open && policy.operator_caps !== undefined,
+      agentLimit: policy.operator_caps?.approved_agents,
       error: "Enter a whole email address, like name@example.com.",
       email: typeof raw === "string" ? raw.slice(0, 254) : undefined,
     }), 422);

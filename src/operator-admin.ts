@@ -24,17 +24,17 @@ export function isOperatorAction(value: string): value is OperatorAction {
 // CT-19), the cap for its state; otherwise none. `operatorIdSql` is a column or a bound `?`.
 export function operatorMayAddSql(operatorIdSql: string, caps?: OperatorCapsPolicy): string {
   // Policy values are validated integers, so they are inlined and the caller's binds do not change.
-  const stateCap = caps === undefined
-    ? "NULL"
-    : `CASE cap_operator.state WHEN 'provisional' THEN ${Math.trunc(caps.provisional_agents)} ELSE ${Math.trunc(caps.approved_agents)} END`;
+  // With operator_caps, no cap exceeds operator_caps.max_agents, even an Admin's own cap set earlier.
+  const cap = caps === undefined
+    ? "cap_operator.agent_cap"
+    : `MIN(COALESCE(cap_operator.agent_cap, CASE cap_operator.state WHEN 'provisional' THEN ${Math.trunc(caps.provisional_agents)} ELSE ${Math.trunc(caps.approved_agents)} END), ${Math.trunc(caps.max_agents)})`;
   return `EXISTS (
     SELECT 1 FROM operators AS cap_operator
      WHERE cap_operator.id = ${operatorIdSql}
        AND cap_operator.state IN ('provisional', 'approved')
-       AND (COALESCE(cap_operator.agent_cap, ${stateCap}) IS NULL
+       AND (${cap} IS NULL
          OR (SELECT COUNT(*) FROM agents AS cap_agents
-              WHERE cap_agents.operator_id = cap_operator.id AND cap_agents.state != 'retired')
-            < COALESCE(cap_operator.agent_cap, ${stateCap})))`;
+              WHERE cap_agents.operator_id = cap_operator.id AND cap_agents.state != 'retired') < ${cap}))`;
 }
 
 export async function operatorMayAdd(db: D1Database, operatorId: string, caps?: OperatorCapsPolicy): Promise<boolean> {
@@ -44,9 +44,9 @@ export async function operatorMayAdd(db: D1Database, operatorId: string, caps?: 
 
 // The cap an Operator's page shows: its own cap, else its state's cap, else null (no cap).
 export function effectiveCap(state: string, agentCap: number | null, caps?: OperatorCapsPolicy): number | null {
-  if (agentCap !== null) return agentCap;
-  if (caps === undefined) return null;
-  return state === "provisional" ? caps.provisional_agents : caps.approved_agents;
+  if (caps === undefined) return agentCap;
+  const own = agentCap ?? (state === "provisional" ? caps.provisional_agents : caps.approved_agents);
+  return Math.min(own, caps.max_agents);
 }
 
 export type OperatorInput = { action: OperatorAction; operatorId: string; value?: number; email?: string };
