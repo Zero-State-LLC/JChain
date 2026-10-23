@@ -15,8 +15,11 @@ export const REDACTED_EMAIL = "redacted";
 // passed the expiry check at the boundary has finished writing first.
 export const RESERVATION_GRACE_HOURS = 1;
 
+export const SCAN_PENDING_MINUTES = 15;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
 
 type RetentionEnv = Pick<Env, "DB" | "MEDIA" | "POLICY" | "QUOTA">;
 
@@ -47,9 +50,20 @@ export async function runRetention(env: RetentionEnv, now: number): Promise<Rete
   const removals = await finishRemovals(env.DB);
   const assets = await deleteExpiredAssets(env, policy, now);
   const signIns = await purgeSignIns(env.DB, policy, now, mailerOf(env as Env) !== null && policy.auth !== undefined);
+  const idempotency = await purgeExpiredIdempotency(env.DB, now);
+  const events = await purgeOldEvents(env.DB, policy, now);
+  const scans = await sweepStuckScans(env.DB, now);
   const alerts = await breachAlerts(env.DB, now);
   const result = { ran: true, ...audit, assets_deleted: assets, alerts };
-  console.log(JSON.stringify({ message: "retention run", ...result, sign_ins_deleted: signIns, removals_finished: removals }));
+  console.log(JSON.stringify({
+    message: "retention run",
+    ...result,
+    sign_ins_deleted: signIns,
+    removals_finished: removals,
+    idempotency_deleted: idempotency,
+    events_deleted: events,
+    scans_swept: scans,
+  }));
   return result;
 }
 
@@ -225,6 +239,50 @@ async function purgeSignIns(db: D1Database, policy: Policy, now: number, enabled
       console.log(JSON.stringify({ message: "retention sign-in step skipped", reason: "tables missing" }));
       return 0;
     }
+    throw error;
+  }
+}
+
+async function purgeExpiredIdempotency(db: D1Database, now: number): Promise<number> {
+  const cutoff = utcSeconds(new Date(now));
+  const deleted = await db.prepare(
+    `DELETE FROM idempotency_keys
+      WHERE rowid IN (
+        SELECT rowid FROM idempotency_keys
+         WHERE expires_at < ?
+         ORDER BY expires_at
+         LIMIT ?)`,
+  ).bind(cutoff, AUDIT_BATCH).run();
+  return Number(deleted.meta.changes ?? 0);
+}
+
+async function purgeOldEvents(db: D1Database, policy: Policy, now: number): Promise<number> {
+  const cutoff = utcSeconds(new Date(now - policy.retention.audit_log_days * DAY_MS));
+  const deleted = await db.prepare(
+    `DELETE FROM events
+      WHERE id IN (
+        SELECT id FROM events
+         WHERE occurred_at < ?
+         ORDER BY occurred_at, id
+         LIMIT ?)`,
+  ).bind(cutoff, AUDIT_BATCH).run();
+  return Number(deleted.meta.changes ?? 0);
+}
+
+async function sweepStuckScans(db: D1Database, now: number): Promise<number> {
+  const cutoff = utcSeconds(new Date(now - SCAN_PENDING_MINUTES * MINUTE_MS));
+  try {
+    const updated = await db.prepare(
+      `UPDATE post_scans SET result = 'unscanned'
+        WHERE post_id IN (
+          SELECT post_id FROM post_scans
+           WHERE result = 'pending' AND scanned_at IS NULL AND published_at < ?
+           ORDER BY published_at, post_id
+           LIMIT ?)`,
+    ).bind(cutoff, RETENTION_BATCH).run();
+    return Number(updated.meta.changes ?? 0);
+  } catch (error) {
+    if (error instanceof Error && /no such table/i.test(error.message)) return 0;
     throw error;
   }
 }

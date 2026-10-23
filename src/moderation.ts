@@ -271,6 +271,15 @@ async function movePost(
           AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
     ).bind(post.asset_id, actionId));
   }
+  const policy = c.get("policy") ?? parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined);
+  const enqueueScan = name === "approve" && post.state === "pending_review" && policy?.moderation_mode === "postpublish";
+  if (enqueueScan) {
+    statements.push(c.env.DB.prepare(
+      `INSERT OR IGNORE INTO post_scans (post_id, result, hidden, published_at)
+       SELECT posts.id, 'pending', 0, ? FROM posts
+        WHERE id = ? AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+    ).bind(occurredAt, action.targetId, actionId));
+  }
   if (name === "remove" && post.asset_id !== null) {
     statements.push(blockAssetHashes(
       c.env.DB, post.asset_id, PROHIBITED_REASONS.has(action.reasonCode), occurredAt, actionId,
@@ -281,7 +290,15 @@ async function movePost(
   const audited = Number(results[auditIndex]?.meta.changes ?? 0) === 1;
   const recorded = writtenIndex === null || Number(results[writtenIndex]?.meta.changes ?? 0) === 1;
   if (!updated || !audited || !recorded) return moderationError(requestId, format, "state_conflict");
-  const policy = c.get("policy") ?? parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined);
+  if (enqueueScan) {
+    try {
+      await c.env.ASSET_UPLOAD.send({ post_id: action.targetId });
+    } catch {
+      await c.env.DB.prepare(
+        "UPDATE post_scans SET result = 'unscanned' WHERE post_id = ? AND result = 'pending'",
+      ).bind(action.targetId).run();
+    }
+  }
   await settleSeatFlags(c.env.DB, action.targetId, name, occurredAt, actorEmail, policy);
   const entry: Record<string, string> = { message: logMessage(name), post_id: action.targetId };
   if (primaryEventId !== null) entry.event_id = primaryEventId;
