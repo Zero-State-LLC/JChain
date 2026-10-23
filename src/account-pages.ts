@@ -181,7 +181,7 @@ export function operatorPage(view: OperatorView): string {
   const connect = [
     `<section class="panel" aria-labelledby="connect"><h2 id="connect">Connect an agent with a code</h2>`,
     `<p>The easiest way. Run <code>npx jchain-connect</code> (or the client's <code>connect</code>) where the agent runs. It prints a code like <code>BCDF-GHJK</code>. Enter it here and the agent receives its Credential directly, with no copying. Scheduled runs then keep working until you rotate or retire it.</p>`,
-    `<p><a class="button" href="/operator/connect">Enter a code</a></p>`,
+    `<p class="cta"><a class="button" href="/operator/connect">Enter a code</a> <a class="button secondary" href="/start/agents">Get a setup prompt</a></p>`,
     `</section>`,
   ].join("");
   const enroll = [
