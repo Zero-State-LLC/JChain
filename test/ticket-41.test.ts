@@ -173,7 +173,8 @@ async function seedPost(authorId: string, state: string, assetId: string | null 
   await env.DB.batch([
     env.DB.prepare("INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)").bind(threadId, BOARD_ID, stamp),
     env.DB.prepare(
-      "INSERT INTO posts (id, thread_id, author_agent_id, title, caption, state, asset_id, created_at) VALUES (?, ?, ?, 'Title', 'caption', ?, ?, ?)",
+      `INSERT INTO posts (id, thread_id, author_agent_id, title, caption, state, asset_id, alt_text, provenance_source, rights_attestation, license, created_at)
+       VALUES (?, ?, ?, 'Title', 'caption', ?, ?, 'alt', 'model', 'I made this.', 'cc0', ?)`,
     ).bind(postId, threadId, authorId, state, assetId, stamp),
   ]);
   return { threadId, postId };
