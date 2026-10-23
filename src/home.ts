@@ -2,7 +2,8 @@ import { Hono, type Context } from "hono";
 import { listDirectory } from "./directory";
 import { ROBOTS_TXT, guideHtml, guideMarkdown } from "./guide";
 import { homeDocument } from "./home-page";
-import { document } from "./html";
+import { FRAMEWORKS, frameworkLabel, readPersona, setupMarkdown, setupPageHtml, type Framework } from "./agent-setup";
+import { document, notFoundDocument } from "./html";
 import { HOME_CSP, errorResponse, htmlResponse } from "./http";
 import { uuidv7 } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
@@ -18,6 +19,9 @@ export function mountHome(app: Hono<AppEnv>): void {
   app.get("/", homePage);
   // CT-26: the guide reads no binding, so it renders while the policy is missing.
   app.get("/start", startPage);
+  // CT-31: agent setup prompts, one tab per agent framework.
+  app.get("/start/agents", (c) => c.redirect("/start/agents/grokbot", 302));
+  app.get("/start/agents/:framework", agentSetup);
   app.get("/llms.txt", llmsTxt);
   app.get("/robots.txt", robotsTxt);
   app.on(["GET", "HEAD"], "/brand/*", staticAsset);
@@ -38,6 +42,37 @@ function startPage(_c: PageCtx): Response {
   const response = htmlResponse(requestId, document("Get started", guideHtml(), { section: "start" }));
   response.headers.set("cache-control", GUIDE_CACHE);
   return response;
+}
+
+function agentSetup(c: PageCtx): Response {
+  const requestId = uuidv7();
+  const raw = c.req.param("framework") ?? "";
+  const markdown = raw.endsWith(".md");
+  const id = markdown ? raw.slice(0, -3) : raw;
+  if (!(FRAMEWORKS as readonly string[]).includes(id)) return notFound(c, requestId);
+  const framework = id as Framework;
+  const persona = readPersona((key) => c.req.query(key));
+  const origin = new URL(c.req.url).origin;
+  // A filled-in persona is the Operator's own text: never cache it.
+  const cache = new URL(c.req.url).search === "" ? GUIDE_CACHE : "no-store";
+  if (markdown) {
+    const response = textResponse(setupMarkdown(framework, persona, origin), "text/markdown; charset=utf-8");
+    response.headers.set("cache-control", cache);
+    response.headers.set("referrer-policy", "same-origin");
+    return response;
+  }
+  const response = htmlResponse(
+    requestId,
+    document(`Set up your agent: ${frameworkLabel(framework)}`, setupPageHtml(framework, persona, origin), { section: "start" }),
+  );
+  response.headers.set("cache-control", cache);
+  response.headers.set("referrer-policy", "same-origin");
+  return response;
+}
+
+function notFound(c: PageCtx, requestId: string): Response {
+  const accept = c.req.header("accept") ?? "";
+  return accept.includes("text/html") ? htmlResponse(requestId, notFoundDocument(), 404) : errorResponse(requestId, "not_found");
 }
 
 function llmsTxt(c: PageCtx): Response {

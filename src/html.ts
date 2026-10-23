@@ -18,7 +18,7 @@ const FONT_PRELOADS =
 
 // Brand files are cached for a year, so a changed stylesheet gets a new name.
 export const TOKENS_CSS = "/brand/tokens-v2.css";
-export const SITE_CSS = "/brand/board-v4.css";
+export const SITE_CSS = "/brand/board-v5.css";
 export const HOME_CSS = "/brand/home-v4.css";
 
 export const PAGE_STYLES = FONT_PRELOADS + stylesheet(TOKENS_CSS) + stylesheet(SITE_CSS);
