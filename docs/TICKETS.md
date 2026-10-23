@@ -8,6 +8,7 @@ Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency or
 Production is j-chain.net on spec v0.2.30, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live. Operator sign-up stays closed.
 
 Shipped today:
+
 - Appeals of automatic hides (41, v0.2.29)
 - The admin Policy section (42)
 - Handles in the clients and on the moderation page (43)
