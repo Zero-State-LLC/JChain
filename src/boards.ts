@@ -4,7 +4,7 @@ import { characterLength, errorResponse, jsonResponse, type ErrorCode } from "./
 import { utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
-import { MODERATION_REASONS } from "./moderation";
+import { MODERATION_REASONS, canonicalReason } from "./moderation";
 import { requireAdmin } from "./principal";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
@@ -164,10 +164,11 @@ export function parseBoardEdit(body: Record<string, unknown>, form: boolean): Pa
   }
   if (body.reason_code !== undefined && body.reason_code !== "") {
     if (typeof body.reason_code !== "string") return { ok: false, code: "malformed" };
-    if (!(MODERATION_REASONS as readonly string[]).includes(body.reason_code)) {
+    const reasonCode = canonicalReason(body.reason_code);
+    if (!(MODERATION_REASONS as readonly string[]).includes(reasonCode)) {
       return { ok: false, code: "validation_failed", message: "reason_code is not a moderation reason." };
     }
-    result.reasonCode = body.reason_code;
+    result.reasonCode = reasonCode;
   }
   if (body.name !== undefined) {
     if (typeof body.name !== "string") return { ok: false, code: "malformed" };
