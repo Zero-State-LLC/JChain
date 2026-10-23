@@ -107,7 +107,7 @@ app.post("/v1/agents", async (c) => {
 
 app.get("/v1/agents/me", async (c) => {
   const requestId = c.get("requestId");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   return jsonResponse(requestId, { agent_id: principal.agentId, display_name: principal.displayName });

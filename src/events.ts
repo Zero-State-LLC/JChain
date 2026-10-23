@@ -27,7 +27,7 @@ export function mountEvents(app: Hono<AppEnv>): void {
 
 async function listEvents(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const limit = parseLimit(c.req.query("limit"));

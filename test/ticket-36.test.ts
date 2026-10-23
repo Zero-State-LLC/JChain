@@ -1,6 +1,7 @@
-import { applyD1Migrations } from "cloudflare:test";
+import { applyD1Migrations, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import worker from "../src/index";
 import { runRetention } from "../src/retention";
 import { call, clearSignInQuota, MODERATOR, OPERATOR, resetAndSeed, STAFF } from "./harness";
 
@@ -163,7 +164,9 @@ describe("AT-53 sign-in is off without the auth block or the binding", () => {
     const door = await call("/signin/access");
     expect(door.status).toBe(303);
     expect(door.headers.get("location")).toBe("/operator");
-    expect((await call(`/signin/sl_${"A".repeat(43)}`)).status).toBe(503);
+    const disabled = await call(`/signin/sl_${"A".repeat(43)}`);
+    expect(disabled.status).toBe(503);
+    expect(disabled.headers.get("referrer-policy")).toBe("no-referrer");
     expect(page).not.toContain('name="email"');
     const posted = await call("/signin", { method: "POST", raw: form({ email: OPERATOR }), headers: FORM });
     expect(posted.status).toBe(503);
@@ -432,5 +435,42 @@ describe("review fixes (v0.2.25)", () => {
     expect(Number((await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first<{ n: number }>())?.n)).toBe(1);
     await runRetention(env, Date.now());
     expect(Number((await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first<{ n: number }>())?.n)).toBe(0);
+  });
+
+  it("returns the confirmation page before the email send finishes", async () => {
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sent: Sent[] = [];
+    const bindings = signInEnv(sent);
+    const mailer = bindings.EMAIL as { send: (message: Sent) => Promise<{ messageId: string }> };
+    mailer.send = async (message) => {
+      await gate;
+      sent.push(message);
+      return { messageId: "test" };
+    };
+    const ctx = createExecutionContext();
+    const pending = worker.fetch(new Request(`${ORIGIN}/signin`, {
+      method: "POST",
+      headers: FORM,
+      body: form({ email: OPERATOR }),
+    }), bindings, ctx);
+    try {
+      const response = await Promise.race([
+        pending,
+        new Promise<Response>((_, reject) => {
+          setTimeout(() => reject(new Error("signin waited on the email send")), 2_000);
+        }),
+      ]);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("If that address can sign in, a link is on its way.");
+      expect(sent).toHaveLength(0);
+    } finally {
+      release();
+      await waitOnExecutionContext(ctx);
+    }
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.to).toBe(OPERATOR);
   });
 });

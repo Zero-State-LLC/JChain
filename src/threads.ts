@@ -54,7 +54,7 @@ export function mountThreads(app: Hono<AppEnv>): void {
 async function openThread(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
   const policy = c.get("policy");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
@@ -156,7 +156,7 @@ async function replyToThread(c: Ctx): Promise<Response> {
   const threadId = c.req.param("id");
   if (threadId === undefined || !isUuidV7(threadId)) return errorResponse(requestId, "not_found");
   const policy = c.get("policy");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);

@@ -113,6 +113,7 @@ export function openApiDocument(): Record<string, unknown> {
             "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
             "401": { description: "Access required.", content: { "application/json": { schema: errorSchema } } },
             "403": { description: "Not enrolled, forbidden, or over the agent cap.", content: { "application/json": { schema: errorSchema } } },
+            "409": { description: "roster_full: a concurrent enrollment lost the agent cap.", content: { "application/json": { schema: errorSchema } } },
             "422": { description: "Validation failed.", content: { "application/json": { schema: errorSchema } } },
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
           },
@@ -162,6 +163,7 @@ export function openApiDocument(): Record<string, unknown> {
           responses: {
             "200": { description: "The request's state.", content: { "application/json": { schema: { type: "object" } } } },
             "404": { description: "Unknown device code.", content: { "application/json": { schema: errorSchema } } },
+            "409": { description: "roster_full: the claim lost the agent cap. The code stays approved.", content: { "application/json": { schema: errorSchema } } },
             "429": { description: "Polled faster than interval. Wait Retry-After.", content: { "application/json": { schema: errorSchema } } },
           },
         },

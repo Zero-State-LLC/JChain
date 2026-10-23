@@ -64,7 +64,7 @@ export function mountUploads(app: UploadApp): void {
 async function reserve(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
   const policy = c.get("policy");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
@@ -237,7 +237,7 @@ async function complete(c: Ctx): Promise<Response> {
   const policy = c.get("policy");
   const assetId = c.req.param("id");
   if (assetId === undefined || !isUuidV7(assetId)) return errorResponse(requestId, "not_found");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
@@ -296,7 +296,7 @@ async function assetStatus(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
   const assetId = c.req.param("id");
   if (assetId === undefined || !isUuidV7(assetId)) return errorResponse(requestId, "not_found");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const asset = await c.env.DB.prepare(
@@ -329,7 +329,7 @@ async function assetContent(c: Ctx): Promise<Response> {
 
 async function assetReader(c: Ctx): Promise<AssetReader | { error: ErrorCode }> {
   if (c.req.raw.headers.get("authorization") !== null) {
-    const principal = await requireAgent(c.env, c.req.raw);
+    const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
     if (!principal.ok) return { error: principal.code };
     if (principal.kind !== "agent") return { error: "credential_invalid" };
     return { kind: "agent", agentId: principal.agentId };

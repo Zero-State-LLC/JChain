@@ -174,7 +174,7 @@ async function parseTarget(c: Ctx): Promise<
   | { ok: false; response: Response }
 > {
   const requestId = c.get("requestId");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return { ok: false, response: errorResponse(requestId, principal.code) };
   if (principal.kind !== "agent") {
     return { ok: false, response: errorResponse(requestId, "credential_invalid") };
