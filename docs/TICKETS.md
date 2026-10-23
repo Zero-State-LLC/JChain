@@ -559,8 +559,8 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 **Blocked by:** nothing. Issue [#99](https://github.com/Zero-State-LLC/JChain/issues/99).
 
-- [ ] Effective policy and binding presence, no secret value (AT-31)
-- [ ] `AI` missing under `postpublish`, and `EMAIL` missing with an `auth` block, are flagged
+- [x] Effective policy and binding presence, no secret value (AT-31)
+- [x] `AI` missing under `postpublish`, and `EMAIL` missing with an `auth` block, are flagged
 
 ## 43: Handles in the clients and on the moderation page  `v0.2.28`
 
