@@ -17,7 +17,6 @@ import {
 } from "./harness";
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
-const SHA = "b".repeat(64);
 const CSP = "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'";
 
 beforeAll(async () => {
@@ -67,14 +66,38 @@ describe("archived boards (AT-32)", () => {
 });
 
 describe("admin surface (AT-31, AT-33, AT-16)", () => {
-  it("serves the admin page only to an Admin Seat", async () => {
+  it("serves the admin page and seat routes only to an Admin Seat via Cloudflare Access", async () => {
+    const ada = await enroll("Ada", OPERATOR);
+    const sessionId = uuidv7();
+    const sessionSecret = "s".repeat(43);
+    const { sha256Hex } = await import("../src/credential");
+    const now = utcSeconds();
+    await env.DB.prepare(
+      `INSERT INTO sessions (id, operator_id, secret_hash, created_at, last_used_at, revoked_at)
+       VALUES (?, (SELECT id FROM operators WHERE email = ?), ?, ?, ?, NULL)`,
+    ).bind(sessionId, ADMIN2, await sha256Hex(sessionSecret), now, now).run();
+    const adminSessionCookie = `__Host-jchain_session=${sessionSecret}`;
+
     for (const options of [
       {},
+      { headers: { cookie: adminSessionCookie } },
+      { bearer: ada.credential },
+    ]) {
+      await expectError(await call("/admin", options), 401, "access_required");
+      await expectError(await call("/v1/admin/seats/1", {
+        ...options,
+        body: { action: "pause_seat_agent" },
+      }), 401, "access_required");
+    }
+    for (const options of [
       { email: OPERATOR },
       { email: STAFF },
-      { bearer: (await enroll("Ada", OPERATOR)).credential },
     ]) {
       await expectError(await call("/admin", options), 403, "forbidden");
+      await expectError(await call("/v1/admin/seats/1", {
+        ...options,
+        body: { action: "pause_seat_agent" },
+      }), 403, "forbidden");
     }
     const page = await call("/admin", { email: ADMIN });
     expect(page.status).toBe(200);
@@ -149,7 +172,15 @@ describe("prohibited reports and legal hold (AT-35, AT-38)", () => {
       const post = await env.DB.prepare(
         "SELECT state, legal_hold, legal_hold_reason FROM posts WHERE id = ?",
       ).bind(seeded.postId).first<{ state: string; legal_hold: number; legal_hold_reason: string }>();
-      expect(post).toEqual({ state: "quarantined", legal_hold: 1, legal_hold_reason: reason });
+      expect(post).toEqual({
+        state: "quarantined",
+        legal_hold: reason === "csam" ? 1 : 0,
+        legal_hold_reason: reason === "csam" ? "csam" : null,
+      });
+      const asset = await env.DB.prepare(
+        "SELECT state FROM assets WHERE id = (SELECT asset_id FROM posts WHERE id = ?)",
+      ).bind(seeded.postId).first<{ state: string }>();
+      expect(asset?.state).toBe("quarantined");
       const event = await env.DB.prepare(
         "SELECT type FROM events WHERE resource_id = ? AND type = 'post.withdrawn'",
       ).bind(seeded.postId).first<{ type: string }>();
@@ -159,6 +190,63 @@ describe("prohibited reports and legal hold (AT-35, AT-38)", () => {
       ).bind(seeded.postId).first<{ action: string; reason_code: string }>();
       expect(action).toEqual({ action: "quarantine", reason_code: reason });
     }
+  });
+
+
+  it("lets a Moderator remove or restore an id-document quarantine and requires an Admin Seat for a csam legal hold", async () => {
+    const author = await enroll("Bea", ADMIN2);
+    const idDoc = await seedPost(author.agentId);
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      body: { target_type: "post", target_id: idDoc.postId, reason_code: "id-document" },
+    }), 201);
+    const removedIdDoc = await expectJson(await call("/v1/moderation/actions", {
+      email: STAFF,
+      body: { target_type: "post", target_id: idDoc.postId, action: "remove", reason_code: "id-document" },
+    }), 200);
+    expect(removedIdDoc.state).toBe("removal_pending");
+
+    const csam = await seedPost(author.agentId);
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      body: { target_type: "post", target_id: csam.postId, reason_code: "csam" },
+    }), 201);
+    // A Moderator without an Admin Seat cannot release a legal hold.
+    await expectError(await call("/v1/moderation/actions", {
+      email: STAFF,
+      body: { target_type: "post", target_id: csam.postId, action: "restore", reason_code: "rules" },
+    }), 403, "forbidden");
+    // An Admin clears a false alarm in one action: the Post, its Asset, and the hold are released.
+    const restored = await expectJson(await call("/v1/moderation/actions", {
+      email: ADMIN,
+      body: { target_type: "post", target_id: csam.postId, action: "restore", reason_code: "rules" },
+    }), 200);
+    expect(restored.state).toBe("published");
+    const cleared = await env.DB.prepare("SELECT state, legal_hold, legal_hold_reason FROM posts WHERE id = ?")
+      .bind(csam.postId).first<{ state: string; legal_hold: number; legal_hold_reason: string | null }>();
+    expect(cleared).toEqual({ state: "published", legal_hold: 0, legal_hold_reason: null });
+    const releasedAsset = await env.DB.prepare("SELECT state FROM assets WHERE id = ?")
+      .bind(csam.assetId).first<{ state: string }>();
+    expect(releasedAsset?.state).toBe("ready");
+    const restoredEvent = await env.DB.prepare(
+      "SELECT type FROM events WHERE resource_id = ? AND type = 'post.restored'",
+    ).bind(csam.postId).first<{ type: string }>();
+    expect(restoredEvent?.type).toBe("post.restored");
+
+    // Any Moderator may still remove a held Post; the hold stays for preservation.
+    const heldRemove = await seedPost(author.agentId);
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      body: { target_type: "post", target_id: heldRemove.postId, reason_code: "csam" },
+    }), 201);
+    const removedHeld = await expectJson(await call("/v1/moderation/actions", {
+      email: STAFF,
+      body: { target_type: "post", target_id: heldRemove.postId, action: "remove", reason_code: "csam" },
+    }), 200);
+    expect(removedHeld.state).toBe("removal_pending");
+    const stillHeld = await env.DB.prepare("SELECT legal_hold FROM posts WHERE id = ?")
+      .bind(heldRemove.postId).first<{ legal_hold: number }>();
+    expect(stillHeld?.legal_hold).toBe(1);
   });
 
   it("leaves an anonymous prohibited report open for triage", async () => {
@@ -282,11 +370,37 @@ describe("seat flags (AT-42, AT-43)", () => {
     await env.DB.prepare(
       "UPDATE admin_seats SET seat_state = 'active', seat_trial_count = 10 WHERE seat = 1",
     ).run();
-    for (let index = 0; index < 20; index += 1) {
+    // Duplicate flag by the same seat on the same Post is state_conflict.
+    const dupPost = await seedPost(author.agentId);
+    await expectJson(await flag(dupPost.postId, seat.credential), 200);
+    await env.DB.prepare("UPDATE posts SET state = 'published' WHERE id = ?").bind(dupPost.postId).run();
+    await expectError(await flag(dupPost.postId, seat.credential), 409, "state_conflict");
+
+    // Own-Admin (ADMIN) and non-seat Moderator (STAFF) decisions do not score Seat 1.
+    for (const actor of [ADMIN, STAFF]) {
+      for (let i = 0; i < 6; i += 1) {
+        const unscored = await seedPost(author.agentId);
+        await expectJson(await flag(unscored.postId, seat.credential), 200);
+        await expectJson(await call("/v1/moderation/actions", {
+          email: actor,
+          body: {
+            target_type: "post",
+            target_id: unscored.postId,
+            action: "approve",
+            reason_code: "rules",
+          },
+        }), 200);
+      }
+    }
+    const stillActive = await env.DB.prepare("SELECT seat_state FROM admin_seats WHERE seat = 1").first<{ seat_state: string }>();
+    expect(stillActive?.seat_state).toBe("active");
+
+    // Other Admin (ADMIN2) scores Seat 1; after > 5 reviewed flags (6 overturned), Seat 1 pauses.
+    for (let index = 0; index < 6; index += 1) {
       const seeded = await seedPost(author.agentId);
       await expectJson(await flag(seeded.postId, seat.credential), 200);
       await expectJson(await call("/v1/moderation/actions", {
-        email: ADMIN,
+        email: ADMIN2,
         body: {
           target_type: "post",
           target_id: seeded.postId,
@@ -447,16 +561,20 @@ async function seedPost(
   authorId: string,
   state = "published",
   stamp = utcSeconds(),
-): Promise<{ threadId: string; postId: string }> {
+): Promise<{ threadId: string; postId: string; assetId: string }> {
   const threadId = uuidv7();
   const postId = uuidv7();
+  const assetId = await seedAsset(authorId, "ready", stamp);
   await env.DB.batch([
     env.DB.prepare("INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)").bind(threadId, BOARD_ID, stamp),
     env.DB.prepare(
-      "INSERT INTO posts (id, thread_id, author_agent_id, title, caption, state, created_at) VALUES (?, ?, ?, 'Title', 'caption', ?, ?)",
-    ).bind(postId, threadId, authorId, state, stamp),
+      `INSERT INTO posts (
+         id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
+         provenance_source, rights_attestation, license, state, created_at
+       ) VALUES (?, ?, ?, ?, 'Title', 'caption', 'alt', 'human', 'mine', 'cc0', ?, ?)`,
+    ).bind(postId, threadId, authorId, assetId, state, stamp),
   ]);
-  return { threadId, postId };
+  return { threadId, postId, assetId };
 }
 
 async function seedAsset(agentId: string, state: string, createdAt: string): Promise<string> {
@@ -465,7 +583,7 @@ async function seedAsset(agentId: string, state: string, createdAt: string): Pro
     `INSERT INTO assets (
        id, agent_id, state, content_type, byte_size, sha256, original_stored, created_at, expires_at
      ) VALUES (?, ?, ?, 'image/webp', 4, ?, 0, ?, ?)`,
-  ).bind(id, agentId, state, SHA, createdAt, createdAt).run();
+  ).bind(id, agentId, state, id.replaceAll("-", "").padEnd(64, "b"), createdAt, createdAt).run();
   return id;
 }
 

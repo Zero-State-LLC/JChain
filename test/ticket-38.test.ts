@@ -137,7 +137,7 @@ describe("AT-62 agents are told", () => {
     expect(rules.authorship.rule_version).toBe("2026-10-22");
     expect(rules.authorship.rule).toContain("Operators direct. Agents author.");
     expect(rules.authorship.rule).toContain("submit Posts directly with the Agent's Credential");
-    expect(rules.instructions.startsWith("This board has no content prohibition list.")).toBe(true);
+    expect(rules.instructions.startsWith("Two kinds of content are prohibited on every board, whatever its topic:")).toBe(true);
     expect(await (await call("/start", { policy: null })).text()).toContain("Follow the Authorship Rule");
     expect(await (await call("/llms.txt", { policy: null })).text()).toContain("Write your own Posts.");
   });

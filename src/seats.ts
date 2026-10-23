@@ -10,9 +10,9 @@ type Ctx = Context<AppEnv>;
 
 // Spec default when the optional review block is absent (prepublish beta).
 export const DEFAULT_SEAT_TRIAL_ACTIONS = 10;
-const ACCURACY_FLOOR = 0.7;
-const ACCURACY_MIN = 20;
-const ACCURACY_WINDOW = 100;
+const DEFAULT_ACCURACY_PERCENT = 70;
+const DEFAULT_ACCURACY_MIN_REVIEWED = 5;
+const DEFAULT_ACCURACY_WINDOW = 100;
 
 const FLAG_REASONS = ["off-topic", "id-document", "csam"] as const;
 const SEAT_ACTIONS = ["bind_seat_agent", "pause_seat_agent", "readmit_seat_agent", "restore_seat_powers"] as const;
@@ -86,6 +86,10 @@ async function flagPost(c: Ctx): Promise<Response> {
   if (post.author_operator !== null && post.author_operator === post.seat_operator) {
     return errorResponse(requestId, "forbidden");
   }
+  const existingFlag = await c.env.DB.prepare(
+    "SELECT id FROM seat_flags WHERE seat = ? AND post_id = ? LIMIT 1",
+  ).bind(seat.seat, postId).first<{ id: string }>();
+  if (existingFlag) return errorResponse(requestId, "state_conflict");
 
   const threshold = trialThreshold(c.get("policy"));
   const trial = seat.seat_state === "trial" || seat.seat_trial_count < threshold;
@@ -222,6 +226,8 @@ export async function settleSeatFlags(
   postId: string,
   action: string,
   at: string,
+  actorEmail?: string,
+  policy?: Policy | null,
 ): Promise<void> {
   // v0.2.29: upholding an appealed hide confirms its flags. Dismissing them overturns them.
   const outcome = action === "quarantine" || action === "remove" || action === "uphold"
@@ -238,20 +244,46 @@ export async function settleSeatFlags(
   await db.prepare(
     "UPDATE seat_flags SET outcome = ?, resolved_at = ? WHERE post_id = ? AND outcome = 'pending'",
   ).bind(outcome, at, postId).run();
-  for (const row of seats) await maybePauseSeat(db, row.seat);
+  let scorerSeat: number | null = null;
+  if (actorEmail !== undefined) {
+    const row = await db.prepare(
+      "SELECT seat FROM admin_seats WHERE lower(email) = lower(?)",
+    ).bind(actorEmail).first<{ seat: number }>();
+    if (!row) return;
+    scorerSeat = Number(row.seat);
+  }
+  for (const row of seats) {
+    if (scorerSeat !== null && Number(row.seat) === scorerSeat) continue;
+    await maybePauseSeat(db, Number(row.seat), policy);
+  }
 }
 
-async function maybePauseSeat(db: D1Database, seat: number): Promise<void> {
+async function maybePauseSeat(db: D1Database, seat: number, policy?: Policy | null): Promise<void> {
+  const accuracyWindow = policy?.review?.seat_accuracy_window ?? DEFAULT_ACCURACY_WINDOW;
+  const minReviewed = policy?.review?.seat_accuracy_min_reviewed ?? DEFAULT_ACCURACY_MIN_REVIEWED;
+  const accuracyPercent = policy?.review?.seat_accuracy_percent ?? DEFAULT_ACCURACY_PERCENT;
   const listed = await db.prepare(
-    `SELECT outcome FROM seat_flags
-      WHERE seat = ? AND trial = 0 AND outcome IN ('confirmed', 'overturned')
-      ORDER BY resolved_at DESC, id DESC
+    `SELECT seat_flags.outcome AS outcome
+       FROM seat_flags
+      WHERE seat_flags.seat = ?
+        AND seat_flags.trial = 0
+        AND seat_flags.outcome IN ('confirmed', 'overturned')
+        AND EXISTS (
+          SELECT 1
+            FROM moderation_actions
+            JOIN admin_seats ON lower(admin_seats.email) = lower(moderation_actions.actor_email)
+           WHERE moderation_actions.target_type = 'post'
+             AND moderation_actions.target_id = seat_flags.post_id
+             AND moderation_actions.created_at = seat_flags.resolved_at
+             AND admin_seats.seat != seat_flags.seat
+        )
+      ORDER BY seat_flags.resolved_at DESC, seat_flags.id DESC
       LIMIT ?`,
-  ).bind(seat, ACCURACY_WINDOW).all<{ outcome: string }>();
+  ).bind(seat, accuracyWindow).all<{ outcome: string }>();
   const rows = listed.results ?? [];
-  if (rows.length < ACCURACY_MIN) return;
+  if (rows.length <= minReviewed) return;
   const confirmed = rows.filter((row) => row.outcome === "confirmed").length;
-  if (confirmed / rows.length < ACCURACY_FLOOR) {
+  if (confirmed * 100 < accuracyPercent * rows.length) {
     await db.prepare("UPDATE admin_seats SET seat_state = 'paused' WHERE seat = ?").bind(seat).run();
   }
 }

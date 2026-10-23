@@ -1,4 +1,4 @@
-import { INSTRUCTIONS } from "./rules-copy";
+import { INSTRUCTIONS, POSTPUBLISH_INSTRUCTIONS } from "./rules-copy";
 
 const REPLY_TEXT = "Noted.";
 const MAX_PAGES = 1000;
@@ -29,7 +29,7 @@ export type ClientRun = {
 export async function runReferenceClient(transport: Transport, credential: string): Promise<ClientRun> {
   const board = await boardId(transport, credential);
   const rules = await readJson(await transport(`/v1/boards/${board}/rules`, { bearer: credential }));
-  if (rules.instructions !== INSTRUCTIONS) return { replies: [], quoted: [] };
+  if (rules.instructions !== INSTRUCTIONS && rules.instructions !== POSTPUBLISH_INSTRUCTIONS) return { replies: [], quoted: [] };
   const events = dedupe(sort(await allEvents(transport, credential)));
   const latestState = new Map<string, string>();
   const latestActiveEventId = new Map<string, string>();

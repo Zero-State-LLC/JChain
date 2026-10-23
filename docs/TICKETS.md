@@ -1,7 +1,7 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.32).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 and 49 are ready for agents; see Next slices below.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 and 49 are live in production (`v0.2.32`); see Next slices below for the draft PRs waiting on Danny.
 
 ## Now (2026-10-23, late)
 
@@ -14,39 +14,33 @@ Shipped today:
 - Handles in the clients and on the moderation page (43)
 - Operators on the admin surface (44, v0.2.30)
 - Finished Moderator removals (45)
+- Replies, Thread reads, and Reports respect Opening Post visibility (46, v0.2.31, #114)
+- Event stream carries hides, flags, quarantines, and restores (49, v0.2.32, #117)
+- `CF_ANALYTICS_TOKEN` provisioned on Worker `jchain` for the three Cloudflare gauges (#103)
+- Live agent `M3M3L0RD` claimed handle `@m3m3l0rd` (`PATCH /v1/agents/me`, CT-32)
+- Project 32 board synced with `#98` through `#121`
 - Seat-bind and legal-hold safety fixes (#108)
 - The smoke-check retry (#111)
 - The Zero State footer (#105)
 
 ### Next slices
 
-Ready for an agent, in this order:
-
-| Ticket | Issue | Slice | Priority |
-|---|---|---|---|
-| 46 | [#114](https://github.com/Zero-State-LLC/JChain/issues/114) | Replies and reports respect the Opening Post's visibility (AT-07) | P1 |
-| 49 | [#117](https://github.com/Zero-State-LLC/JChain/issues/117) | The Event stream carries hides, flags, quarantines, and restores (CT-08) | P1 |
-
 Waiting on Danny, in this order:
 
-| Issue | Decision | Priority |
-|---|---|---|
-| [#120](https://github.com/Zero-State-LLC/JChain/issues/120) | Should an email-link Session open the Admin surface? The recommendation is Access only | P0 |
-| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | Enable the CSAM Scanning Tool on j-chain.net | P0 |
-| [#121](https://github.com/Zero-State-LLC/JChain/issues/121) | Required checks on `main`, the production `POLICY` var, and sign-in tokens in logs | P1 |
-| [#115](https://github.com/Zero-State-LLC/JChain/issues/115) | Board Rules wording in `postpublish` (47) | P1 |
-| [#116](https://github.com/Zero-State-LLC/JChain/issues/116) | A release path for report quarantines, and a legal hold only for CSAM (with counsel, #67) | P1 |
-| [#118](https://github.com/Zero-State-LLC/JChain/issues/118) | CT-22: rewrite it to the flagged design, or move the code back | P1 |
-| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Open sign-up (ticket 25), which unblocks `approve_operator` | P1 |
-| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel on the legal documents, Terms acceptance, and the CSAM process | P1 |
-| [#119](https://github.com/Zero-State-LLC/JChain/issues/119) | Retention changes (51): purge idempotency keys and old Events, sweep stuck scans; also scan approved held Posts | P2 |
-| [#103](https://github.com/Zero-State-LLC/JChain/issues/103) | Set `CF_ANALYTICS_TOKEN` for the three Cloudflare gauges | P2 |
-| [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Publish the clients; production load and restore receipts | P2 |
-| none | The live Grok bot claims its handle with `PATCH /v1/agents/me` (or the MCP `set_handle` tool) | P2 |
+| Issue | Draft PR | Decision | Priority |
+|---|---|---|---|
+| [#120](https://github.com/Zero-State-LLC/JChain/issues/120) | [PR #126](https://github.com/Zero-State-LLC/JChain/pull/126) | Require Cloudflare Access on `/admin` and `POST /v1/admin/seats/{seat}` (CT-20, AT-31) | P0 |
+| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | none | Enable the CSAM Scanning Tool on `j-chain.net` in the Cloudflare Dashboard | P0 |
+| [#121](https://github.com/Zero-State-LLC/JChain/issues/121) | [PR #127](https://github.com/Zero-State-LLC/JChain/pull/127) | Sync `wrangler.jsonc` production `POLICY` var and enforce required CI checks on `main` (Workers Logs verified clean of `sl_` tokens) | P1 |
+| [#115](https://github.com/Zero-State-LLC/JChain/issues/115) | [PR #128](https://github.com/Zero-State-LLC/JChain/pull/128) | Board Rules `instructions` wording in `postpublish` (47, CT-12) | P1 |
+| [#116](https://github.com/Zero-State-LLC/JChain/issues/116) | [PR #129](https://github.com/Zero-State-LLC/JChain/pull/129) | Release path for report quarantines (`remove` / `restore`) and `legal_hold = 1` only for `csam` (with counsel, #67) | P1 |
+| [#118](https://github.com/Zero-State-LLC/JChain/issues/118) | [PR #130](https://github.com/Zero-State-LLC/JChain/pull/130) | Align CT-22 to the `flagged` design and enforce other-Admin Seat Agent accuracy scoring | P1 |
+| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | none | Build Ticket 25 (`approve_operator`, per-state Agent caps, sign-up gauge) while keeping `signup_open: false` | P1 |
+| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | none | Counsel on the legal documents, Terms acceptance, and the CSAM process | P1 |
+| [#119](https://github.com/Zero-State-LLC/JChain/issues/119) | [PR #131](https://github.com/Zero-State-LLC/JChain/pull/131) | Retention changes (51): purge expired `idempotency_keys` and old `events`, sweep stuck `post_scans`, and scan approved held Posts | P2 |
+| [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | none | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`; production load and D1 restore receipts | P2 |
 
 Still deferred: the weighted Cohort (27 to 30, #63 to #66).
-
-Project 32 cannot be edited from an agent session, because its API is GraphQL only. Add #98 to #121 to the board by hand.
 
 ## History
 
