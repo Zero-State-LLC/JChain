@@ -128,7 +128,7 @@ async function movePost(
   const name = action.action as MoveName;
 
   const post = await c.env.DB.prepare(
-    `SELECT posts.state AS state, threads.state AS thread_state,
+    `SELECT posts.state AS state, posts.legal_hold AS legal_hold, threads.state AS thread_state,
             posts.asset_id AS asset_id, assets.state AS asset_state
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
@@ -136,12 +136,21 @@ async function movePost(
       WHERE posts.id = ?`,
   ).bind(action.targetId).first<{
     state: string;
+    legal_hold: number;
     thread_state: string;
     asset_id: string | null;
     asset_state: string | null;
   }>();
   if (!post) return moderationError(requestId, format, "not_found");
-  const assetReady = post.asset_id === null || post.asset_state === "ready";
+  // #116: any Moderator may remove or quarantine (the safe direction). Releasing a quarantined
+  // Post, or any Post under a legal hold, is Admin only, and it releases the quarantined Asset in
+  // the same batch, so a false report or false CSAM match can be cleared without editing D1.
+  const fromQuarantine = name === "restore" && post.state === "quarantined";
+  if (name === "restore" && (fromQuarantine || post.legal_hold === 1)) {
+    if (!(await isAdminEmail(c.env, actorEmail))) return moderationError(requestId, format, "forbidden");
+  }
+  const assetReady = post.asset_id === null || post.asset_state === "ready"
+    || (fromQuarantine && post.asset_state === "quarantined");
   if (!legal(name, post.state, post.thread_state, assetReady)) {
     return moderationError(requestId, format, "state_conflict");
   }
@@ -190,7 +199,12 @@ async function movePost(
   const primaryEventId = publishedEventId ?? restoredEventId;
   const auditEventId = primaryEventId ?? withdrawnEventId;
 
-  const where = guard(name);
+  const where = fromQuarantine
+    ? `posts.id = ? AND posts.state = 'quarantined'
+    AND (posts.asset_id IS NULL OR EXISTS (
+      SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state IN ('ready', 'quarantined')
+    ))`
+    : guard(name);
   const statements: D1PreparedStatement[] = [];
   let writtenIndex: number | null = null;
   if (name === "approve" && publishedEventId !== null) {
@@ -233,8 +247,13 @@ async function movePost(
   const updateIndex = statements.length;
   // v0.2.29: a Moderator hide is final and never appealable. Restore and approve clear who hid it.
   const hiddenBy = name === "hide" ? "'moderator'" : name === "restore" || name === "approve" ? "NULL" : "hidden_by";
+  const holdSql = name === "restore"
+    ? ", legal_hold = 0, legal_hold_reason = NULL"
+    : action.reasonCode === "csam" && (name === "remove" || name === "quarantine")
+      ? ", legal_hold = 1, legal_hold_reason = 'csam'"
+      : "";
   statements.push(c.env.DB.prepare(
-    `UPDATE posts SET state = ?, hidden_by = ${hiddenBy} WHERE ${where}`,
+    `UPDATE posts SET state = ?, hidden_by = ${hiddenBy}${holdSql} WHERE ${where}`,
   ).bind(destination(name), action.targetId));
   if (name === "restore") {
     // An open appeal is answered by the restore, in the same batch, only when the restore applied.
@@ -243,6 +262,14 @@ async function movePost(
         WHERE post_id = ? AND outcome IS NULL
           AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
     ).bind(occurredAt, actorEmail, action.targetId, actionId));
+  }
+  if (fromQuarantine && post.asset_id !== null) {
+    // Runs after the Post update, so it keys on the audit row this batch wrote.
+    statements.push(c.env.DB.prepare(
+      `UPDATE assets SET state = 'ready'
+        WHERE id = ? AND state = 'quarantined'
+          AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+    ).bind(post.asset_id, actionId));
   }
   if (name === "remove" && post.asset_id !== null) {
     statements.push(blockAssetHashes(
@@ -617,9 +644,9 @@ function legal(name: MoveName, state: string, threadState: string, assetReady: b
   }
   if (name === "reject") return state === "pending_review";
   if (name === "hide") return state === "published";
-  if (name === "remove") return state === "published" || state === "hidden" || state === "rejected" || state === "flagged";
+  if (name === "remove") return state === "published" || state === "hidden" || state === "rejected" || state === "flagged" || state === "quarantined";
   if (name === "quarantine") return state === "flagged" || state === "published" || state === "hidden";
-  return (state === "hidden" || state === "flagged") && assetReady;
+  return (state === "hidden" || state === "flagged" || state === "quarantined") && assetReady;
 }
 
 function destination(name: MoveName): string {
@@ -669,13 +696,13 @@ function guard(name: MoveName): string {
     )`;
   }
   if (name === "restore") {
-    return `posts.id = ? AND posts.state IN ('hidden', 'flagged')
+    return `posts.id = ? AND posts.state IN ('hidden', 'flagged', 'quarantined')
     AND (posts.asset_id IS NULL OR EXISTS (
       SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
     ))`;
   }
   if (name === "hide") return "posts.id = ? AND posts.state = 'published'";
-  if (name === "remove") return "posts.id = ? AND posts.state IN ('published', 'hidden', 'rejected', 'flagged')";
+  if (name === "remove") return "posts.id = ? AND posts.state IN ('published', 'hidden', 'rejected', 'flagged', 'quarantined')";
   if (name === "quarantine") return "posts.id = ? AND posts.state IN ('flagged', 'published', 'hidden')";
   return "posts.id = ? AND posts.state = 'pending_review'";
 }
