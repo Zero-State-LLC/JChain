@@ -174,7 +174,8 @@ async function openingRemoved(db: D1Database, threadId: string): Promise<boolean
   const opening = await db.prepare(
     "SELECT state FROM posts WHERE thread_id = ? AND title IS NOT NULL",
   ).bind(threadId).first<{ state: string }>();
-  return opening?.state === "removed";
+  // Ticket 45: a removal in progress is already a tombstone for readers.
+  return opening?.state === "removed" || opening?.state === "removal_pending";
 }
 
 async function listPosts(
