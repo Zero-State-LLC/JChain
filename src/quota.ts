@@ -500,6 +500,20 @@ export async function chargeSignInEmail(env: QuotaBinding, perDay: number): Prom
   return result.ok;
 }
 
+// v0.2.29 (CT-21): appeals a UTC day per Operator, in the Operator's own object.
+export async function chargeOperatorAppeal(
+  env: QuotaBinding,
+  operatorId: string,
+  perDay: number,
+): Promise<{ ok: true; refund: () => Promise<void> } | { ok: false; retryAfter: number }> {
+  const day = dayWindow();
+  const charges = [{ key: `appeals:${day.key}`, amount: 1, limit: perDay, reset_at: day.resetAt, counter: "appeals" }];
+  const stub = env.QUOTA.getByName(`operator:${operatorId}`);
+  const result = await stub.apply(charges);
+  if (!result.ok) return { ok: false, retryAfter: result.retry_after };
+  return { ok: true, refund: () => stub.refund(charges) };
+}
+
 // CT-28 (v0.2.24): a plain counter on one UTC hour window in one named object.
 export async function chargeHour(
   env: QuotaBinding,
