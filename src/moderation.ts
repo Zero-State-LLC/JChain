@@ -138,13 +138,14 @@ async function movePost(
 
   const post = await c.env.DB.prepare(
     `SELECT posts.state AS state, posts.legal_hold AS legal_hold, threads.state AS thread_state,
-            posts.asset_id AS asset_id, assets.state AS asset_state
+            posts.asset_id AS asset_id, assets.state AS asset_state, posts.hidden_by AS hidden_by
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
        LEFT JOIN assets ON assets.id = posts.asset_id
       WHERE posts.id = ?`,
   ).bind(action.targetId).first<{
     state: string;
+    hidden_by: string | null;
     legal_hold: number;
     thread_state: string;
     asset_id: string | null;
@@ -345,7 +346,7 @@ async function movePost(
     }
   }
   await settleSeatFlags(c.env.DB, action.targetId, name, occurredAt, actorEmail, policy);
-  await logHideToDecision(c.env.DB, action.targetId, post.state, name, occurredAt);
+  await logHideToDecision(c.env.DB, action.targetId, post, name, occurredAt);
   const entry: Record<string, string> = { message: logMessage(name), post_id: action.targetId };
   if (primaryEventId !== null) entry.event_id = primaryEventId;
   console.log(JSON.stringify(entry));
@@ -514,6 +515,8 @@ async function upholdAppeal(
   await settleSeatFlags(c.env.DB, action.targetId, "uphold", at, actorEmail, policy);
   console.log(JSON.stringify({ message: "appeal upheld", post_id: action.targetId }));
   const post = await c.env.DB.prepare("SELECT state FROM posts WHERE id = ?").bind(action.targetId).first<{ state: string }>();
+  // NFR-10: uphold keeps the hide, so the Post as it is now names the original hide and its time.
+  await logHideToDecision(c.env.DB, action.targetId, null, "uphold", at);
   return moderationDone(
     requestId,
     format,

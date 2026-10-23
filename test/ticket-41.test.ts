@@ -1,6 +1,6 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { utcSeconds, uuidv7 } from "../src/ids";
 import postpublishFixture from "./fixtures/policy-postpublish.json";
 import { ADMIN, ADMIN2, BOARD_ID, OPERATOR, STAFF, call, resetAndSeed } from "./harness";
@@ -136,6 +136,37 @@ describe("AT-44 appeals of automatic hides", () => {
     const after = await expectJson(await call(`/v1/posts/${post.postId}/review`, { bearer: ada.credential, policy: POSTPUBLISH }), 200);
     expect(after).toMatchObject({ appeal: { state: "decided", outcome: "uphold" } });
     await expectError(await moderate(STAFF, "post", post.postId, "uphold"), 409, "state_conflict");
+  });
+
+  it("logs hide_to_decision_ms from the original hide when an appeal is upheld (NFR-10)", async () => {
+    const ada = await enroll("Ada", OPERATOR);
+    const hiddenAt = Date.now() - 2 * 60 * 60 * 1000;
+    const scan = await seedHidden(ada.agentId, "scan", hiddenAt);
+    const seat = await seedHidden(ada.agentId, "seat_agents", hiddenAt);
+    await expectJson(await appeal(ada.credential, scan.postId, "k-scan", {}), 201);
+    await expectJson(await appeal(ada.credential, seat.postId, "k-seat", {}), 201);
+    const lines: Record<string, unknown>[] = [];
+    vi.spyOn(console, "log").mockImplementation((line?: unknown) => {
+      try {
+        const parsed = JSON.parse(String(line)) as unknown;
+        if (typeof parsed === "object" && parsed !== null) lines.push(parsed as Record<string, unknown>);
+      } catch {
+        // not a JSON log line
+      }
+    });
+    await expectJson(await moderate(STAFF, "post", scan.postId, "uphold"), 200);
+    await expectJson(await moderate(STAFF, "post", seat.postId, "uphold"), 200);
+    vi.restoreAllMocks();
+    const decided = lines.filter((line) => line.message === "hide decided");
+    expect(decided.map((line) => [line.post_id, line.action, line.hidden_by])).toEqual([
+      [scan.postId, "uphold", "scan"],
+      [seat.postId, "uphold", "seat_agents"],
+    ]);
+    for (const line of decided) {
+      // Measured from the seeded hide, two hours back, not from the appeal.
+      expect(Number(line.hide_to_decision_ms)).toBeGreaterThanOrEqual(2 * 60 * 60 * 1000 - 5000);
+      expect(Number(line.hide_to_decision_ms)).toBeLessThan(3 * 60 * 60 * 1000);
+    }
   });
 
   it("dismisses flags on a published Post without hiding it", async () => {
