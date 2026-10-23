@@ -248,9 +248,11 @@ describe("legal surface (AT-36, CT-12)", () => {
 
 describe("seat flags (AT-42, AT-43)", () => {
   it("trials the first flags, then flags for real, and pauses a weak seat", async () => {
-    const seat = await enroll("Seat", OPERATOR);
+    // A Seat Agent belongs to its seat's own Admin, so seat 1's Admin is an Operator here.
+    await seatOperator(ADMIN);
+    const seat = await enroll("Seat", ADMIN);
     const author = await enroll("Author", ADMIN2);
-    const sameHouse = await enroll("Same", OPERATOR);
+    const sameHouse = await enroll("Same", ADMIN);
     await expectJson(await call("/v1/admin/seats/1", {
       email: ADMIN,
       body: { action: "bind_seat_agent", agent_id: seat.agentId },
@@ -311,8 +313,30 @@ describe("seat flags (AT-42, AT-43)", () => {
     expect(again.trial).toBe(0);
   });
 
+  it("binds only the seat Admin's own Agent and restarts the trial on bind and readmit", async () => {
+    await seatOperator(ADMIN);
+    const other = await enroll("Other", OPERATOR);
+    await expectError(await call("/v1/admin/seats/1", {
+      email: ADMIN,
+      body: { action: "bind_seat_agent", agent_id: other.agentId },
+    }), 422, "validation_failed");
+    const own = await enroll("Own", ADMIN);
+    await env.DB.prepare("UPDATE admin_seats SET seat_state = 'active', seat_trial_count = 10 WHERE seat = 1").run();
+    const bound = await expectJson(await call("/v1/admin/seats/1", {
+      email: ADMIN,
+      body: { action: "bind_seat_agent", agent_id: own.agentId },
+    }), 200);
+    expect(bound).toMatchObject({ seat_state: "trial", seat_trial_count: 0 });
+    await env.DB.prepare("UPDATE admin_seats SET seat_state = 'paused', seat_trial_count = 10 WHERE seat = 1").run();
+    const readmitted = await expectJson(await call("/v1/admin/seats/1", {
+      email: ADMIN2,
+      body: { action: "readmit_seat_agent" },
+    }), 200);
+    expect(readmitted).toMatchObject({ seat_state: "trial", seat_trial_count: 0 });
+  });
+
   it("pauses and readmits a seat agent", async () => {
-    const seat = await enroll("Seat", OPERATOR);
+    const seat = await enroll("Seat", ADMIN2);
     const bound = await expectJson(await call("/v1/admin/seats/2", {
       email: ADMIN,
       body: { action: "bind_seat_agent", agent_id: seat.agentId },
@@ -404,6 +428,12 @@ describe("thread feed index (#81) and public asset cache (#74)", () => {
     expect(bytes.headers.get("cache-control")).toBe("public, max-age=300");
   });
 });
+
+async function seatOperator(email: string): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO operators (email, id, authorship_attested_version, authorship_attested_at) VALUES (?, ?, '2026-10-22', '2026-10-22T00:00:00Z')",
+  ).bind(email, uuidv7()).run();
+}
 
 async function enroll(name: string, email: string): Promise<{ agentId: string; credential: string }> {
   const body = await expectJson(await call("/v1/agents", {

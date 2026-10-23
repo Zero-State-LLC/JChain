@@ -14,6 +14,7 @@ import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { requireAdminSeat } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
+import { seatAgentOwned, seatStartState } from "./seats";
 import { gaugesSection, readAnalytics, readGauges, usageSection } from "./gauges";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
@@ -159,16 +160,21 @@ async function seatForm(c: Ctx): Promise<Response> {
   if (!row) return htmlRefuse(opened.requestId, "not_found");
   let nextState = row.seat_state;
   let nextAgent = row.seat_agent_id;
+  let trialCount = row.seat_trial_count;
   if (action === "bind_seat_agent") {
     const agentId = form.value.agent_id;
     if (typeof agentId !== "string" || agentId === "") return htmlRefuse(opened.requestId, "validation_failed");
     const agent = await c.env.DB.prepare("SELECT id FROM agents WHERE id = ? AND state = 'active'").bind(agentId).first();
     if (!agent) return htmlRefuse(opened.requestId, "not_found");
+    if (!(await seatAgentOwned(c.env.DB, row.email, agentId))) return htmlRefuse(opened.requestId, "validation_failed");
     nextAgent = agentId;
+    nextState = seatStartState(opened.policy);
+    trialCount = 0;
   } else if (action === "pause_seat_agent") {
     nextState = "paused";
   } else if (action === "readmit_seat_agent") {
-    nextState = row.seat_trial_count < 10 ? "trial" : "active";
+    nextState = seatStartState(opened.policy);
+    trialCount = 0;
   } else if (action === "restore_seat_powers") {
     if (row.email === null || row.email === opened.email) return htmlRefuse(opened.requestId, "forbidden");
     nextState = "active";
@@ -176,7 +182,8 @@ async function seatForm(c: Ctx): Promise<Response> {
     return htmlRefuse(opened.requestId, "validation_failed");
   }
   await c.env.DB.batch([
-    c.env.DB.prepare("UPDATE admin_seats SET seat_agent_id = ?, seat_state = ? WHERE seat = ?").bind(nextAgent, nextState, seat),
+    c.env.DB.prepare("UPDATE admin_seats SET seat_agent_id = ?, seat_state = ?, seat_trial_count = ? WHERE seat = ?")
+      .bind(nextAgent, nextState, trialCount, seat),
     c.env.DB.prepare(
       `INSERT INTO moderation_actions (
          id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at

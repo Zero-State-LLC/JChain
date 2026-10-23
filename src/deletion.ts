@@ -104,8 +104,10 @@ async function revokeAssets(c: Ctx, agentId: string): Promise<boolean> {
   let changed = false;
   for (;;) {
     const listed = await c.env.DB.prepare(
+      // Part D: an owner deletion never destroys evidence under legal hold.
       `SELECT id FROM assets
         WHERE agent_id = ? AND state IN ('ready', 'quarantined', 'deletion_pending')
+          AND NOT EXISTS (SELECT 1 FROM posts WHERE posts.asset_id = assets.id AND posts.legal_hold = 1)
         LIMIT 40`,
     ).bind(agentId).all<{ id: string }>();
     const ids = (listed.results ?? []).map((row) => row.id);
@@ -113,7 +115,8 @@ async function revokeAssets(c: Ctx, agentId: string): Promise<boolean> {
     const placeholders = ids.map(() => "?").join(", ");
     const marked = await c.env.DB.prepare(
       `UPDATE assets SET state = 'deletion_pending'
-        WHERE agent_id = ? AND id IN (${placeholders}) AND state IN ('ready', 'quarantined')`,
+        WHERE agent_id = ? AND id IN (${placeholders}) AND state IN ('ready', 'quarantined')
+          AND NOT EXISTS (SELECT 1 FROM posts WHERE posts.asset_id = assets.id AND posts.legal_hold = 1)`,
     ).bind(agentId, ...ids).run();
     for (const id of ids) await refundDerivatives(c.env, id);
     await c.env.MEDIA.delete(ids.flatMap((id) => [
