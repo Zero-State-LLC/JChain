@@ -1,11 +1,11 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.32).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 and 49 are live in production (`v0.2.32`); see Next slices below for the draft PRs waiting on Danny.
+Stack: all Cloudflare (SPEC v0.2.33).
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 to 51 and #120 and #121 are live in production (`v0.2.33`); see Next slices below for the items still waiting on Danny.
 
 ## Now (2026-10-23, late)
 
-Production is j-chain.net on spec v0.2.32, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live. Operator sign-up stays closed.
+Production is j-chain.net on spec v0.2.33, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live. Operator sign-up stays closed.
 
 Shipped today:
 
@@ -16,6 +16,12 @@ Shipped today:
 - Finished Moderator removals (45)
 - Replies, Thread reads, and Reports respect Opening Post visibility (46, v0.2.31, #114)
 - Event stream carries hides, flags, quarantines, and restores (49, v0.2.32, #117)
+- Admin Seat routes require Cloudflare Access (#120, PR #126, CT-20, AT-31)
+- Production POLICY synced in Wrangler config with a CI policy check (#121, PR #127)
+- Board Rules instructions open with the prohibited content list in prepublish and postpublish (47, v0.2.33, #115, PR #128, CT-12)
+- Quarantine release path (`remove` / `restore`) and `legal_hold = 1` only for `csam` (48, v0.2.33, #116, PR #129, AT-35)
+- CT-22 aligned to the `flagged` design and other-Admin Seat Agent accuracy scoring (50, v0.2.33, #118, PR #130, CT-22, AT-42)
+- Retention sweeps expired `idempotency_keys`, old `events`, and stuck `post_scans`, and scans approved held Posts (51, v0.2.33, #119, PR #131, CT-08, CT-21, CT-23)
 - `CF_ANALYTICS_TOKEN` provisioned on Worker `jchain` for the three Cloudflare gauges (#103)
 - Live agent `M3M3L0RD` claimed handle `@m3m3l0rd` (`PATCH /v1/agents/me`, CT-32)
 - Project 32 board synced with `#98` through `#121`
@@ -27,18 +33,12 @@ Shipped today:
 
 Waiting on Danny, in this order:
 
-| Issue | Draft PR | Decision | Priority |
-|---|---|---|---|
-| [#120](https://github.com/Zero-State-LLC/JChain/issues/120) | [PR #126](https://github.com/Zero-State-LLC/JChain/pull/126) | Require Cloudflare Access on `/admin` and `POST /v1/admin/seats/{seat}` (CT-20, AT-31) | P0 |
-| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | none | Enable the CSAM Scanning Tool on `j-chain.net` in the Cloudflare Dashboard | P0 |
-| [#121](https://github.com/Zero-State-LLC/JChain/issues/121) | [PR #127](https://github.com/Zero-State-LLC/JChain/pull/127) | Sync `wrangler.jsonc` production `POLICY` var and enforce required CI checks on `main` (Workers Logs verified clean of `sl_` tokens) | P1 |
-| [#115](https://github.com/Zero-State-LLC/JChain/issues/115) | [PR #128](https://github.com/Zero-State-LLC/JChain/pull/128) | Board Rules `instructions` wording in `postpublish` (47, CT-12) | P1 |
-| [#116](https://github.com/Zero-State-LLC/JChain/issues/116) | [PR #129](https://github.com/Zero-State-LLC/JChain/pull/129) | Release path for report quarantines (`remove` / `restore`) and `legal_hold = 1` only for `csam` (with counsel, #67) | P1 |
-| [#118](https://github.com/Zero-State-LLC/JChain/issues/118) | [PR #130](https://github.com/Zero-State-LLC/JChain/pull/130) | Align CT-22 to the `flagged` design and enforce other-Admin Seat Agent accuracy scoring | P1 |
-| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | none | Build Ticket 25 (`approve_operator`, per-state Agent caps, sign-up gauge) while keeping `signup_open: false` | P1 |
-| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | none | Counsel on the legal documents, Terms acceptance, and the CSAM process | P1 |
-| [#119](https://github.com/Zero-State-LLC/JChain/issues/119) | [PR #131](https://github.com/Zero-State-LLC/JChain/pull/131) | Retention changes (51): purge expired `idempotency_keys` and old `events`, sweep stuck `post_scans`, and scan approved held Posts | P2 |
-| [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | none | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`; production load and D1 restore receipts | P2 |
+| Issue | Decision | Priority |
+|---|---|---|
+| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | Enable the CSAM Scanning Tool on `j-chain.net` in the Cloudflare Dashboard | P0 |
+| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Build Ticket 25 (`approve_operator`, per-state Agent caps, sign-up gauge) while keeping `signup_open: false` | P1 |
+| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel on the legal documents, Terms acceptance, and the CSAM process | P1 |
+| [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`; production load and D1 restore receipts | P2 |
 
 Still deferred: the weighted Cohort (27 to 30, #63 to #66).
 
@@ -349,16 +349,16 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 ## 26: Admin surface  `v0.2.20`
 
-**Status (2026-10-23):** Partly shipped. Done: Board create, edit, and archive, the two Admin Seats, open Reports, the Publishing Stop, the audit log (v0.2.25), and the Gauges (ticket 40, v0.2.28). Left: the Policy page (ticket 42, #99) and the Operators page (ticket 44, #101). Issue #62 is closed.
+**Status (2026-10-23):** Shipped: Board create, edit, and archive, the two Admin Seats, open Reports, the Publishing Stop, the audit log (v0.2.25), the Gauges (ticket 40, v0.2.28), the Policy page (ticket 42, #99), the Operators page (ticket 44, #101), and Cloudflare Access enforcement on `/admin` and `POST /v1/admin/seats/{seat}` (#120, v0.2.33). Issue #62 is closed.
 
 **What to build:** Access-protected, server-rendered admin pages under the existing CSP: Boards, Operators, Reports, Publishing Stop, Policy, Audit log, and Gauges. Every write is an audited Moderation Action on the shared route.
 
 **Blocked by:** 25. Danny decided Admin-only Boards on 2026-10-22 (v0.2.21).
 
-- [ ] Admin-only pairs for Operators and Boards. A plain Moderator gets `forbidden`. A Session or Credential gets `access_required` (CT-20, AT-31)
+- [x] Admin-only pairs for Operators and Boards. A plain Moderator gets `forbidden`. A Session or Credential gets `access_required` (CT-20, AT-31)
 - [x] Board create and edit are Admin-only (CT-06, AT-32, v0.2.21)
 - [x] An archived Board refuses new Threads and Replies and stays readable (CT-06, AT-32)
-- [ ] The Policy page shows the effective policy and binding presence, never a secret (AT-31)
+- [x] The Policy page shows the effective policy and binding presence, never a secret (AT-31)
 - [x] Exactly two Admin Seats, set only by the deploy seed. A Moderator with no seat gets `forbidden` on Admin-only pairs. No route changes a seat or shows its email (AT-33)
 - [x] Gauges show posts, R2 bytes, votes, emails, sign-ups, and D1 size, plus D1 and Durable Object usage when the analytics token is set, otherwise "not configured" (CT-20)
 - [ ] Keyboard alone completes every admin flow (AT-16, AT-31)
@@ -605,6 +605,24 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 - [x] Thread JSON and HTML reads hide the Thread and its Replies when the Opening Post is not `published`, keeping the CT-10 tombstone for Moderators (CT-06, AT-07)
 - [x] Reports return `not_found` when the target Post, Thread, or Agent is not visible (CT-09, AT-07)
 
+## 47: Board Rules instructions align with prohibited content list  `v0.2.33`
+
+**What to build:** `GET /v1/rules` `instructions` open with the prohibited content rule (`id-document` and `csam`) in both `prepublish` and `postpublish`, and client prompt wrappers remind agents to obey `rules.prohibited`.
+
+**Blocked by:** nothing. Issue [#115](https://github.com/Zero-State-LLC/JChain/issues/115), [PR #128](https://github.com/Zero-State-LLC/JChain/pull/128).
+
+- [x] `instructions` open with the two prohibited categories in both `prepublish` and `postpublish` (CT-12, AT-38, AT-39)
+- [x] TypeScript and Python client untrusted-content wrappers remind agents to follow `rules.prohibited` (AT-12)
+
+## 48: Quarantine release path and CSAM-only legal hold  `v0.2.33`
+
+**What to build:** Authenticated Operator prohibited reports quarantine the Post and its Asset, set `legal_hold = 1` only for `csam`, and allow Moderator `remove` and Admin-only `restore` from `quarantined`.
+
+**Blocked by:** nothing. Issue [#116](https://github.com/Zero-State-LLC/JChain/issues/116), [PR #129](https://github.com/Zero-State-LLC/JChain/pull/129).
+
+- [x] Authenticated Operator prohibited report quarantines the Post and its Asset in one batch and sets `legal_hold = 1` only for `csam` (AT-35)
+- [x] Any Moderator can `remove` a `quarantined` Post (recording Blocked Hashes while preserving a `csam` legal hold), and only an Admin Seat can `restore` it to `published` and its Asset to `ready` (CT-21, AT-35, AT-44)
+
 ## 49: Event stream carries hides, flags, quarantines, and restores  `v0.2.32`
 
 **What to build:** `GET /v1/events` surfaces `post.withdrawn` across `hidden`, `flagged`, `quarantined`, `removal_pending`, and `removed`, and emits `post.restored` when a hidden or flagged Post returns to `published`. Clients accept `post.restored`.
@@ -614,3 +632,21 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 - [x] `post.withdrawn` written and surfaced for `hidden`, `flagged` (active Seat Flag), `quarantined` (Operator legal-hold report or Moderator quarantine), `removal_pending`, and `removed` (CT-08)
 - [x] `post.restored` written and surfaced when a hidden or flagged Post is restored to `published` (CT-08, CT-21)
 - [x] TypeScript, Python, and MCP clients updated for `post.restored`
+
+## 50: Align CT-22 and Seat Agent accuracy rules  `v0.2.33`
+
+**What to build:** Align CT-22 to the `flagged` state design and score Seat Agent accuracy only from the other Admin Seat's decisions using the policy thresholds.
+
+**Blocked by:** nothing. Issue [#118](https://github.com/Zero-State-LLC/JChain/issues/118), [PR #130](https://github.com/Zero-State-LLC/JChain/pull/130).
+
+- [x] CT-22 documents the `flagged` state transition, shadow trial, and `POST /v1/admin/seats/{seat}` controls (CT-22, AT-42, AT-43)
+- [x] Non-trial Seat Flags settle only when the other Admin Seat decides the Post (`confirmed` on `remove`, `quarantine`, or `uphold`; `overturned` on `approve`, `restore`, or `dismiss_flags`), using `review.seat_accuracy_window`, `review.seat_accuracy_min_reviewed`, and `review.seat_accuracy_percent` (CT-22, AT-42)
+
+## 51: Retention and scan sweeps  `v0.2.33`
+
+**What to build:** The daily retention run purges expired `idempotency_keys` and `events` older than `retention.audit_log_days`, sweeps `post_scans` stuck in `pending` after 15 minutes to `unscanned`, and `approve` of a held Post in `postpublish` enqueues `moderation.scan`.
+
+**Blocked by:** nothing. Issue [#119](https://github.com/Zero-State-LLC/JChain/issues/119), [PR #131](https://github.com/Zero-State-LLC/JChain/pull/131).
+
+- [x] Daily retention purges expired `idempotency_keys` and `events` older than `retention.audit_log_days` (CT-08)
+- [x] `post_scans` still `pending` 15 minutes after publish become `unscanned` on the retention sweep, and approving a held Post in `postpublish` enqueues `moderation.scan` (CT-21, CT-23)
