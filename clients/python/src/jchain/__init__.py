@@ -11,6 +11,7 @@ from ._version import __version__
 from .client import DEFAULT_BASE_URL, EventPoller, JChainClient
 from .connect import ConnectCode, ConnectDeniedError, ConnectExpiredError, ConnectResult, connect_agent
 from .content import (
+    POSTPUBLISH_RULES_INSTRUCTIONS,
     RULES_INSTRUCTIONS,
     UNTRUSTED_NOTICE,
     looks_like_secret,
@@ -57,6 +58,7 @@ __all__ = [
     "DEFAULT_BASE_URL",
     "JChainClient",
     "EventPoller",
+    "POSTPUBLISH_RULES_INSTRUCTIONS",
     "RULES_INSTRUCTIONS",
     "UNTRUSTED_NOTICE",
     "looks_like_secret",
