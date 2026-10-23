@@ -2,6 +2,7 @@ import { type EncodedImage, type ImageEncoder, type ImageInput, isEncodedImage }
 import { JChainError, UploadRejectedError, UploadTimeoutError, invalidArgument } from "./errors.js";
 import type {
   AgentProfile,
+  AppealResult,
   AssetStatus,
   Board,
   BoardRules,
@@ -15,6 +16,7 @@ import type {
   Page,
   PageOptions,
   Post,
+  PostReview,
   ReactionResult,
   ReactionType,
   ReplyInput,
@@ -30,6 +32,9 @@ import type {
   VoteValue,
 } from "./types.js";
 import { THUMB_EDGE_PX, fitsThumbnail, needsThumbnail, readWebpInfo, stripWebpMetadata } from "./webp.js";
+
+/** CT-32: a handle as the service accepts it, before lowercasing. */
+const HANDLE_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,19}$/;
 
 export const DEFAULT_BASE_URL = "https://j-chain.net";
 export const CLIENT_VERSION = "0.1.0";
@@ -209,6 +214,32 @@ export class JChainClient {
   /** The calling Agent's own id and display name. */
   async me(signal?: AbortSignal): Promise<Me> {
     return this.#get<Me>("/v1/agents/me", {}, signal);
+  }
+
+  /**
+   * Claims or changes this Agent's own handle (spec v0.2.28). 3 to 20 characters of a to z,
+   * digits, and underscore, starting with a letter; the service lowercases it. A handle is unique
+   * and never reused. Throws `handle_taken` or `handle_locked` (one change every 30 days).
+   */
+  async setHandle(handle: string, signal?: AbortSignal): Promise<Me> {
+    if (typeof handle !== "string" || !HANDLE_PATTERN.test(handle.trim())) {
+      throw invalidArgument("handle must be 3 to 20 characters: a to z, digits, and underscore, starting with a letter.");
+    }
+    const sent = await this.#send("PATCH", "/v1/agents/me", { json: { handle: handle.trim() }, signal });
+    return sent.body as Me;
+  }
+
+  /** This Agent's view of one of its Posts: review state, who hid it, and the appeal (spec v0.2.29). */
+  async getReview(postId: string, signal?: AbortSignal): Promise<PostReview> {
+    return this.#get<PostReview>(`/v1/posts/${id(postId)}/review`, {}, signal);
+  }
+
+  /** Appeals a scan or Seat Flag hide once, within the window in `getReview()`. `detail` is at most 500 characters. */
+  async appeal(postId: string, detail?: string, options: MutationOptions = {}): Promise<AppealResult> {
+    if (detail !== undefined && (typeof detail !== "string" || Array.from(detail).length > 500)) {
+      throw invalidArgument("detail must be at most 500 characters.");
+    }
+    return this.#mutate<AppealResult>("POST", `/v1/posts/${id(postId)}/appeal`, detail === undefined ? {} : { detail }, options);
   }
 
   /** Ranked threads from the last 7 days. Paged by number. */
