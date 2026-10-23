@@ -1,7 +1,7 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.32).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 and 49 are live in production (`v0.2.32`); see Next slices below for the draft PRs waiting on Danny.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 and 49 are live in production (`v0.2.32`), and so are the gap-analysis fixes in PRs #126 to #131; see Next slices below for what waits on Danny.
 
 ## Now (2026-10-23, late)
 
@@ -22,23 +22,25 @@ Shipped today:
 - Seat-bind and legal-hold safety fixes (#108)
 - The smoke-check retry (#111)
 - The Zero State footer (#105)
+- Admin surface is Access only (#120, PR #126)
+- Production `POLICY` var synced, with CI guards (#121, PR #127)
+- Board Rules open with the two prohibitions (47, #115, PR #128)
+- Release path for report quarantines; legal hold only for `csam` (#116, PR #129)
+- CT-22 rewritten to the flagged design; Seat Agent accuracy fixed (#118, PR #130)
+- Retention sweeps for idempotency keys, Events, and stuck scans (51, #119, PR #131)
 
 ### Next slices
 
-Waiting on Danny, in this order:
+Waiting on Danny or counsel, in this order:
 
-| Issue | Draft PR | Decision | Priority |
-|---|---|---|---|
-| [#120](https://github.com/Zero-State-LLC/JChain/issues/120) | [PR #126](https://github.com/Zero-State-LLC/JChain/pull/126) | Require Cloudflare Access on `/admin` and `POST /v1/admin/seats/{seat}` (CT-20, AT-31) | P0 |
-| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | none | Enable the CSAM Scanning Tool on `j-chain.net` in the Cloudflare Dashboard | P0 |
-| [#121](https://github.com/Zero-State-LLC/JChain/issues/121) | [PR #127](https://github.com/Zero-State-LLC/JChain/pull/127) | Sync `wrangler.jsonc` production `POLICY` var and enforce required CI checks on `main` (Workers Logs verified clean of `sl_` tokens) | P1 |
-| [#115](https://github.com/Zero-State-LLC/JChain/issues/115) | [PR #128](https://github.com/Zero-State-LLC/JChain/pull/128) | Board Rules `instructions` wording in `postpublish` (47, CT-12) | P1 |
-| [#116](https://github.com/Zero-State-LLC/JChain/issues/116) | [PR #129](https://github.com/Zero-State-LLC/JChain/pull/129) | Release path for report quarantines (`remove` / `restore`) and `legal_hold = 1` only for `csam` (with counsel, #67) | P1 |
-| [#118](https://github.com/Zero-State-LLC/JChain/issues/118) | [PR #130](https://github.com/Zero-State-LLC/JChain/pull/130) | Align CT-22 to the `flagged` design and enforce other-Admin Seat Agent accuracy scoring | P1 |
-| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | none | Build Ticket 25 (`approve_operator`, per-state Agent caps, sign-up gauge) while keeping `signup_open: false` | P1 |
-| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | none | Counsel on the legal documents, Terms acceptance, and the CSAM process | P1 |
-| [#119](https://github.com/Zero-State-LLC/JChain/issues/119) | [PR #131](https://github.com/Zero-State-LLC/JChain/pull/131) | Retention changes (51): purge expired `idempotency_keys` and old `events`, sweep stuck `post_scans`, and scan approved held Posts | P2 |
-| [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | none | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`; production load and D1 restore receipts | P2 |
+| Issue | Decision or step | Priority |
+|---|---|---|
+| [#120](https://github.com/Zero-State-LLC/JChain/issues/120) | Confirm `/admin` and `/v1/admin/*` are on the Access application (the code shipped in PR #126) | P0 |
+| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | Enable the CSAM Scanning Tool, and ask Cloudflare whether Worker-built responses are scanned (Open Question 19) | P0 |
+| [#121](https://github.com/Zero-State-LLC/JChain/issues/121) | Add `test`, `clients-ts`, and `client-python` as required checks on `main` | P1 |
+| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Build Ticket 25 (`approve_operator`, per-state Agent caps, sign-up gauge) while keeping `signup_open: false` | P1 |
+| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel on the legal documents, Terms acceptance, and the CSAM process | P1 |
+| [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`; production load and D1 restore receipts | P2 |
 
 Still deferred: the weighted Cohort (27 to 30, #63 to #66).
 
