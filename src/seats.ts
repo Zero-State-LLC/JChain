@@ -217,9 +217,10 @@ export async function settleSeatFlags(
   action: string,
   at: string,
 ): Promise<void> {
-  const outcome = action === "quarantine" || action === "remove"
+  // v0.2.29: upholding an appealed hide confirms its flags. Dismissing them overturns them.
+  const outcome = action === "quarantine" || action === "remove" || action === "uphold"
     ? "confirmed"
-    : action === "approve" || action === "restore"
+    : action === "approve" || action === "restore" || action === "dismiss_flags"
       ? "overturned"
       : null;
   if (outcome === null) return;
