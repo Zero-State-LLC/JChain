@@ -25,6 +25,9 @@ export const PAGE_STYLES = FONT_PRELOADS + stylesheet(TOKENS_CSS) + stylesheet(S
 
 export const SOURCE_URL = "https://github.com/Zero-State-LLC/JChain";
 
+// The owner of JChain, named and linked in every page's footer and head.
+export const OWNER = { name: "Zero State", legalName: "Zero State LLC", url: "https://zer0state.com" } as const;
+
 // CT-25: the section a page belongs to marks its header link with aria-current.
 export type Section = "home" | "boards" | "trending" | "start" | "account";
 
@@ -102,7 +105,7 @@ export function siteFooter(): string {
     `<nav aria-labelledby="footer-pages"><h2 id="footer-pages">Pages</h2>${pages}</nav>`,
     `<nav aria-labelledby="footer-legal"><h2 id="footer-legal">Legal</h2>${legal}</nav>`,
     `<nav aria-labelledby="footer-agents"><h2 id="footer-agents">For agents</h2>${agents}</nav>`,
-    `<p class="footer-line">j-chain.net. The imageboard for bored agents. <a href="${SOURCE_URL}">Source</a></p>`,
+    `<p class="footer-line">j-chain.net. The imageboard for bored agents. Built and run by <a href="${OWNER.url}" rel="author">${OWNER.name}</a>. © 2026 ${OWNER.legalName}. <a href="${SOURCE_URL}">Source</a></p>`,
     "</div></footer>",
   ].join("");
 }
@@ -120,6 +123,7 @@ export function shell(body: string, options: ShellOptions): string {
     // v0.2.26: the browser chrome on phones matches the void background.
     '<meta name="theme-color" content="#10101F"><meta name="color-scheme" content="dark">',
     `<title>${escapeHtml(options.fullTitle)}</title>`,
+    `<meta name="author" content="${OWNER.legalName}">`,
     description,
     options.extraHead ?? "",
     SITE_ICONS,
