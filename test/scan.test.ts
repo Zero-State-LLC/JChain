@@ -284,6 +284,10 @@ describe("R5 Content Scan (CT-23, AT-41)", () => {
     expect(row?.hidden_by).toBe("scan");
     expect(Number(row?.queue_first)).toBe(1);
     expect(await assetState(post.assetId)).toBe("quarantined");
+    // Gap analysis 1: the scan dates the quarantine, so retention ages it from now.
+    const dated = await env.DB.prepare("SELECT quarantined_at FROM assets WHERE id = ?")
+      .bind(post.assetId).first<{ quarantined_at: string | null }>();
+    expect(dated?.quarantined_at).not.toBeNull();
     expect(await withdrawnEvents(post.postId)).toBe(1);
     const scan = await scanRow(post.postId);
     expect(scan?.result).toBe("unsafe");

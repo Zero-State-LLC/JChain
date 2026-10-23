@@ -126,7 +126,7 @@ async function report(c: Ctx, format: Format): Promise<Response> {
       ).bind(body.reasonCode, body.reasonCode, body.targetId),
       c.env.DB.prepare(
         `UPDATE assets
-            SET state = 'quarantined'
+            SET state = 'quarantined', quarantined_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
           WHERE id = (SELECT asset_id FROM posts WHERE id = ? AND state NOT IN ('removed', 'removal_pending'))
             AND state = 'ready'`,
       ).bind(body.targetId),

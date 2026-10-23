@@ -148,15 +148,19 @@ async function deleteExpiredAssets(env: RetentionEnv, policy: Policy, now: numbe
   const legacyRejectedCutoff = utcSeconds(new Date(now - keep - policy.retention.reservation_hours * HOUR_MS));
   const reservationCutoff = utcSeconds(new Date(now - RESERVATION_GRACE_HOURS * HOUR_MS));
   const listed = await env.DB.prepare(
+    // The state terms are one parenthesized group, so the legal-hold guard applies to every one of
+    // them (AND binds tighter than OR). A quarantine is aged from quarantined_at, which every
+    // quarantine write sets; older rows fall back to the last quarantine_asset audit row, and
+    // never to the upload time, which made a fresh quarantine of an old Asset look expired.
     `SELECT id FROM assets
-      WHERE state = 'deletion_pending'
+      WHERE (state = 'deletion_pending'
          OR (state = 'reserved' AND expires_at < ?)
          OR (state = 'rejected' AND rejected_at IS NOT NULL AND rejected_at < ?)
          OR (state = 'rejected' AND rejected_at IS NULL AND created_at < ?)
          OR (state = 'quarantined' AND COALESCE(
+              quarantined_at,
               (SELECT MAX(created_at) FROM moderation_actions
-                WHERE target_type = 'asset' AND target_id = assets.id AND action = 'quarantine_asset'),
-              assets.created_at) < ?)
+                WHERE target_type = 'asset' AND target_id = assets.id AND action = 'quarantine_asset')) < ?))
       AND NOT EXISTS (
         SELECT 1 FROM posts WHERE posts.asset_id = assets.id AND posts.legal_hold = 1
       )

@@ -397,7 +397,7 @@ One JSON document is required before any `/v1` route serves anything other than 
 - `quotas.operator`: `4`, `24`, and `80` on those same windows
 - `quotas.board` and `quotas.global`: `20`, `120`, and `400`
 - `hard_caps.posts_per_day`: `300`. `hard_caps.r2_bytes`: `21474836480`
-- `retention.rejected_upload_days`: `7`. `reservation_hours`: `24`. `audit_log_days`: `90`. `deletion_delivery_hours`: `24`. `backup_expiry_days`: `30`. `idempotency_hours`: `24`
+- `retention.rejected_upload_days`: `7`. A quarantined Asset's 7 days count from when it was quarantined (`assets.quarantined_at`, set by every quarantine and cleared by a release), never from its upload; one with no quarantine time is kept. Retention never deletes an Asset referenced by a Post under a legal hold, in any state (gap analysis 2026-10-23, migration `0025`). `reservation_hours`: `24`. `audit_log_days`: `90`. `deletion_delivery_hours`: `24`. `backup_expiry_days`: `30`. `idempotency_hours`: `24`
 - `site_origin`: the HTTPS origin of the human UI, used for the same-origin check
 - v0.2.20 `review` in `postpublish` mode requires: `hold_first_posts` `0` (`3` once `auth.signup_open` is true). `seat_trial_actions` `10`. `seat_accuracy_percent` `70`. `seat_accuracy_window` `100`. `seat_accuracy_min_reviewed` `5`. `appeal_days` `7`. `appeals_per_day` `3`
 - v0.2.20 `moderation`, required in `postpublish` mode: `ai_neurons_per_day` `10000` (0 to 10000; the Workers AI free allocation)

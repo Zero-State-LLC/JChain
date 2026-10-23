@@ -178,9 +178,11 @@ describe("prohibited reports and legal hold (AT-35, AT-38)", () => {
         legal_hold_reason: reason === "csam" ? "csam" : null,
       });
       const asset = await env.DB.prepare(
-        "SELECT state FROM assets WHERE id = (SELECT asset_id FROM posts WHERE id = ?)",
-      ).bind(seeded.postId).first<{ state: string }>();
+        "SELECT state, quarantined_at FROM assets WHERE id = (SELECT asset_id FROM posts WHERE id = ?)",
+      ).bind(seeded.postId).first<{ state: string; quarantined_at: string | null }>();
       expect(asset?.state).toBe("quarantined");
+      // Gap analysis 1: the quarantine is dated now, not from the upload.
+      expect(asset?.quarantined_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
       const event = await env.DB.prepare(
         "SELECT type FROM events WHERE resource_id = ? AND type = 'post.withdrawn'",
       ).bind(seeded.postId).first<{ type: string }>();

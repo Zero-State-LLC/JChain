@@ -6,7 +6,7 @@ import worker from "../src/index";
 import { derivativeKey, originalKey, rejectInFlight } from "../src/asset-pipeline";
 import { refundAssetBytes } from "../src/quota";
 import { REDACTED_EMAIL, RETENTION_BATCH, runRetention } from "../src/retention";
-import { MODERATOR, OPERATOR, OPERATOR_ID, call, resetAndSeed } from "./harness";
+import { BOARD_ID, MODERATOR, OPERATOR, OPERATOR_ID, call, resetAndSeed } from "./harness";
 
 const NOW = Date.parse("2026-10-21T12:00:00Z");
 const HOUR = 60 * 60 * 1000;
@@ -154,6 +154,45 @@ describe("retention sweep", () => {
     expect(await stored(recent)).toBe(2);
     expect(await assetState(ready)).toBe("ready");
     expect(await stored(ready)).toBe(2);
+  });
+
+  it("ages a quarantine from quarantined_at, never from the upload time (gap analysis 1)", async () => {
+    // An old Asset quarantined yesterday, as a scan hide or a report does with no asset audit row.
+    const fresh = await seedAsset("quarantined", at(-30 * DAY), at(-29 * DAY), ["display", "thumb"]);
+    await env.DB.prepare("UPDATE assets SET quarantined_at = ? WHERE id = ?").bind(at(-1 * DAY), fresh).run();
+    const stale = await seedAsset("quarantined", at(-30 * DAY), at(-29 * DAY), ["display", "thumb"]);
+    await env.DB.prepare("UPDATE assets SET quarantined_at = ? WHERE id = ?").bind(at(-8 * DAY), stale).run();
+    // No quarantine time at all: kept, never aged from the upload.
+    const unknown = await seedAsset("quarantined", at(-30 * DAY), at(-29 * DAY), ["display", "thumb"]);
+
+    await runScheduled();
+
+    expect(await assetState(fresh)).toBe("quarantined");
+    expect(await stored(fresh)).toBe(2);
+    expect(await assetState(stale)).toBe("deleted");
+    expect(await assetState(unknown)).toBe("quarantined");
+    expect(await stored(unknown)).toBe(2);
+  });
+
+  it("never deletes an Asset under a legal hold, whatever state it is in (gap analysis 2)", async () => {
+    const pending = await seedAsset("deletion_pending", at(-30 * DAY), at(-29 * DAY), ["display", "thumb"]);
+    const rejected = await seedAsset("rejected", at(-30 * DAY), at(-29 * DAY), ["original"]);
+    const threadId = uuidv7();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)").bind(threadId, BOARD_ID, at(-30 * DAY)),
+      ...[pending, rejected].map((assetId, index) => env.DB.prepare(
+        `INSERT INTO posts (id, thread_id, author_agent_id, title, caption, state, asset_id, alt_text, provenance_source,
+           rights_attestation, license, legal_hold, legal_hold_reason, created_at)
+         VALUES (?, ?, ?, ?, 'caption', 'removal_pending', ?, 'alt', 'model', 'I made this.', 'cc0', 1, 'csam', ?)`,
+      ).bind(uuidv7(), threadId, agentId, index === 0 ? "Held" : null, assetId, at(-30 * DAY))),
+    ]);
+
+    await runScheduled();
+
+    expect(await assetState(pending)).toBe("deletion_pending");
+    expect(await stored(pending)).toBe(2);
+    expect(await assetState(rejected)).toBe("rejected");
+    expect(await stored(rejected)).toBe(1);
   });
 
   it("deletes rejected upload bytes after 7 days plus the reservation window", async () => {

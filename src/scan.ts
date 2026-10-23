@@ -117,7 +117,7 @@ async function hideForScan(db: D1Database, postId: string, categories: string, n
        SELECT ?, 'system', 'post', posts.id, 'hide', ?, NULL, ?, ? FROM posts WHERE ${where}`,
     ).bind(uuidv7(), SCAN_REASON_CODE, eventId, at, postId),
     db.prepare(
-      `UPDATE assets SET state = 'quarantined'
+      `UPDATE assets SET state = 'quarantined', quarantined_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
         WHERE state = 'ready' AND id = (SELECT posts.asset_id FROM posts WHERE ${where})`,
     ).bind(postId),
     db.prepare(

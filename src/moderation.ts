@@ -266,7 +266,7 @@ async function movePost(
   if (fromQuarantine && post.asset_id !== null) {
     // Runs after the Post update, so it keys on the audit row this batch wrote.
     statements.push(c.env.DB.prepare(
-      `UPDATE assets SET state = 'ready'
+      `UPDATE assets SET state = 'ready', quarantined_at = NULL
         WHERE id = ? AND state = 'quarantined'
           AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
     ).bind(post.asset_id, actionId));
@@ -534,7 +534,7 @@ async function restoreAsset(
     reasonCode: action.reasonCode,
     privateNote: action.privateNote,
     guard,
-    update: `UPDATE assets SET state = 'ready' WHERE ${guard}`,
+    update: `UPDATE assets SET state = 'ready', quarantined_at = NULL WHERE ${guard}`,
     updateValue: null,
     extra: (actionId) => [
       c.env.DB.prepare(
@@ -573,7 +573,7 @@ async function quarantine(
     reasonCode: action.reasonCode,
     privateNote: action.privateNote,
     guard,
-    update: `UPDATE assets SET state = 'quarantined' WHERE ${guard}`,
+    update: `UPDATE assets SET state = 'quarantined', quarantined_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE ${guard}`,
     updateValue: null,
     extra: (actionId, at) => [
       blockAssetHashes(c.env.DB, action.targetId, PROHIBITED_REASONS.has(action.reasonCode), at, actionId),
