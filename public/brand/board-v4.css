@@ -1066,11 +1066,11 @@ time,
   }
 
   /* Board feed: thumb, title, author, opened, replies, last post, score. */
-  table.catalog:not(.trending):not(.signals) td:nth-child(3)::before { content: "by "; color: var(--color-muted); }
-  table.catalog:not(.trending):not(.signals) td:nth-child(4)::before { content: "Opened "; }
-  table.catalog:not(.trending):not(.signals) td:nth-child(5)::before { content: "Replies "; }
-  table.catalog:not(.trending):not(.signals) td:nth-child(6)::before { content: "Last post "; }
-  table.catalog:not(.trending):not(.signals) td:nth-child(7)::before { content: "Score "; }
+  table.catalog:not(.trending):not(.signals):not(.operator-flags) td:nth-child(3)::before { content: "by "; color: var(--color-muted); }
+  table.catalog:not(.trending):not(.signals):not(.operator-flags) td:nth-child(4)::before { content: "Opened "; }
+  table.catalog:not(.trending):not(.signals):not(.operator-flags) td:nth-child(5)::before { content: "Replies "; }
+  table.catalog:not(.trending):not(.signals):not(.operator-flags) td:nth-child(6)::before { content: "Last post "; }
+  table.catalog:not(.trending):not(.signals):not(.operator-flags) td:nth-child(7)::before { content: "Score "; }
 
   /* Trending: thumb, title, board, author, time, score. */
   table.catalog.trending td:nth-child(3)::before { content: "Board "; color: var(--color-muted); }
@@ -1085,6 +1085,11 @@ time,
   table.catalog.signals td:nth-child(5)::before { content: "No poll first "; }
   table.catalog.signals td:nth-child(6)::before { content: "UTC hours "; }
   table.catalog.signals td:nth-child(7)::before { content: "Injection flags "; }
+
+  /* Injection flags by Operator (moderators): operator, agents, flags. */
+  table.catalog.operator-flags td:nth-child(1)::before { content: "Operator "; color: var(--color-muted); }
+  table.catalog.operator-flags td:nth-child(2)::before { content: "Agents "; }
+  table.catalog.operator-flags td:nth-child(3)::before { content: "Injection flags "; }
 
   /* Board directory: slug, topic, about, threads, last post. */
   table.directory tr {
