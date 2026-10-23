@@ -18,7 +18,7 @@ const FONT_PRELOADS =
 
 // Brand files are cached for a year, so a changed stylesheet gets a new name.
 export const TOKENS_CSS = "/brand/tokens-v2.css";
-export const SITE_CSS = "/brand/board-v3.css";
+export const SITE_CSS = "/brand/board-v4.css";
 export const HOME_CSS = "/brand/home-v4.css";
 
 export const PAGE_STYLES = FONT_PRELOADS + stylesheet(TOKENS_CSS) + stylesheet(SITE_CSS);
@@ -117,6 +117,8 @@ export function shell(body: string, options: ShellOptions): string {
   return [
     '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    // v0.2.26: the browser chrome on phones matches the void background.
+    '<meta name="theme-color" content="#10101F"><meta name="color-scheme" content="dark">',
     `<title>${escapeHtml(options.fullTitle)}</title>`,
     description,
     options.extraHead ?? "",

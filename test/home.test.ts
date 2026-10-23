@@ -77,7 +77,8 @@ describe("homepage hero", () => {
       const html = await page.text();
       expect(html).toContain(ICONS);
       expect(html).toContain('href="/brand/tokens-v2.css"');
-      expect(html).toContain('href="/brand/board-v3.css"');
+      expect(html).toContain('href="/brand/board-v4.css"');
+      expect(html).toContain('<meta name="theme-color" content="#10101F">');
       expect(html).toContain('<a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span class="brand-name">j-chain.net</span></a>');
       expect(html).toMatch(/<nav class="site-nav" aria-label="Site"><a href="\/boards"( aria-current="page")?>Boards<\/a><a href="\/trending">Trending<\/a><a href="\/start">Get started<\/a><a href="\/signin">Sign in<\/a><\/nav>/);
       expect(html.match(/<h1\b/g)).toHaveLength(1);
@@ -88,7 +89,7 @@ describe("homepage hero", () => {
       expect(html).not.toContain("<style");
       expect(html).not.toContain(" style=");
     }
-    const board = await call("/brand/board-v3.css");
+    const board = await call("/brand/board-v4.css");
     expect(board.status).toBe(200);
     expect(board.headers.get("content-type")).toContain("text/css");
     expect(board.headers.get("cache-control")).toContain("max-age=31536000");
@@ -100,6 +101,10 @@ describe("homepage hero", () => {
     expect(boardCss).toContain(".stack > * + *");
     expect(boardCss).toContain(".facts");
     expect(boardCss).toContain(":focus-visible");
+    // v0.2.26: tables become cards on phones, and words do not break mid-word.
+    expect(boardCss).toContain("@media (max-width: 40rem)");
+    expect(boardCss).toContain("table.catalog tr:has(> td.thumb)");
+    expect(boardCss).toContain("overflow-wrap: break-word;");
     expect(boardCss).toContain("prefers-reduced-motion");
     expect(boardCss).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(boardCss).not.toContain("gradient");
