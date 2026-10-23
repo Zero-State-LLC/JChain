@@ -30,6 +30,21 @@ export function mountSeats(app: Hono<AppEnv>): void {
   app.post("/v1/admin/seats/:seat", adminSeat);
 }
 
+// CT-22 and the Admin Seats ruling: a Seat Agent is an active Agent owned by that seat's Admin.
+export async function seatAgentOwned(db: D1Database, seatEmail: string | null, agentId: string): Promise<boolean> {
+  if (seatEmail === null) return false;
+  const row = await db.prepare(
+    `SELECT 1 AS one FROM agents JOIN operators ON operators.id = agents.operator_id
+      WHERE agents.id = ? AND agents.state = 'active' AND operators.email = ?`,
+  ).bind(agentId, seatEmail).first();
+  return row !== null;
+}
+
+// The start state of a seat after a bind, a rebind, or a readmit: the shadow trial restarts.
+export function seatStartState(policy: Policy): "trial" | "active" {
+  return trialThreshold(policy) > 0 ? "trial" : "active";
+}
+
 export function trialThreshold(policy: Policy): number {
   return policy.review?.seat_trial_actions ?? DEFAULT_SEAT_TRIAL_ACTIONS;
 }
@@ -145,6 +160,7 @@ async function adminSeat(c: Ctx): Promise<Response> {
   const now = utcSeconds();
   let nextState = seat.seat_state;
   let nextAgent = seat.seat_agent_id;
+  let trialCount = seat.seat_trial_count;
   if (action === "bind_seat_agent") {
     const agentId = body.value.agent_id;
     if (typeof agentId !== "string" || !isUuidV7(agentId)) return errorResponse(requestId, "validation_failed");
@@ -152,7 +168,12 @@ async function adminSeat(c: Ctx): Promise<Response> {
       "SELECT id FROM agents WHERE id = ? AND state = 'active'",
     ).bind(agentId).first<{ id: string }>();
     if (!agent) return errorResponse(requestId, "not_found");
+    if (!(await seatAgentOwned(c.env.DB, seat.email, agentId))) {
+      return errorResponse(requestId, "validation_failed", "A Seat Agent must be an active Agent of that seat's own Admin.");
+    }
     nextAgent = agentId;
+    nextState = seatStartState(c.get("policy"));
+    trialCount = 0;
   } else if (Object.keys(body.value).some((key) => key !== "action")) {
     return errorResponse(requestId, "malformed");
   }
@@ -161,7 +182,9 @@ async function adminSeat(c: Ctx): Promise<Response> {
   }
   if (action === "pause_seat_agent") nextState = "paused";
   if (action === "readmit_seat_agent") {
-    nextState = seat.seat_trial_count < threshold ? "trial" : "active";
+    // CT-22: readmit returns the seat to its start state, so the trial restarts.
+    nextState = threshold > 0 ? "trial" : "active";
+    trialCount = 0;
   }
   if (action === "restore_seat_powers") {
     if (seat.email === null || seat.email === principal.email) return errorResponse(requestId, "forbidden");
@@ -170,8 +193,8 @@ async function adminSeat(c: Ctx): Promise<Response> {
 
   await c.env.DB.batch([
     c.env.DB.prepare(
-      "UPDATE admin_seats SET seat_agent_id = ?, seat_state = ? WHERE seat = ?",
-    ).bind(nextAgent, nextState, seatNumber),
+      "UPDATE admin_seats SET seat_agent_id = ?, seat_state = ?, seat_trial_count = ? WHERE seat = ?",
+    ).bind(nextAgent, nextState, trialCount, seatNumber),
     c.env.DB.prepare(
       `INSERT INTO moderation_actions (
          id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
@@ -182,7 +205,7 @@ async function adminSeat(c: Ctx): Promise<Response> {
     seat: seatNumber,
     seat_state: nextState,
     seat_agent_id: nextAgent,
-    seat_trial_count: seat.seat_trial_count,
+    seat_trial_count: trialCount,
   });
 }
 
