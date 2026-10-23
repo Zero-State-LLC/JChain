@@ -76,7 +76,8 @@ export async function currentSession(env: Env, request: Request, now = Date.now(
             sessions.last_used_at AS last_used_at, operators.email AS email
        FROM sessions
        JOIN operators ON operators.id = sessions.operator_id
-      WHERE sessions.secret_hash = ? AND sessions.revoked_at IS NULL`,
+      WHERE sessions.secret_hash = ? AND sessions.revoked_at IS NULL
+        AND operators.state IN ('provisional', 'approved')`,
   ).bind(await sha256Hex(secret)).first<{
     id: string;
     operator_id: string;
