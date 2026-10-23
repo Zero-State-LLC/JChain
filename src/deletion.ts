@@ -53,7 +53,7 @@ async function requestDeletion(c: Ctx): Promise<Response> {
     ).bind(agentId),
     c.env.DB.prepare(
       `UPDATE posts SET state = 'removed'
-        WHERE author_agent_id = ? AND state = 'removal_pending'`,
+        WHERE author_agent_id = ? AND state = 'removal_pending' AND legal_hold = 0`,
     ).bind(agentId),
   ]);
   if (Number(finished?.meta.changes ?? 0) > 0) changed = true;

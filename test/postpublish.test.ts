@@ -302,6 +302,18 @@ describe("AT-40 and AT-49 Blocked Hashes", () => {
     const assetId = await uploadSettled(ada.credential);
     const status = await expectSuccess(await call(`/v1/assets/${assetId}/status`, { bearer: ada.credential }));
     expect(status.state).toBe("quarantined");
+
+    // Queued first: the quarantined upload is listed for Moderators, ahead of the reports,
+    // with its age and the Admin-only Restore image form.
+    const page = await (await call("/moderation", { email: MODERATOR })).text();
+    const start = page.indexOf('id="queue-quarantined-uploads"');
+    expect(start).toBeGreaterThan(-1);
+    expect(start).toBeLessThan(page.indexOf('id="reports"'));
+    const section = page.slice(start, page.indexOf('id="reports"'));
+    expect(section).toContain(assetId);
+    expect(section).toContain("(age ");
+    expect(section).toContain('name="action" value="restore_asset"');
+    expect(section).toContain("Restore image (Admin)");
   });
 
   it("refuses a thread and a reply whose ready Asset was blocked afterwards (AT-49)", async () => {
