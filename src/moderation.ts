@@ -77,6 +77,9 @@ async function moderate(c: Ctx, format: Format): Promise<Response> {
   if (action.targetType === "agent" && isAgentMove(action.action)) {
     return moveAgent(c, requestId, principal.email, action, format);
   }
+  if (action.targetType === "agent" && action.action === "revoke_handle") {
+    return revokeHandle(c, requestId, principal.email, action, format);
+  }
   if (action.targetType === "asset" && action.action === "quarantine_asset") {
     return quarantine(c, requestId, principal.email, action, format);
   }
@@ -260,6 +263,50 @@ async function moveAgent(
   const message = name === "suspend_agent" ? "agent suspended" : "agent resumed";
   console.log(JSON.stringify({ message, agent_id: action.targetId }));
   return moderationDone(requestId, format, { agent_id: action.targetId, state: next }, `Agent ${action.targetId} is ${next}.`);
+}
+
+// v0.2.28 H3: clear the handle and revoke every handle the Agent ever held.
+async function revokeHandle(
+  c: Ctx,
+  requestId: string,
+  actorEmail: string,
+  action: ActionInput,
+  format: Format,
+): Promise<Response> {
+  const agent = await c.env.DB.prepare("SELECT handle FROM agents WHERE id = ?").bind(action.targetId).first<{
+    handle: string | null;
+  }>();
+  if (!agent) return moderationError(requestId, format, "not_found");
+  if (agent.handle === null) return moderationError(requestId, format, "state_conflict");
+  const guard = "id = ? AND handle = ?";
+  const ok = await auditedUpdate(c.env.DB, {
+    actorEmail,
+    targetType: "agent",
+    targetId: action.targetId,
+    action: "revoke_handle",
+    reasonCode: action.reasonCode,
+    privateNote: action.privateNote,
+    guard,
+    guardExtra: agent.handle,
+    update: `UPDATE agents SET handle = NULL, handle_changed_at = NULL WHERE ${guard}`,
+    updateValue: null,
+    // Runs only when the guarded audit row was written, so a handle claimed after the read stays intact.
+    extra: (actionId, at) => [
+      c.env.DB.prepare(
+        `UPDATE agent_handles SET state = 'revoked', released_at = COALESCE(released_at, ?)
+          WHERE agent_id = ? AND state != 'revoked'
+            AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+      ).bind(at, action.targetId, actionId),
+    ],
+  });
+  if (!ok) return moderationError(requestId, format, "state_conflict");
+  console.log(JSON.stringify({ message: "agent handle revoked", agent_id: action.targetId }));
+  return moderationDone(
+    requestId,
+    format,
+    { agent_id: action.targetId, handle: null },
+    `The handle of agent ${action.targetId} is revoked.`,
+  );
 }
 
 async function quarantine(

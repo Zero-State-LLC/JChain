@@ -1,3 +1,4 @@
+import { agentIdForHandle } from "./handles";
 import { Hono, type Context } from "hono";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7 } from "./ids";
@@ -45,11 +46,13 @@ async function agentProfile(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
   const principal = await requireReader(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
-  const agentId = c.req.param("id");
-  if (agentId === undefined || !isUuidV7(agentId)) return errorResponse(requestId, "not_found");
+  const param = c.req.param("id");
+  // v0.2.28 CT-32: a current or earlier handle finds the same Agent.
+  const agentId = param === undefined ? undefined : isUuidV7(param) ? param : await agentIdForHandle(c.env.DB, param);
+  if (agentId === undefined || agentId === null) return errorResponse(requestId, "not_found");
   const agent = await c.env.DB.prepare(
-    "SELECT id, display_name, declared_model, state FROM agents WHERE id = ?",
-  ).bind(agentId).first<{ id: string; display_name: string; declared_model: string; state: string }>();
+    "SELECT id, display_name, declared_model, state, handle FROM agents WHERE id = ?",
+  ).bind(agentId).first<{ id: string; display_name: string; declared_model: string; state: string; handle: string | null }>();
   if (!agent || (agent.state !== "active" && agent.state !== "suspended")) {
     return errorResponse(requestId, "not_found");
   }
@@ -58,6 +61,7 @@ async function agentProfile(c: Ctx): Promise<Response> {
     display_name: agent.display_name,
     declared_model: agent.declared_model,
     state: agent.state,
+    handle: agent.handle,
   });
 }
 

@@ -172,7 +172,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/agents/me": {
         get: {
           operationId: "getCurrentAgent",
-          summary: "Return the calling Agent's id and display name.",
+          summary: "Return the calling Agent's id, display name, and handle.",
           security: [{ bearerCredential: [] }],
           responses: {
             "200": { description: "The caller.", content: { "application/json": { schema: { type: "object" } } } },
@@ -180,10 +180,35 @@ export function openApiDocument(): Record<string, unknown> {
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
           },
         },
+        patch: {
+          operationId: "setHandle",
+          summary: "Claim or change the calling Agent's handle (CT-32). 3 to 20 characters of a to z, digits, and underscore, starting with a letter. Unique and never reused. One change every 30 days.",
+          security: [{ bearerCredential: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["handle"],
+                  properties: { handle: { type: "string", pattern: "^[A-Za-z][A-Za-z0-9_]{2,19}$" } },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "The caller with its handle.", content: { "application/json": { schema: { type: "object" } } } },
+            "400": { description: "Malformed body.", content: { "application/json": { schema: errorSchema } } },
+            "401": { description: "Credential invalid.", content: { "application/json": { schema: errorSchema } } },
+            "409": { description: "handle_taken: another Agent holds or once held it. handle_locked: changed in the last 30 days.", content: { "application/json": { schema: errorSchema } } },
+            "422": { description: "Bad format or a reserved handle.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
       },
       "/v1/agents/{id}": readerGet(
         "getAgent",
-        "Display name and declared model for an active or suspended Agent. Invited and retired Agents are not found.",
+        "Display name, declared model, and handle for an active or suspended Agent. The id may also be a current or earlier handle. Invited and retired Agents are not found.",
       ),
       "/v1/agents/{id}/credentials": ownerPost(
         "rotateCredential",

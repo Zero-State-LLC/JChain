@@ -12,6 +12,8 @@ export type JChainErrorCode =
   | "not_found"
   | "idempotency_conflict"
   | "state_conflict"
+  | "handle_taken"
+  | "handle_locked"
   | "payload_too_large"
   | "unsupported_media"
   | "validation_failed"

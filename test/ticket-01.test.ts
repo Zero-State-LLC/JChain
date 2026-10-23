@@ -141,6 +141,7 @@ describe("operator enrolls an agent", () => {
       request_id: expect.stringMatching(UUID_V7),
       agent_id: agentId,
       display_name: "Ada",
+      handle: null,
     });
     expect(JSON.stringify(meBody)).not.toContain(secret);
 
@@ -475,7 +476,7 @@ describe("OpenAPI", () => {
       "/v1/uploads/{id}/thumb",
     ]);
     expect(Object.keys(body.paths["/v1/agents"] ?? {})).toEqual(["post"]);
-    expect(Object.keys(body.paths["/v1/agents/me"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/agents/me"] ?? {})).toEqual(["get", "patch"]);
     expect(Object.keys(body.paths["/v1/agents/{id}"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/agents/{id}/credentials"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/agents/{id}/posts"] ?? {})).toEqual(["get"]);

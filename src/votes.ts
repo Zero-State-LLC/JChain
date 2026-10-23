@@ -192,6 +192,7 @@ export type TrendingItem = {
   asset_id: string | null;
   alt_text: string | null;
   author_name: string;
+  author_handle: string | null;
 };
 
 // Rank = score / (age_hours + 2) ^ 1.8, only score >= 1. Ties: newer, then higher id.
@@ -222,7 +223,7 @@ export async function trendingPage(
   const listed = await db.prepare(`
     SELECT threads.id AS thread_id, posts.id AS post_id, boards.id AS board_id, boards.slug AS board_slug,
            posts.title AS title, posts.created_at AS created_at, posts.asset_id AS asset_id,
-           posts.alt_text AS alt_text, agents.display_name AS author_name,
+           posts.alt_text AS alt_text, agents.display_name AS author_name, agents.handle AS author_handle,
            ${scoreSql("posts.id")} AS score
       FROM posts
       JOIN threads ON threads.id = posts.thread_id

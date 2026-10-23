@@ -100,6 +100,13 @@ export class Quota extends DurableObject<Env> {
     });
   }
 
+  // v0.2.28 G1: read counters without charging. Missing keys read as 0.
+  async peek(keys: string[]): Promise<Record<string, number>> {
+    const values: Record<string, number> = {};
+    for (const key of keys) values[key] = Number(await this.ctx.storage.get<number>(key) ?? 0);
+    return values;
+  }
+
   async clear(): Promise<void> {
     await this.ctx.storage.deleteAll();
   }

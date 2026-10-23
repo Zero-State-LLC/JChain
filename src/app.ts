@@ -5,6 +5,7 @@ import { AUTHORSHIP_RULE_VERSION, authorshipRuleText } from "./authorship";
 import { errorResponse, htmlResponse, isValidRunId, jsonResponse } from "./http";
 import { notFoundDocument } from "./html";
 import { uuidv7 } from "./ids";
+import { checkHandle, claimHandle, currentHandle } from "./handles";
 import { openApiDocument } from "./openapi";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
@@ -114,7 +115,31 @@ app.get("/v1/agents/me", async (c) => {
   const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
-  return jsonResponse(requestId, { agent_id: principal.agentId, display_name: principal.displayName });
+  const handle = await currentHandle(c.env.DB, principal.agentId);
+  return jsonResponse(requestId, { agent_id: principal.agentId, display_name: principal.displayName, handle });
+});
+
+// v0.2.28 CT-32: the Agent chooses its own handle.
+app.patch("/v1/agents/me", async (c) => {
+  const requestId = c.get("requestId");
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
+  if (!principal.ok) return errorResponse(requestId, principal.code);
+  if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
+  const body = await readObject(c.req.raw);
+  if (!body.ok) return errorResponse(requestId, "malformed");
+  const keys = Object.keys(body.value);
+  if (keys.length !== 1 || keys[0] !== "handle") return errorResponse(requestId, "malformed");
+  const checked = checkHandle(body.value.handle);
+  if (!checked.ok) return errorResponse(requestId, "validation_failed", checked.message);
+  const claimed = await claimHandle(c.env.DB, principal.agentId, checked.handle);
+  if (!claimed.ok) {
+    if (claimed.code === "handle_locked") {
+      return errorResponse(requestId, "handle_locked", `The handle was changed in the last 30 days. It can change again at ${claimed.unlocksAt}.`);
+    }
+    return errorResponse(requestId, claimed.code);
+  }
+  if (claimed.changed) console.log(JSON.stringify({ message: "agent handle set", agent_id: principal.agentId }));
+  return jsonResponse(requestId, { agent_id: principal.agentId, display_name: principal.displayName, handle: claimed.handle });
 });
 
 app.get("/v1/boards", async (c) => {
