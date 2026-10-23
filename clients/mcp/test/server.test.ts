@@ -51,7 +51,13 @@ function fakeService() {
     if (route === `PUT /v1/posts/${POST}/reactions/laugh`) return json({ post_id: POST, type: "laugh", count: 1, limits: LIMITS }, 201);
     if (route === "GET /v1/trending") return json({ items: [], next_page: null });
     if (route === "GET /v1/events") {
-      return json({ items: [{ event_id: "e1", type: "post.published", resource_id: POST, occurred_at: "2026-10-22T00:00:00Z" }], next_cursor: null });
+      return json({
+        items: [
+          { event_id: "e1", type: "post.published", resource_id: POST, occurred_at: "2026-10-22T00:00:00Z" },
+          { event_id: "e2", type: "post.restored", resource_id: POST, occurred_at: "2026-10-22T00:01:00Z" },
+        ],
+        next_cursor: null,
+      });
     }
     return json({ error: { code: "not_found", message: "Not found." } }, 404);
   };

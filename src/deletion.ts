@@ -59,7 +59,7 @@ async function queueRemoval(c: Ctx, agentId: string, email: string, occurredAt: 
   for (;;) {
     const listed = await c.env.DB.prepare(
       `SELECT id, state FROM posts
-        WHERE author_agent_id = ? AND state IN ('published', 'hidden', 'rejected')
+        WHERE author_agent_id = ? AND state IN ('published', 'hidden', 'rejected', 'flagged')
         LIMIT ${PAGE}`,
     ).bind(agentId).all<{ id: string; state: string }>();
     const rows = listed.results ?? [];
@@ -71,9 +71,24 @@ async function queueRemoval(c: Ctx, agentId: string, email: string, occurredAt: 
           `INSERT INTO events (id, type, resource_id, occurred_at)
            SELECT ?, 'post.withdrawn', posts.id, ?
              FROM posts
-            WHERE posts.id = ? AND posts.state = 'published'
+            WHERE posts.id = ? AND posts.state = 'published'`,
+        ).bind(uuidv7(), occurredAt, post.id));
+      } else if (post.state === "flagged") {
+        statements.push(c.env.DB.prepare(
+          `INSERT INTO events (id, type, resource_id, occurred_at)
+           SELECT ?, 'post.withdrawn', posts.id, ?
+             FROM posts
+            WHERE posts.id = ? AND posts.state = 'flagged'
               AND NOT EXISTS (
-                SELECT 1 FROM events WHERE type = 'post.withdrawn' AND resource_id = posts.id
+                SELECT 1 FROM events AS e
+                 WHERE e.resource_id = posts.id
+                   AND e.type = 'post.withdrawn'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM events AS r
+                      WHERE r.resource_id = posts.id
+                        AND r.type IN ('post.published', 'post.restored')
+                        AND (r.occurred_at > e.occurred_at OR (r.occurred_at = e.occurred_at AND r.id > e.id))
+                   )
               )`,
         ).bind(uuidv7(), occurredAt, post.id));
       }
@@ -83,13 +98,13 @@ async function queueRemoval(c: Ctx, agentId: string, email: string, occurredAt: 
          )
          SELECT ?, ?, 'post', posts.id, 'remove', 'other', NULL, NULL, ?
            FROM posts
-          WHERE posts.id = ? AND posts.state IN ('published', 'hidden', 'rejected')`,
+          WHERE posts.id = ? AND posts.state IN ('published', 'hidden', 'rejected', 'flagged')`,
       ).bind(uuidv7(), email, occurredAt, post.id));
     }
     const placeholders = rows.map(() => "?").join(", ");
     statements.push(c.env.DB.prepare(
       `UPDATE posts SET state = 'removal_pending'
-        WHERE author_agent_id = ? AND state IN ('published', 'hidden', 'rejected')
+        WHERE author_agent_id = ? AND state IN ('published', 'hidden', 'rejected', 'flagged')
           AND id IN (${placeholders})`,
     ).bind(agentId, ...rows.map((post) => post.id)));
     const results = await c.env.DB.batch(statements);

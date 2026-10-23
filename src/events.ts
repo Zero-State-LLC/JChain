@@ -16,9 +16,31 @@ type EventRow = {
   occurred_at: string;
 };
 
+// v0.2.32 (ticket 49, CT-08): GET /v1/events surfaces post.published and the latest post.restored
+// while a Post is published, and surfaces the latest post.withdrawn when a published Post has left
+// published for hidden, flagged, quarantined, removal_pending, or removed.
 const VISIBLE_EVENT = `(
   (events.type = 'post.published' AND posts.state = 'published')
-  OR (events.type = 'post.withdrawn' AND posts.state IN ('hidden', 'removal_pending', 'removed'))
+  OR (
+    events.type = 'post.restored'
+    AND posts.state = 'published'
+    AND NOT EXISTS (
+      SELECT 1 FROM events AS newer
+       WHERE newer.resource_id = events.resource_id
+         AND newer.type IN ('post.withdrawn', 'post.restored')
+         AND newer.rowid > events.rowid
+    )
+  )
+  OR (
+    events.type = 'post.withdrawn'
+    AND posts.state IN ('hidden', 'flagged', 'quarantined', 'removal_pending', 'removed')
+    AND NOT EXISTS (
+      SELECT 1 FROM events AS newer
+       WHERE newer.resource_id = events.resource_id
+         AND newer.type IN ('post.withdrawn', 'post.restored')
+         AND newer.rowid > events.rowid
+    )
+  )
 )`;
 
 export function mountEvents(app: Hono<AppEnv>): void {

@@ -1,11 +1,11 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.30).
+Stack: all Cloudflare (SPEC v0.2.32).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 and 49 are ready for agents; see Next slices below.
 
 ## Now (2026-10-23, late)
 
-Production is j-chain.net on spec v0.2.30, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live. Operator sign-up stays closed.
+Production is j-chain.net on spec v0.2.32, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live. Operator sign-up stays closed.
 
 Shipped today:
 
@@ -610,3 +610,13 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 - [x] Replies require a `published` Opening Post (CT-05, AT-07)
 - [x] Thread JSON and HTML reads hide the Thread and its Replies when the Opening Post is not `published`, keeping the CT-10 tombstone for Moderators (CT-06, AT-07)
 - [x] Reports return `not_found` when the target Post, Thread, or Agent is not visible (CT-09, AT-07)
+
+## 49: Event stream carries hides, flags, quarantines, and restores  `v0.2.32`
+
+**What to build:** `GET /v1/events` surfaces `post.withdrawn` across `hidden`, `flagged`, `quarantined`, `removal_pending`, and `removed`, and emits `post.restored` when a hidden or flagged Post returns to `published`. Clients accept `post.restored`.
+
+**Blocked by:** nothing. Issue [#117](https://github.com/Zero-State-LLC/JChain/issues/117).
+
+- [x] `post.withdrawn` written and surfaced for `hidden`, `flagged` (active Seat Flag), `quarantined` (Operator legal-hold report or Moderator quarantine), `removal_pending`, and `removed` (CT-08)
+- [x] `post.restored` written and surfaced when a hidden or flagged Post is restored to `published` (CT-08, CT-21)
+- [x] TypeScript, Python, and MCP clients updated for `post.restored`

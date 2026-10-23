@@ -322,8 +322,9 @@ describe("moderation actions", () => {
 
     const restored = await expectSuccess(await act(hideId, "restore"));
     expect(restored.state).toBe("published");
-    expect(restored.event_id).toBe(approved.event_id);
-    expect(await eventCount(hideId)).toBe(1);
+    expect(restored.event_id).toMatch(UUID_V7);
+    expect(restored.event_id).not.toBe(approved.event_id);
+    expect(await eventCount(hideId)).toBe(3);
     expect(await (await call("/boards/beta")).text()).toContain("Hide title");
     expect(await (await call(`/threads/${String(second.thread_id)}`)).text()).toContain("hide-caption-05");
     await expectError(await act(hideId, "restore"), 409, "state_conflict");
@@ -341,8 +342,9 @@ describe("moderation actions", () => {
     const textApproved = await expectSuccess(await act(String(textReply.post_id), "approve"));
     await act(String(textReply.post_id), "hide");
     const textRestored = await expectSuccess(await act(String(textReply.post_id), "restore"));
-    expect(textRestored.event_id).toBe(textApproved.event_id);
-    expect(await eventCount(String(textReply.post_id))).toBe(1);
+    expect(textRestored.event_id).toMatch(UUID_V7);
+    expect(textRestored.event_id).not.toBe(textApproved.event_id);
+    expect(await eventCount(String(textReply.post_id))).toBe(3);
     const feed = await (await call("/boards/beta")).text();
     expect(feed).not.toContain(replyText);
     const page = await (await call(`/threads/${String(second.thread_id)}`)).text();

@@ -151,23 +151,44 @@ async function movePost(
 
   const occurredAt = utcSeconds();
   const actionId = uuidv7();
-  // One post.published and one post.withdrawn per Post. Restore keeps the publication
-  // row and deletes the withdrawal so a later hide can insert it again.
+  // One post.published per Post. Each withdrawal writes a post.withdrawn row, and each
+  // restore (including approve from flagged) writes a post.restored row.
   const fromFlagged = post.state === "flagged";
-  let publishedEventId: string | null = null;
-  if (name === "approve" && !fromFlagged) publishedEventId = uuidv7();
-  if (name === "restore" || (name === "approve" && fromFlagged)) {
-    const existing = await c.env.DB.prepare(
-      "SELECT id FROM events WHERE type = 'post.published' AND resource_id = ?",
-    ).bind(action.targetId).first<{ id: string }>();
-    publishedEventId = existing?.id ?? null;
-  }
+  const isRestore = name === "restore" || (name === "approve" && fromFlagged);
+  const publishedEventId = name === "approve" && !fromFlagged ? uuidv7() : null;
+  const restoredEventId = isRestore ? uuidv7() : null;
   const wasPublic = post.state === "published" || post.state === "flagged";
   const writeWithdrawn = name === "hide"
     || (name === "quarantine" && wasPublic)
     || (name === "remove" && wasPublic);
-  const withdrawnEventId = writeWithdrawn ? uuidv7() : null;
-  const auditEventId = publishedEventId ?? withdrawnEventId;
+  let withdrawnEventId: string | null = null;
+  let insertWithdrawn = false;
+  if (writeWithdrawn) {
+    if (fromFlagged) {
+      const existingWithdrawn = await c.env.DB.prepare(
+        `SELECT e.id FROM events AS e
+          WHERE e.resource_id = ? AND e.type = 'post.withdrawn'
+            AND NOT EXISTS (
+              SELECT 1 FROM events AS r
+               WHERE r.resource_id = e.resource_id
+                 AND r.type IN ('post.published', 'post.restored')
+                 AND (r.occurred_at > e.occurred_at OR (r.occurred_at = e.occurred_at AND r.id > e.id))
+            )
+          ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1`,
+      ).bind(action.targetId).first<{ id: string }>();
+      if (existingWithdrawn) {
+        withdrawnEventId = existingWithdrawn.id;
+      } else {
+        withdrawnEventId = uuidv7();
+        insertWithdrawn = true;
+      }
+    } else {
+      withdrawnEventId = uuidv7();
+      insertWithdrawn = true;
+    }
+  }
+  const primaryEventId = publishedEventId ?? restoredEventId;
+  const auditEventId = primaryEventId ?? withdrawnEventId;
 
   const where = guard(name);
   const statements: D1PreparedStatement[] = [];
@@ -179,19 +200,19 @@ async function movePost(
        SELECT ?, 'post.published', posts.id, ? FROM posts WHERE ${where}`,
     ).bind(publishedEventId, occurredAt, action.targetId));
   }
-  if (withdrawnEventId !== null) {
+  if (isRestore && restoredEventId !== null) {
+    writtenIndex = statements.length;
+    statements.push(c.env.DB.prepare(
+      `INSERT INTO events (id, type, resource_id, occurred_at)
+       SELECT ?, 'post.restored', posts.id, ? FROM posts WHERE ${where}`,
+    ).bind(restoredEventId, occurredAt, action.targetId));
+  }
+  if (insertWithdrawn && withdrawnEventId !== null) {
     writtenIndex = statements.length;
     statements.push(c.env.DB.prepare(
       `INSERT INTO events (id, type, resource_id, occurred_at)
        SELECT ?, 'post.withdrawn', posts.id, ? FROM posts WHERE ${where}`,
     ).bind(withdrawnEventId, occurredAt, action.targetId));
-  }
-  if (name === "restore") {
-    statements.push(c.env.DB.prepare(
-      `DELETE FROM events
-        WHERE type = 'post.withdrawn' AND resource_id = ?
-          AND EXISTS (SELECT 1 FROM posts WHERE ${where})`,
-    ).bind(action.targetId, action.targetId));
   }
   const auditIndex = statements.length;
   statements.push(c.env.DB.prepare(
@@ -235,11 +256,11 @@ async function movePost(
   if (!updated || !audited || !recorded) return moderationError(requestId, format, "state_conflict");
   await settleSeatFlags(c.env.DB, action.targetId, name, occurredAt);
   const entry: Record<string, string> = { message: logMessage(name), post_id: action.targetId };
-  if (publishedEventId !== null) entry.event_id = publishedEventId;
+  if (primaryEventId !== null) entry.event_id = primaryEventId;
   console.log(JSON.stringify(entry));
   const state = destination(name);
   const body: Record<string, unknown> = { post_id: action.targetId, state };
-  if (publishedEventId !== null) body.event_id = publishedEventId;
+  if (primaryEventId !== null) body.event_id = primaryEventId;
   return moderationDone(requestId, format, body, `Post ${action.targetId} is ${state}.`);
 }
 

@@ -243,7 +243,7 @@ export function registerJChainTools(server: McpServer, deps: ToolDeps): void {
 
   server.registerTool("poll_events", {
     title: "Poll events",
-    description: "Return new events (post.published, post.withdrawn) since the last poll in this session, oldest first. "
+    description: "Return new events (post.published, post.withdrawn, post.restored) since the last poll in this session, oldest first. "
       + "Pass after to start from a cursor. Each poll counts toward the per-minute event cap. "
       + UNTRUSTED_NOTE,
     inputSchema: { after: cursor.optional(), limit: limit.optional() },

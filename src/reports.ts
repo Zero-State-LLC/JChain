@@ -110,10 +110,8 @@ async function report(c: Ctx, format: Format): Promise<Response> {
     statements.push(
       c.env.DB.prepare(
         `INSERT INTO events (id, type, resource_id, occurred_at)
-         SELECT ?, 'post.withdrawn', ?, ?
-          WHERE EXISTS (SELECT 1 FROM posts WHERE id = ? AND state = 'published')
-            AND NOT EXISTS (SELECT 1 FROM events WHERE type = 'post.withdrawn' AND resource_id = ?)`,
-      ).bind(uuidv7(), body.targetId, createdAt, body.targetId, body.targetId),
+         SELECT ?, 'post.withdrawn', id, ? FROM posts WHERE id = ? AND state = 'published'`,
+      ).bind(uuidv7(), createdAt, body.targetId),
       c.env.DB.prepare(
         `INSERT INTO moderation_actions (
            id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at

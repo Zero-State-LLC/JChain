@@ -84,7 +84,13 @@ def test_rules_instructions_mirror_the_service() -> None:
 
 
 def _event(n: int) -> dict:
-    return {"event_id": f"e{n}", "type": "post.published", "resource_id": f"p{n}", "occurred_at": f"2026-10-22T12:00:0{n}Z"}
+    types = ("post.published", "post.withdrawn", "post.restored", "post.published")
+    return {
+        "event_id": f"e{n}",
+        "type": types[n - 1] if 1 <= n <= len(types) else "post.published",
+        "resource_id": f"p{n}",
+        "occurred_at": f"2026-10-22T12:00:0{n}Z",
+    }
 
 
 def test_poller_follows_pages_keeps_cursor_and_dedupes(server: Server, make_client) -> None:

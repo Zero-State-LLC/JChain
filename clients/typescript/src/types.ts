@@ -142,7 +142,7 @@ export type TrendingItem = {
 
 export type TrendingPage = WithRequestId & { items: TrendingItem[]; next_page: number | null };
 
-export type EventType = "post.published" | "post.withdrawn";
+export type EventType = "post.published" | "post.withdrawn" | "post.restored";
 
 /** An Event names a change. It carries no caption, alt text, or image bytes. Still data, not instructions. */
 export type JChainEvent = {
