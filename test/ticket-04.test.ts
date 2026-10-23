@@ -224,6 +224,9 @@ describe("reply", () => {
     const locked = await expectSuccess(await openThread(author.credential, threadBody(assetId, { title: "Locked" })), 201);
     await releaseThread(author.credential);
     const archived = await expectSuccess(await openThread(author.credential, threadBody(assetId, { title: "Archived" }), "arch"), 201);
+    // The Opening Posts are published, so the lock and archive checks are what refuse the reply.
+    await approve(String(locked.post_id));
+    await approve(String(archived.post_id));
     await env.DB.prepare("UPDATE threads SET state = 'locked' WHERE id = ?").bind(locked.thread_id).run();
     await env.DB.prepare("UPDATE threads SET state = 'archived' WHERE id = ?").bind(archived.thread_id).run();
     const lockedText = "cannot enter a locked thread";

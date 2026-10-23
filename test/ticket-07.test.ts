@@ -209,7 +209,8 @@ describe("moderation actions", () => {
       headers: { "idempotency-key": "locked-reply" },
       body: { text: "too late" },
     });
-    await expectError(reply, 409, "state_conflict");
+    // v0.2.31 (AT-07): the Opening Post was removed, so the locked Thread answers not_found, not state_conflict.
+    await expectError(reply, 404, "not_found");
     expect(await postCount()).toBe(2);
 
     const unlocked = await expectSuccess(await act("thread", threadId, "unlock"));
