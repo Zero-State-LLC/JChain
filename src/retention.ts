@@ -2,7 +2,7 @@ import { derivativeKey, originalKey, refundDerivatives } from "./asset-pipeline"
 import { utcSeconds } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
 import { purgeConnections } from "./connect";
-import { purgeEndedSignIns } from "./session";
+import { mailerOf, purgeEndedSignIns } from "./session";
 
 // Retention sweep (SPEC Retention, Asset state machine). Runs from the Worker
 // `scheduled` handler. Every step is idempotent and bounded per run, so a cron
@@ -35,7 +35,7 @@ export async function runRetention(env: RetentionEnv, now: number): Promise<Rete
   }
   const audit = await redactAudit(env.DB, policy, now);
   const assets = await deleteExpiredAssets(env, policy, now);
-  const signIns = await purgeSignIns(env.DB, policy, now);
+  const signIns = await purgeSignIns(env.DB, policy, now, mailerOf(env as Env) !== null && policy.auth !== undefined);
   const result = { ran: true, ...audit, assets_deleted: assets };
   console.log(JSON.stringify({ message: "retention run", ...result, sign_ins_deleted: signIns }));
   return result;
@@ -127,13 +127,17 @@ async function deleteExpiredAssets(env: RetentionEnv, policy: Policy, now: numbe
   return Number(finished.meta.changes ?? 0);
 }
 
-// v0.2.23: ended Sessions and Sign-in Links. A database without the sign-in
-// tables yet (migration 0015 not applied) skips this step.
-async function purgeSignIns(db: D1Database, policy: Policy, now: number): Promise<number> {
+// v0.2.23: ended Sessions, Sign-in Links, and connect requests. Only a database
+// that lacks those tables (migrations 0015 or 0016 not applied yet) skips this
+// step. Any other failure propagates, so the cron run fails and is retried.
+async function purgeSignIns(db: D1Database, policy: Policy, now: number, enabled: boolean): Promise<number> {
   try {
-    return (await purgeEndedSignIns(db, policy, now)) + (await purgeConnections(db, now));
-  } catch {
-    console.log(JSON.stringify({ message: "retention sign-in step skipped" }));
-    return 0;
+    return (await purgeEndedSignIns(db, policy, now, enabled)) + (await purgeConnections(db, now));
+  } catch (error) {
+    if (error instanceof Error && /no such table/i.test(error.message)) {
+      console.log(JSON.stringify({ message: "retention sign-in step skipped", reason: "tables missing" }));
+      return 0;
+    }
+    throw error;
   }
 }

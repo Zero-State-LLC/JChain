@@ -1,6 +1,7 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { runRetention } from "../src/retention";
 import { call, clearSignInQuota, MODERATOR, OPERATOR, resetAndSeed, STAFF } from "./harness";
 
 // Ticket 36 (spec v0.2.23): site map, Get started, sign-in, and the Operator page.
@@ -158,7 +159,11 @@ describe("AT-52 Get started, the agent guide, and robots", () => {
 describe("AT-53 sign-in is off without the auth block or the binding", () => {
   it("shows the Access door and refuses the email routes", async () => {
     const page = await html(await call("/signin"));
-    expect(page).toContain('<a class="button" href="/operator">Sign in with Cloudflare Access</a>');
+    expect(page).toContain('<a class="button" href="/signin/access">Sign in with Cloudflare Access</a>');
+    const door = await call("/signin/access");
+    expect(door.status).toBe(303);
+    expect(door.headers.get("location")).toBe("/operator");
+    expect((await call(`/signin/sl_${"A".repeat(43)}`)).status).toBe(503);
     expect(page).not.toContain('name="email"');
     const posted = await call("/signin", { method: "POST", raw: form({ email: OPERATOR }), headers: FORM });
     expect(posted.status).toBe(503);
@@ -396,5 +401,36 @@ describe("AT-57 not found, for people", () => {
     const api = await call("/v1/no-such-route", { headers: { accept: "text/html" } });
     expect(api.status).toBe(404);
     expect(api.headers.get("content-type")).toContain("application/json");
+  });
+});
+
+describe("review fixes (v0.2.25)", () => {
+  it("does not let unknown addresses spend the daily email cap", async () => {
+    const sent: Sent[] = [];
+    const bindings = signInEnv(sent, { ...AUTH, emails_per_day: 2 });
+    for (let i = 0; i < 5; i += 1) {
+      const stranger = await call("/signin", { method: "POST", raw: form({ email: `stranger${i}@example.test` }), headers: FORM, env: bindings });
+      expect(stranger.status).toBe(200);
+    }
+    const known = await call("/signin", { method: "POST", raw: form({ email: OPERATOR }), headers: FORM, env: bindings });
+    expect(known.status).toBe(200);
+    expect(sent).toHaveLength(1);
+    await call("/signin", { method: "POST", raw: form({ email: OPERATOR }), headers: FORM, env: bindings });
+    const capped = await call("/signin", { method: "POST", raw: form({ email: OPERATOR }), headers: FORM, env: bindings });
+    expect(capped.status).toBe(200);
+    expect(await capped.text()).toContain("If that address can sign in, a link is on its way.");
+    expect(sent).toHaveLength(2);
+    for (let i = 0; i < 5; i += 1) await clearSignInQuota(`stranger${i}@example.test`);
+  });
+
+  it("deletes Session rows once email sign-in is off", async () => {
+    const sent: Sent[] = [];
+    const bindings = signInEnv(sent);
+    await signIn(bindings, sent);
+    expect(Number((await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first<{ n: number }>())?.n)).toBe(1);
+    await runRetention(bindings, Date.now());
+    expect(Number((await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first<{ n: number }>())?.n)).toBe(1);
+    await runRetention(env, Date.now());
+    expect(Number((await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first<{ n: number }>())?.n)).toBe(0);
   });
 });

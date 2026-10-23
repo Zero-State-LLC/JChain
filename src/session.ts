@@ -175,7 +175,15 @@ export async function revokeOperatorSessions(db: D1Database, operatorId: string,
 
 // Retention (v0.2.23): ended Sessions and ended links are deleted within a day
 // of their end. Bounded per run like the other retention steps.
-export async function purgeEndedSignIns(db: D1Database, policy: Policy, now: number, limit = 500): Promise<number> {
+// `enabled` is false when the auth block or the EMAIL binding is missing. Then no
+// Session is honored (currentSession), so every Session row has ended.
+export async function purgeEndedSignIns(
+  db: D1Database,
+  policy: Policy,
+  now: number,
+  enabled: boolean,
+  limit = 500,
+): Promise<number> {
   const dayAgo = utcSeconds(new Date(now - DAY_MS));
   const stamp = utcSeconds(new Date(now));
   const statements = [
@@ -189,7 +197,11 @@ export async function purgeEndedSignIns(db: D1Database, policy: Policy, now: num
     ).bind(dayAgo, limit),
   ];
   const auth = policy.auth;
-  if (auth !== undefined) {
+  if (!enabled || auth === undefined) {
+    statements.push(db.prepare(
+      "DELETE FROM sessions WHERE id IN (SELECT id FROM sessions LIMIT ?)",
+    ).bind(limit));
+  } else {
     const absolute = utcSeconds(new Date(now - auth.session_days * DAY_MS - DAY_MS));
     const idle = utcSeconds(new Date(now - auth.idle_days * DAY_MS - DAY_MS));
     statements.push(db.prepare(

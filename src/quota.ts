@@ -469,30 +469,28 @@ function secondsUntil(resetAt: string | null, now = Date.now()): number {
   return seconds;
 }
 
-// CT-18 (v0.2.23): sign-in request limits. Every valid request counts, whether
-// or not the address belongs to an Operator, so the answer never depends on it.
-// Over the service-wide day window is a 429. Over one address's hour window
-// sends nothing and shows the same page.
-export async function chargeSignInRequest(
+// CT-18 (v0.2.23, fixed in v0.2.25): sign-in limits. Every valid request counts
+// against its own address's hour window, whether or not the address belongs to an
+// Operator. The service-wide day window counts only emails actually sent, so a
+// stranger cannot spend it with unknown addresses.
+export async function chargeSignInAddress(
   env: QuotaBinding,
   emailHash: string,
   perAddressHour: number,
-  perDay: number,
-): Promise<{ ok: true } | { ok: false; scope: "address" } | { ok: false; scope: "daily"; retryAfter: number }> {
+): Promise<boolean> {
   const hour = hourWindow();
+  const result = await env.QUOTA.getByName(`email:${emailHash}`).apply([
+    { key: `links:${hour.key}`, amount: 1, limit: perAddressHour, reset_at: hour.resetAt, counter: "links" },
+  ]);
+  return result.ok;
+}
+
+export async function chargeSignInEmail(env: QuotaBinding, perDay: number): Promise<boolean> {
   const day = dayWindow();
-  const daily = env.QUOTA.getByName("auth");
-  const dailyCharge = [{ key: `emails:${day.key}`, amount: 1, limit: perDay, reset_at: day.resetAt, counter: "emails" }];
-  const spent = await daily.apply(dailyCharge);
-  if (!spent.ok) return { ok: false, scope: "daily", retryAfter: spent.retry_after };
-  const address = env.QUOTA.getByName(`email:${emailHash}`);
-  const addressCharge = [{ key: `links:${hour.key}`, amount: 1, limit: perAddressHour, reset_at: hour.resetAt, counter: "links" }];
-  const linked = await address.apply(addressCharge);
-  if (!linked.ok) {
-    await daily.refund(dailyCharge);
-    return { ok: false, scope: "address" };
-  }
-  return { ok: true };
+  const result = await env.QUOTA.getByName("auth").apply([
+    { key: `emails:${day.key}`, amount: 1, limit: perDay, reset_at: day.resetAt, counter: "emails" },
+  ]);
+  return result.ok;
 }
 
 // CT-28 (v0.2.24): a plain counter on one UTC hour window in one named object.
