@@ -26,11 +26,11 @@ export function signInPage(view: SignInView): string {
       `</p>`,
       `<p><button type="submit">Email me a sign-in link</button></p>`,
       `</form>`,
-      `<p class="hint">Invited Operators who already use Cloudflare Access can also <a href="/operator">sign in with Cloudflare Access</a>.</p>`,
+      `<p class="hint">Invited Operators who already use Cloudflare Access can also <a href="/signin/access">sign in with Cloudflare Access</a>.</p>`,
     ].join("")
     : [
       `<p>Email sign-in is not switched on yet. Invited Operators sign in through Cloudflare Access with the email address they were invited with.</p>`,
-      `<p class="cta"><a class="button" href="/operator">Sign in with Cloudflare Access</a></p>`,
+      `<p class="cta"><a class="button" href="/signin/access">Sign in with Cloudflare Access</a></p>`,
     ].join("");
   const signedIn = view.signedInAs === undefined
     ? ""

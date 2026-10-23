@@ -13,7 +13,7 @@ import { htmlResponse } from "./http";
 import { uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import { mailbox, type Policy } from "./policy";
-import { chargeSignInRequest } from "./quota";
+import { chargeSignInAddress, chargeSignInEmail } from "./quota";
 import {
   CLEAR_SESSION_COOKIE,
   consumeLink,
@@ -39,6 +39,10 @@ const ACCOUNT = { section: "account" } as const;
 
 export function mountSignIn(app: Hono<AppEnv>): void {
   app.get("/signin", signInForm);
+  // v0.2.25: the one path the Access application covers for Operators. Access
+  // signs the person in, then the Worker sends them to the Operator page, which
+  // itself stays off the Access application so email Sessions reach it too.
+  app.get("/signin/access", accessDoor);
   app.post("/signin", requestLink);
   app.get("/signin/:token", confirmLink);
   app.post("/signin/:token", useLink);
@@ -55,6 +59,13 @@ async function signInForm(c: Ctx): Promise<Response> {
     linkMinutes: enabled?.auth.link_minutes,
     signedInAs: session?.email,
   }));
+}
+
+function accessDoor(_c: Ctx): Response {
+  return new Response(null, {
+    status: 303,
+    headers: { location: "/operator", "cache-control": "no-store", "x-request-id": uuidv7() },
+  });
 }
 
 async function requestLink(c: Ctx): Promise<Response> {
@@ -75,23 +86,23 @@ async function requestLink(c: Ctx): Promise<Response> {
     }), 422);
   }
   const { auth, mailer } = enabled;
-  const limited = await chargeSignInRequest(c.env, await sha256Hex(email), auth.links_per_email_hour, auth.emails_per_day);
-  if (!limited.ok && limited.scope === "daily") {
-    const response = htmlError(requestId, "rate_limited", "Sign in", "/signin", "Sign in", ACCOUNT);
-    response.headers.set("retry-after", String(limited.retryAfter));
-    return response;
-  }
-  if (limited.ok) {
+  // Every outcome below shows the same page, so the answer never says whether
+  // the address belongs to an Operator or whether a cap was reached.
+  if (await chargeSignInAddress(c.env, await sha256Hex(email), auth.links_per_email_hour)) {
     const operator = await c.env.DB.prepare(
       "SELECT id FROM operators WHERE email = ?",
     ).bind(email).first<{ id: string | null }>();
     // Sign-up (ticket 25) is closed, so only an existing Operator gets a link.
     if (operator?.id) {
-      const token = await issueLink(c.env.DB, operator.id, auth);
-      try {
-        await mailer.send(signInEmail(auth, email, `${policy.site_origin}/signin/${token}`));
-      } catch {
-        console.error(JSON.stringify({ message: "sign-in email failed", request_id: requestId }));
+      if (await chargeSignInEmail(c.env, auth.emails_per_day)) {
+        const token = await issueLink(c.env.DB, operator.id, auth);
+        try {
+          await mailer.send(signInEmail(auth, email, `${policy.site_origin}/signin/${token}`));
+        } catch {
+          console.error(JSON.stringify({ message: "sign-in email failed", request_id: requestId }));
+        }
+      } else {
+        console.error(JSON.stringify({ message: "sign-in email cap reached", request_id: requestId }));
       }
     }
   }
@@ -101,6 +112,9 @@ async function requestLink(c: Ctx): Promise<Response> {
 // GET consumes nothing, so a mail scanner that follows the link signs no one in.
 function confirmLink(c: Ctx): Response {
   const requestId = uuidv7();
+  if (emailSignIn(c.env, policyOf(c.env)) === null) {
+    return htmlError(requestId, "policy_missing", "Sign in", "/signin", "Sign in", ACCOUNT);
+  }
   const token = c.req.param("token") ?? "";
   const response = isLinkToken(token)
     ? htmlResponse(requestId, confirmLinkPage(token))
