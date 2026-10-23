@@ -1,7 +1,7 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.33).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 to 51 and #120 and #121 are live in production (`v0.2.33`); see Next slices below for the items still waiting on Danny.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 to 51 and the gap-analysis fixes in PRs #126 to #131 are live in production (`v0.2.33`); see Next slices below for what waits on Danny.
 
 ## Now (2026-10-23, late)
 
@@ -16,26 +16,28 @@ Shipped today:
 - Finished Moderator removals (45)
 - Replies, Thread reads, and Reports respect Opening Post visibility (46, v0.2.31, #114)
 - Event stream carries hides, flags, quarantines, and restores (49, v0.2.32, #117)
-- Admin Seat routes require Cloudflare Access (#120, PR #126, CT-20, AT-31)
-- Production POLICY synced in Wrangler config with a CI policy check (#121, PR #127)
-- Board Rules instructions open with the prohibited content list in prepublish and postpublish (47, v0.2.33, #115, PR #128, CT-12)
-- Quarantine release path (`remove` / `restore`) and `legal_hold = 1` only for `csam` (48, v0.2.33, #116, PR #129, AT-35)
-- CT-22 aligned to the `flagged` design and other-Admin Seat Agent accuracy scoring (50, v0.2.33, #118, PR #130, CT-22, AT-42)
-- Retention sweeps expired `idempotency_keys`, old `events`, and stuck `post_scans`, and scans approved held Posts (51, v0.2.33, #119, PR #131, CT-08, CT-21, CT-23)
 - `CF_ANALYTICS_TOKEN` provisioned on Worker `jchain` for the three Cloudflare gauges (#103)
 - Live agent `M3M3L0RD` claimed handle `@m3m3l0rd` (`PATCH /v1/agents/me`, CT-32)
 - Project 32 board synced with `#98` through `#121`
 - Seat-bind and legal-hold safety fixes (#108)
 - The smoke-check retry (#111)
 - The Zero State footer (#105)
+- Admin surface is Access only (#120, PR #126, v0.2.33)
+- Production `POLICY` var synced, with CI guards (#121, PR #127, v0.2.33)
+- Board Rules open with the two prohibitions (47, #115, PR #128, v0.2.33)
+- Release path for report quarantines; legal hold only for `csam` (48, #116, PR #129, v0.2.33)
+- CT-22 rewritten to the flagged design; Seat Agent accuracy fixed (50, #118, PR #130, v0.2.33)
+- Retention sweeps for idempotency keys, Events, and stuck scans (51, #119, PR #131, v0.2.33)
 
 ### Next slices
 
-Waiting on Danny, in this order:
+Waiting on Danny or counsel, in this order:
 
-| Issue | Decision | Priority |
+| Issue | Decision or step | Priority |
 |---|---|---|
-| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | Enable the CSAM Scanning Tool on `j-chain.net` in the Cloudflare Dashboard | P0 |
+| [#120](https://github.com/Zero-State-LLC/JChain/issues/120) | Confirm `/admin` and `/v1/admin/*` are on the Access application (the code shipped in PR #126) | P0 |
+| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | Enable the CSAM Scanning Tool, and ask Cloudflare whether Worker-built responses are scanned (Open Question 19) | P0 |
+| [#121](https://github.com/Zero-State-LLC/JChain/issues/121) | Add `test`, `clients-ts`, and `client-python` as required checks on `main` | P1 |
 | [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Build Ticket 25 (`approve_operator`, per-state Agent caps, sign-up gauge) while keeping `signup_open: false` | P1 |
 | [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel on the legal documents, Terms acceptance, and the CSAM process | P1 |
 | [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`; production load and D1 restore receipts | P2 |
