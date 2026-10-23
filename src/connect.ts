@@ -131,15 +131,14 @@ async function claim(c: Ctx): Promise<Response> {
   const now = Date.now();
   const stamp = utcSeconds(new Date(now));
   if (row.expires_at <= stamp) return jsonResponse(requestId, { state: "expired" });
-  if (row.last_poll_at !== null) {
-    const waited = now - Date.parse(row.last_poll_at);
-    if (waited < CONNECT_INTERVAL_SECONDS * 1000) {
-      return limited(requestId, Math.max(1, Math.ceil((CONNECT_INTERVAL_SECONDS * 1000 - waited) / 1000)));
-    }
-  }
-  await c.env.DB.prepare(
-    "UPDATE agent_connections SET last_poll_at = ? WHERE device_hash = ?",
-  ).bind(stamp, deviceHash).run();
+  // One conditional update, keyed by device_hash (the row has no separate id).
+  // A second poll in the same window changes nothing and is the RFC slow_down.
+  const earliestAllowed = utcSeconds(new Date(now - CONNECT_INTERVAL_SECONDS * 1000));
+  const polled = await c.env.DB.prepare(
+    `UPDATE agent_connections SET last_poll_at = ?
+      WHERE device_hash = ? AND (last_poll_at IS NULL OR last_poll_at <= ?)`,
+  ).bind(stamp, deviceHash, earliestAllowed).run();
+  if (Number(polled.meta.changes ?? 0) === 0) return limited(requestId, CONNECT_INTERVAL_SECONDS);
   if (row.state === "pending") return jsonResponse(requestId, { state: "pending", interval: CONNECT_INTERVAL_SECONDS });
   if (row.state === "denied") return jsonResponse(requestId, { state: "denied" });
   return issue(c, requestId, policy, row, stamp);
@@ -157,8 +156,10 @@ async function issue(c: Ctx, requestId: string, policy: Policy, row: ConnectionR
   const credential = await newCredentialSecret();
   const results = await db.batch([
     db.prepare(
-      "UPDATE agent_connections SET state = 'claimed', agent_id = ? WHERE device_hash = ? AND state = 'approved' AND operator_id IS NOT NULL",
-    ).bind(agentId, row.device_hash),
+      `UPDATE agent_connections SET state = 'claimed', agent_id = ?
+        WHERE device_hash = ? AND state = 'approved' AND operator_id IS NOT NULL
+          AND (SELECT COUNT(*) FROM agents) < ?`,
+    ).bind(agentId, row.device_hash, policy.max_agents),
     db.prepare(
       `INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at)
        SELECT ?, display_name, declared_model, 'active', operator_id, ?
@@ -170,6 +171,15 @@ async function issue(c: Ctx, requestId: string, policy: Policy, row: ConnectionR
     ).bind(uuidv7(), agentId, await sha256Hex(credential), stamp, agentId),
   ]);
   if (Number(results[0]?.meta.changes ?? 0) !== 1 || Number(results[2]?.meta.changes ?? 0) !== 1) {
+    if (Number(results[0]?.meta.changes ?? 0) !== 1) {
+      const fresh = await db.prepare(
+        "SELECT state FROM agent_connections WHERE device_hash = ?",
+      ).bind(row.device_hash).first<{ state: string }>();
+      const count = await db.prepare("SELECT COUNT(*) AS n FROM agents").first<{ n: number }>();
+      if (fresh?.state === "approved" && Number(count?.n ?? 0) >= policy.max_agents) {
+        return errorResponse(requestId, "roster_full", "The agent limit is already reached.");
+      }
+    }
     return jsonResponse(requestId, { state: "claimed" });
   }
   console.log(JSON.stringify({ message: "agent connected", agent_id: agentId }));

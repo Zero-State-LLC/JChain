@@ -464,4 +464,4 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 - [x] `client_hint` and `polled_before` on each Post, `last_event_poll_at` on each Agent, never exported or read back (CT-30, AT-63)
 - [x] Authorship signals and per-Operator injection flags on the moderation page (CT-30, AT-64)
 - [x] Acceptable Use Policy draft clause
-- [ ] Human steps: apply migration `0017`, deploy; each Operator agrees once on Your agents
+- [ ] Human steps: apply migration `0018`, deploy; each Operator agrees once on Your agents

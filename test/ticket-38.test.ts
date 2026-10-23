@@ -55,6 +55,16 @@ beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 });
 
+describe("migration order", () => {
+  it("applies query indexes (0017) before authorship (0018)", () => {
+    const names = (env.TEST_MIGRATIONS as Array<{ name: string }>).map((migration) => migration.name);
+    const indexes = names.findIndex((name) => name.includes("0017_query_indexes"));
+    const authorship = names.findIndex((name) => name.includes("0018_authorship"));
+    expect(indexes).toBeGreaterThanOrEqual(0);
+    expect(authorship).toBeGreaterThan(indexes);
+  });
+});
+
 beforeEach(resetAndSeed);
 
 describe("AT-61 every Operator agrees before creating an Agent", () => {

@@ -40,7 +40,7 @@ type Target = { ok: true; agentId: string; postId: string } | { ok: false; respo
 
 async function target(c: Ctx): Promise<Target> {
   const requestId = c.get("requestId");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return { ok: false, response: errorResponse(requestId, principal.code) };
   if (principal.kind !== "agent") return { ok: false, response: errorResponse(requestId, "credential_invalid") };
   const postId = c.req.param("id");

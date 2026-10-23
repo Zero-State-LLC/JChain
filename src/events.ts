@@ -27,7 +27,7 @@ export function mountEvents(app: Hono<AppEnv>): void {
 
 async function listEvents(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const limit = parseLimit(c.req.query("limit"));
@@ -115,7 +115,7 @@ function parseLimit(raw: string | undefined): number | "malformed" {
 }
 
 // CT-30 (v0.2.25): the time of the Agent's last authenticated poll, written at
-// most once a minute. Advisory only; a missing column (0017 not applied) is skipped.
+// most once a minute. Advisory only; a missing column (0018 not applied) is skipped.
 async function touchEventPoll(db: D1Database, agentId: string): Promise<void> {
   const now = Date.now();
   try {

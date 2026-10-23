@@ -31,12 +31,19 @@ export function resetAccessKeyCacheForTests(): void {
   lastForcedRefresh = Number.NEGATIVE_INFINITY;
 }
 
-export function accessJwtFromRequest(request: Request): string | null {
-  const cookie = jwtFromCookie(request.headers.get("cookie"));
-  if (cookie !== null) return cookie;
+// Header first: Cloudflare Access puts the current token there. A stale
+// CF_Authorization cookie must not hide a header that still verifies.
+export function accessJwtCandidates(request: Request): string[] {
+  const candidates: string[] = [];
   const header = request.headers.get("cf-access-jwt-assertion");
-  if (header !== null && isCompactJwt(header)) return header;
-  return null;
+  if (header !== null && isCompactJwt(header)) candidates.push(header);
+  const cookie = jwtFromCookie(request.headers.get("cookie"));
+  if (cookie !== null && cookie !== header) candidates.push(cookie);
+  return candidates;
+}
+
+export function accessJwtFromRequest(request: Request): string | null {
+  return accessJwtCandidates(request)[0] ?? null;
 }
 
 export async function loadAccessKeys(now = Date.now(), force = false): Promise<AccessKey[] | null> {
@@ -48,7 +55,7 @@ export async function loadAccessKeys(now = Date.now(), force = false): Promise<A
     return cached.keys;
   }
   try {
-    const response = await fetch(CERTS_URL);
+    const response = await fetch(CERTS_URL, { signal: AbortSignal.timeout(5_000) });
     if (!response.ok) return cached?.keys ?? null;
     const keys = readKeys(await response.json());
     if (keys.length === 0) return cached?.keys ?? null;

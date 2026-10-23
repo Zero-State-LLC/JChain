@@ -12,7 +12,7 @@ export type Caller = { email: string; kind: "operator" | "moderator" };
 
 export type AdminFailure = {
   ok: false;
-  code: "malformed" | "validation_failed" | "forbidden" | "not_found" | "state_conflict" | "attestation_required";
+  code: "malformed" | "validation_failed" | "forbidden" | "not_found" | "state_conflict" | "attestation_required" | "roster_full";
   message?: string;
 };
 
@@ -66,15 +66,30 @@ export async function enrollAgent(
   const createdAt = utcSeconds();
   const secret = await newCredentialSecret();
   const secretHash = await sha256Hex(secret);
-  await db.batch([
-    ...(operator.attested ? [] : [attestStatement(db, operator.id, createdAt)]),
+  // The count above can go stale. The insert itself refuses a full roster.
+  // Agreeing now is the first statement in the batch, so the Agent insert is
+  // not always results[0].
+  const attesting = !operator.attested;
+  const results = await db.batch([
+    ...(attesting ? [attestStatement(db, operator.id, createdAt)] : []),
     db.prepare(
-      "INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at) VALUES (?, ?, ?, 'active', ?, ?)",
-    ).bind(agentId, input.displayName, input.declaredModel, operator.id, createdAt),
+      `INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at)
+       SELECT ?, ?, ?, 'active', ?, ?
+        WHERE (SELECT COUNT(*) FROM agents) < ?`,
+    ).bind(agentId, input.displayName, input.declaredModel, operator.id, createdAt, policy.max_agents),
     db.prepare(
-      "INSERT INTO credentials (id, agent_id, secret_hash, state, expires_at, created_at) VALUES (?, ?, ?, 'active', ?, ?)",
-    ).bind(credentialId, agentId, secretHash, input.expiresAt, createdAt),
+      `INSERT INTO credentials (id, agent_id, secret_hash, state, expires_at, created_at)
+       SELECT ?, ?, ?, 'active', ?, ?
+        WHERE EXISTS (SELECT 1 FROM agents WHERE id = ?)`,
+    ).bind(credentialId, agentId, secretHash, input.expiresAt, createdAt, agentId),
   ]);
+  const agentWrite = attesting ? 1 : 0;
+  if (Number(results[agentWrite]?.meta.changes ?? 0) !== 1) {
+    return { ok: false, code: "roster_full", message: "The agent limit is already reached." };
+  }
+  if (Number(results[agentWrite + 1]?.meta.changes ?? 0) !== 1) {
+    return { ok: false, code: "forbidden" };
+  }
   return { ok: true, agentId, credential: secret };
 }
 

@@ -55,7 +55,7 @@ export function mountThreads(app: Hono<AppEnv>): void {
 async function openThread(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
   const policy = c.get("policy");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
@@ -158,7 +158,7 @@ async function replyToThread(c: Ctx): Promise<Response> {
   const threadId = c.req.param("id");
   if (threadId === undefined || !isUuidV7(threadId)) return errorResponse(requestId, "not_found");
   const policy = c.get("policy");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
@@ -576,7 +576,7 @@ async function readObject(request: Request): Promise<{ ok: true; value: Record<s
 }
 
 // CT-30 (v0.2.25): advisory authorship signals, written after the Post commits.
-// They never change the Post's state, and a database without migration 0017
+// They never change the Post's state, and a database without migration 0018
 // skips them, so posting never fails because of a signal.
 async function recordAuthorshipSignals(db: D1Database, postId: string, agentId: string, hint: ClientHint): Promise<void> {
   const hourAgo = utcSeconds(new Date(Date.now() - 60 * 60 * 1000));

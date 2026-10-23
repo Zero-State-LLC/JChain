@@ -81,7 +81,7 @@ async function retire(c: Ctx): Promise<Response> {
 async function gate(c: Ctx): Promise<{ caller: Caller } | Response> {
   const requestId = c.get("requestId");
   if (c.req.raw.headers.get("authorization") !== null) {
-    const agent = await requireAgent(c.env, c.req.raw);
+    const agent = await requireAgent(c.env, c.req.raw, c.executionCtx);
     if (!agent.ok) return errorResponse(requestId, agent.code);
     return errorResponse(requestId, "forbidden");
   }

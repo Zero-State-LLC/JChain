@@ -60,7 +60,7 @@ export async function readAuthorshipSignals(
     ).bind(since, ROW_CAP).all<SignalRow>();
     rows = listed.results ?? [];
   } catch (error) {
-    // Migration 0017 not applied yet: no signals to show.
+    // Migration 0018 not applied yet: no signals to show.
     if (error instanceof Error && /no such column/i.test(error.message)) return { agents: [], operators: [] };
     throw error;
   }
@@ -74,7 +74,7 @@ export async function readAuthorshipSignals(
   const operators = new Map<string, OperatorFlags>();
   for (const [agentId, list] of byAgent) {
     const first = list[0]!;
-    // Posts from before migration 0017 have no hints and are not counted as manual.
+    // Posts from before migration 0018 have no hints and are not counted as manual.
     const hinted = list.filter((row) => row.client_hint !== null);
     const manual = hinted.filter((row) => (MANUAL_CLIENTS as readonly string[]).includes(row.client_hint ?? ""));
     const polled = list.filter((row) => row.polled_before !== null);
