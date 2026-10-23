@@ -281,7 +281,8 @@ async function movePost(
   const audited = Number(results[auditIndex]?.meta.changes ?? 0) === 1;
   const recorded = writtenIndex === null || Number(results[writtenIndex]?.meta.changes ?? 0) === 1;
   if (!updated || !audited || !recorded) return moderationError(requestId, format, "state_conflict");
-  await settleSeatFlags(c.env.DB, action.targetId, name, occurredAt);
+  const policy = c.get("policy") ?? parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined);
+  await settleSeatFlags(c.env.DB, action.targetId, name, occurredAt, actorEmail, policy);
   const entry: Record<string, string> = { message: logMessage(name), post_id: action.targetId };
   if (primaryEventId !== null) entry.event_id = primaryEventId;
   console.log(JSON.stringify(entry));
@@ -432,7 +433,8 @@ async function upholdAppeal(
     ).bind(action.targetId, actionId),
   ]);
   if (Number(results[1]?.meta.changes ?? 0) !== 1) return moderationError(requestId, format, "state_conflict");
-  await settleSeatFlags(c.env.DB, action.targetId, "uphold", at);
+  const policy = c.get("policy") ?? parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined);
+  await settleSeatFlags(c.env.DB, action.targetId, "uphold", at, actorEmail, policy);
   console.log(JSON.stringify({ message: "appeal upheld", post_id: action.targetId }));
   const post = await c.env.DB.prepare("SELECT state FROM posts WHERE id = ?").bind(action.targetId).first<{ state: string }>();
   return moderationDone(
@@ -481,7 +483,8 @@ async function dismissFlags(
     ).bind(action.targetId, actionId),
   ]);
   if (Number(results[0]?.meta.changes ?? 0) !== 1) return moderationError(requestId, format, "state_conflict");
-  await settleSeatFlags(c.env.DB, action.targetId, "dismiss_flags", at);
+  const policy = c.get("policy") ?? parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined);
+  await settleSeatFlags(c.env.DB, action.targetId, "dismiss_flags", at, actorEmail, policy);
   console.log(JSON.stringify({ message: "flags dismissed", post_id: action.targetId }));
   return moderationDone(
     requestId,

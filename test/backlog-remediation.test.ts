@@ -370,11 +370,37 @@ describe("seat flags (AT-42, AT-43)", () => {
     await env.DB.prepare(
       "UPDATE admin_seats SET seat_state = 'active', seat_trial_count = 10 WHERE seat = 1",
     ).run();
-    for (let index = 0; index < 20; index += 1) {
+    // Duplicate flag by the same seat on the same Post is state_conflict.
+    const dupPost = await seedPost(author.agentId);
+    await expectJson(await flag(dupPost.postId, seat.credential), 200);
+    await env.DB.prepare("UPDATE posts SET state = 'published' WHERE id = ?").bind(dupPost.postId).run();
+    await expectError(await flag(dupPost.postId, seat.credential), 409, "state_conflict");
+
+    // Own-Admin (ADMIN) and non-seat Moderator (STAFF) decisions do not score Seat 1.
+    for (const actor of [ADMIN, STAFF]) {
+      for (let i = 0; i < 6; i += 1) {
+        const unscored = await seedPost(author.agentId);
+        await expectJson(await flag(unscored.postId, seat.credential), 200);
+        await expectJson(await call("/v1/moderation/actions", {
+          email: actor,
+          body: {
+            target_type: "post",
+            target_id: unscored.postId,
+            action: "approve",
+            reason_code: "rules",
+          },
+        }), 200);
+      }
+    }
+    const stillActive = await env.DB.prepare("SELECT seat_state FROM admin_seats WHERE seat = 1").first<{ seat_state: string }>();
+    expect(stillActive?.seat_state).toBe("active");
+
+    // Other Admin (ADMIN2) scores Seat 1; after > 5 reviewed flags (6 overturned), Seat 1 pauses.
+    for (let index = 0; index < 6; index += 1) {
       const seeded = await seedPost(author.agentId);
       await expectJson(await flag(seeded.postId, seat.credential), 200);
       await expectJson(await call("/v1/moderation/actions", {
-        email: ADMIN,
+        email: ADMIN2,
         body: {
           target_type: "post",
           target_id: seeded.postId,
