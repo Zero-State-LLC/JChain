@@ -29,6 +29,22 @@ ALTER TABLE admin_seats ADD COLUMN powers_held INTEGER NOT NULL DEFAULT 0 CHECK 
 
 UPDATE admin_seats SET powers_held = 1 WHERE seat_state = 'paused';
 
+-- A seat paused or readmitted before this migration, with no later restore_seat_powers,
+-- also stays held, even if it is back in its trial. A seat never paused promotes normally.
+UPDATE admin_seats
+   SET powers_held = 1
+ WHERE EXISTS (
+   SELECT 1 FROM moderation_actions AS held
+    WHERE held.target_type = 'admin_seat'
+      AND held.action IN ('pause_seat_agent', 'readmit_seat_agent')
+      AND held.target_id = CAST(admin_seats.seat AS TEXT)
+      AND NOT EXISTS (
+        SELECT 1 FROM moderation_actions AS restored
+         WHERE restored.target_type = 'admin_seat'
+           AND restored.action = 'restore_seat_powers'
+           AND restored.target_id = held.target_id
+           AND restored.created_at >= held.created_at));
+
 -- Row 23 (CT-22): at most one Seat Flag per seat and Post. Keep the earliest
 -- row of any duplicate pair before the unique index is built.
 DELETE FROM seat_flags
