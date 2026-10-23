@@ -4,6 +4,7 @@ import { characterLength, errorResponse, jsonResponse, type ErrorCode } from "./
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
+import { canonicalReason } from "./moderation";
 import { accessEmail, requireAgent } from "./principal";
 import { currentSession } from "./session";
 import { turnstileSecret, verifyTurnstile } from "./turnstile";
@@ -120,6 +121,7 @@ async function report(c: Ctx, format: Format): Promise<Response> {
       c.env.DB.prepare(
         `UPDATE posts
             SET state = 'quarantined',
+                queue_first = 1,
                 legal_hold = CASE WHEN ? = 'csam' THEN 1 ELSE 0 END,
                 legal_hold_reason = CASE WHEN ? = 'csam' THEN 'csam' ELSE NULL END
           WHERE id = ? AND state NOT IN ('removed', 'removal_pending')`,
@@ -208,7 +210,8 @@ function parseReport(
   }
   if (!(TARGETS as readonly string[]).includes(body.target_type)) return { ok: false, code: "validation_failed" };
   if (!isUuidV7(body.target_id)) return { ok: false, code: "malformed" };
-  if (!(REASONS as readonly string[]).includes(body.reason_code)) return { ok: false, code: "validation_failed" };
+  const reasonCode = canonicalReason(body.reason_code);
+  if (!(REASONS as readonly string[]).includes(reasonCode)) return { ok: false, code: "validation_failed" };
   let detail: string | null = null;
   if (Object.hasOwn(body, "detail")) {
     if (typeof body.detail !== "string") return { ok: false, code: "malformed" };
@@ -227,7 +230,7 @@ function parseReport(
     ok: true,
     targetType: body.target_type,
     targetId: body.target_id,
-    reasonCode: body.reason_code,
+    reasonCode,
     detail,
     token,
   };

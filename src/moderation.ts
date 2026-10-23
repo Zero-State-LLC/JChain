@@ -9,6 +9,7 @@ import { isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { settleSeatFlags } from "./seats";
 import { applyOperatorAction, isOperatorAction, parseOperatorExtras } from "./operator-admin";
+import { mountEvidence } from "./evidence";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -28,18 +29,25 @@ export const MODERATION_REASONS = [
 
 const REASONS = MODERATION_REASONS;
 
-const PROHIBITED_REASONS = new Set([
-  "identification-document",
-  "child-sexual-abuse-material",
-  "id-document",
-  "csam",
-]);
+const PROHIBITED_REASONS = new Set(["id-document", "csam"]);
+
+// Gap analysis row 19: the short codes are canonical. The long names in CT-09 and Part D are
+// accepted on input, in moderation actions and reports, and stored as the short code.
+const REASON_ALIASES: Readonly<Record<string, string>> = {
+  "identification-document": "id-document",
+  "child-sexual-abuse-material": "csam",
+};
+
+export function canonicalReason(code: string): string {
+  return Object.hasOwn(REASON_ALIASES, code) ? String(REASON_ALIASES[code]) : code;
+}
 
 type Format = "json" | "html";
 
 export function mountModeration(app: Hono<AppEnv>): void {
   app.post("/v1/moderation/actions", (c) => moderate(c, "json"));
   app.post("/moderation/actions", (c) => moderate(c, "html"));
+  mountEvidence(app);
 }
 
 function moderationError(requestId: string, format: Format, code: ErrorCode): Response {
@@ -270,6 +278,44 @@ async function movePost(
         WHERE id = ? AND state = 'quarantined'
           AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
     ).bind(post.asset_id, actionId));
+    // Gap row 17: the released Asset leaves the Blocked Hash list, as restore_asset does.
+    statements.push(c.env.DB.prepare(
+      "DELETE FROM blocked_hashes WHERE asset_id = ? AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)",
+    ).bind(post.asset_id, actionId));
+  }
+  const prohibited = PROHIBITED_REASONS.has(action.reasonCode);
+  const csamRemoval = name === "remove" && action.reasonCode === "csam";
+  if (post.asset_id !== null && ((name === "quarantine" && prohibited) || csamRemoval)) {
+    // Gap rows 12 and 18: a prohibited Post quarantine, and a csam removal, also quarantine the
+    // Asset (keyed on this batch's audit row). The removal blocks its hashes below.
+    statements.push(c.env.DB.prepare(
+      `UPDATE assets SET state = 'quarantined', quarantined_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        WHERE id = ? AND state = 'ready'
+          AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+    ).bind(post.asset_id, actionId));
+  }
+  if (name === "quarantine" && prohibited && post.asset_id !== null) {
+    statements.push(blockAssetHashes(c.env.DB, post.asset_id, true, occurredAt, actionId));
+  }
+  if (csamRemoval) {
+    // Gap row 12 (AT-35, Part D item 5): a csam removal suspends every active Agent of the
+    // author's Operator in the same batch, each with its own audit row.
+    for (const agentId of await operatorAgents(c.env.DB, action.targetId)) {
+      statements.push(
+        c.env.DB.prepare(
+          `INSERT INTO moderation_actions (
+             id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+           )
+           SELECT ?, ?, 'agent', agents.id, 'suspend_agent', 'csam', NULL, NULL, ? FROM agents
+            WHERE agents.id = ? AND agents.state = 'active'
+              AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+        ).bind(uuidv7(), actorEmail, occurredAt, agentId, actionId),
+        c.env.DB.prepare(
+          `UPDATE agents SET state = 'suspended'
+            WHERE id = ? AND state = 'active' AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+        ).bind(agentId, actionId),
+      );
+    }
   }
   const policy = c.get("policy") ?? parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined);
   const enqueueScan = name === "approve" && post.state === "pending_review" && policy?.moderation_mode === "postpublish";
@@ -281,9 +327,7 @@ async function movePost(
     ).bind(occurredAt, action.targetId, actionId));
   }
   if (name === "remove" && post.asset_id !== null) {
-    statements.push(blockAssetHashes(
-      c.env.DB, post.asset_id, PROHIBITED_REASONS.has(action.reasonCode), occurredAt, actionId,
-    ));
+    statements.push(blockAssetHashes(c.env.DB, post.asset_id, prohibited, occurredAt, actionId));
   }
   const results = await c.env.DB.batch(statements);
   const updated = Number(results[updateIndex]?.meta.changes ?? 0) === 1;
@@ -307,6 +351,20 @@ async function movePost(
   const body: Record<string, unknown> = { post_id: action.targetId, state };
   if (primaryEventId !== null) body.event_id = primaryEventId;
   return moderationDone(requestId, format, body, `Post ${action.targetId} is ${state}.`);
+}
+
+// The author and every other active Agent of the author's Operator.
+async function operatorAgents(db: D1Database, postId: string): Promise<string[]> {
+  const listed = await db.prepare(
+    `SELECT agents.id AS id FROM agents
+      WHERE agents.state = 'active'
+        AND (agents.id = (SELECT posts.author_agent_id FROM posts WHERE posts.id = ?)
+          OR agents.operator_id = (
+            SELECT author.operator_id FROM posts JOIN agents AS author ON author.id = posts.author_agent_id
+             WHERE posts.id = ?))
+      ORDER BY agents.id`,
+  ).bind(postId, postId).all<{ id: string }>();
+  return (listed.results ?? []).map((row) => row.id);
 }
 
 async function moveThread(
@@ -656,7 +714,8 @@ function isAgentMove(value: string): value is AgentMove {
 
 function legal(name: MoveName, state: string, threadState: string, assetReady: boolean): boolean {
   if (name === "approve") {
-    if (state === "flagged") return true;
+    // Gap row 16: approving a flagged Post needs a ready Asset, as restore does.
+    if (state === "flagged") return assetReady;
     return state === "pending_review" && threadState === "open" && assetReady;
   }
   if (name === "reject") return state === "pending_review";
@@ -706,11 +765,11 @@ function guard(name: MoveName): string {
     return `posts.id = ? AND (
       posts.state = 'flagged'
       OR (posts.state = 'pending_review'
-        AND EXISTS (SELECT 1 FROM threads WHERE threads.id = posts.thread_id AND threads.state = 'open')
-        AND (posts.asset_id IS NULL OR EXISTS (
-          SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
-        )))
-    )`;
+        AND EXISTS (SELECT 1 FROM threads WHERE threads.id = posts.thread_id AND threads.state = 'open'))
+    )
+    AND (posts.asset_id IS NULL OR EXISTS (
+      SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
+    ))`;
   }
   if (name === "restore") {
     return `posts.id = ? AND posts.state IN ('hidden', 'flagged', 'quarantined')
@@ -751,7 +810,8 @@ function parseAction(
     return { ok: false, code: "malformed" };
   }
   if (!isUuidV7(body.target_id)) return { ok: false, code: "malformed" };
-  if (!(REASONS as readonly string[]).includes(body.reason_code)) return { ok: false, code: "validation_failed" };
+  const reasonCode = canonicalReason(body.reason_code);
+  if (!(REASONS as readonly string[]).includes(reasonCode)) return { ok: false, code: "validation_failed" };
   let privateNote: string | null = null;
   if (Object.hasOwn(body, "private_note")) {
     if (typeof body.private_note !== "string") return { ok: false, code: "malformed" };
@@ -763,7 +823,7 @@ function parseAction(
     targetType: body.target_type,
     targetId: body.target_id,
     action: body.action,
-    reasonCode: body.reason_code,
+    reasonCode,
     privateNote,
   };
 }

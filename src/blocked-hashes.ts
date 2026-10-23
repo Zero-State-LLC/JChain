@@ -1,5 +1,5 @@
-// CT-21 and R4: the Blocked Hash list is D1 data written only by Moderator actions
-// (and the scan's prohibited hide). Owner deletion never writes here.
+// CT-21, R4, and R5: the Blocked Hash list is D1 data written only by Moderator actions.
+// The content scan and owner deletion never write here.
 
 const HASH_COLUMNS = ["sha256", "thumb_sha256", "display_sha256", "derived_thumb_sha256"] as const;
 
@@ -30,12 +30,6 @@ export function blockAssetHashes(
   const binds: unknown[] = [prohibited ? 1 : 0, at, ...HASH_COLUMNS.map(() => assetId)];
   if (actionId !== undefined) binds.push(actionId);
   return db.prepare(upsertSql("assets.id = ?", actionId !== undefined)).bind(...binds);
-}
-
-// For the scan's prohibited hide: every Asset of the Post, prohibited = 1.
-export function blockPostAssetsProhibited(db: D1Database, postId: string, at: string): D1PreparedStatement {
-  return db.prepare(upsertSql("assets.id = (SELECT posts.asset_id FROM posts WHERE posts.id = ?)", false))
-    .bind(1, at, ...HASH_COLUMNS.map(() => postId));
 }
 
 export async function blockedMatch(
