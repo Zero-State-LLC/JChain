@@ -1,24 +1,36 @@
 import { readFileSync } from "node:fs";
 
-const policy = JSON.parse(readFileSync("policy/beta.json", "utf8"));
-const prodPolicy = JSON.parse(readFileSync("policy/production.json", "utf8"));
-const wranglerText = readFileSync("wrangler.jsonc", "utf8").replace(/^\s*\/\/.*$/gm, "");
-const wrangler = JSON.parse(wranglerText);
-const bound = JSON.parse(wrangler.vars.POLICY);
-const prodBound = JSON.parse(wrangler.env.production.vars.POLICY);
-
-const a = JSON.stringify(policy);
-const b = JSON.stringify(bound);
-
-if (a !== b) {
-  console.error("policy/beta.json and wrangler.jsonc vars.POLICY do not match.");
+// The local POLICY binding must equal policy/beta.json, and the production POLICY binding must
+// equal policy/production.json (#121), so a hand-run `wrangler deploy --env production` deploys
+// the same policy as the Deploy production workflow.
+const read = (path) => JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), "utf8"));
+const beta = read("policy/beta.json");
+const productionFile = read("policy/production.json");
+const wrangler = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
+const matches = [...wrangler.matchAll(/"POLICY"\s*:\s*"((?:\\.|[^"\\])*)"/g)];
+const fail = (message) => {
+  console.error(message);
   process.exit(1);
+};
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+if (matches.length !== 2) fail(`wrangler.jsonc must have exactly two POLICY bindings (local and production), found ${matches.length}`);
+const parse = (match) => JSON.parse(JSON.parse(`"${match[1]}"`));
+const local = parse(matches[0]);
+const production = parse(matches[1]);
+
+if (!same(local, beta)) fail("policy/beta.json and the local POLICY binding differ");
+if (!same(production, productionFile)) fail("policy/production.json and the production POLICY binding in wrangler.jsonc differ");
+
+if (!/^https:\/\/[^/]+$/.test(productionFile.site_origin) || productionFile.site_origin === beta.site_origin) {
+  fail("production site_origin must be an https origin other than the local test origin");
 }
-
-const prodA = JSON.stringify(prodPolicy);
-const prodB = JSON.stringify(prodBound);
-
-if (prodA !== prodB) {
-  console.error("policy/production.json and wrangler.jsonc env.production.vars.POLICY do not match.");
-  process.exit(1);
+if (
+  productionFile.turnstile_site_key === beta.turnstile_site_key ||
+  !/^0x[0-9A-Za-z_-]{20,}$/.test(productionFile.turnstile_site_key)
+) {
+  fail("production turnstile_site_key must be a live site key");
+}
+if (productionFile.auth?.signup_open !== false) {
+  fail("production auth.signup_open must stay false until Danny opens sign-up (#61)");
 }
