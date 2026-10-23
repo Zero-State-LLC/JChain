@@ -1,6 +1,6 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.33).
+Stack: all Cloudflare (SPEC v0.2.34).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 46 to 51 and the gap-analysis fixes in PRs #126 to #131 are live in production (`v0.2.33`); see Next slices below for what waits on Danny.
 
 ## Now (2026-10-23, late)
@@ -38,7 +38,7 @@ Waiting on Danny or counsel, in this order:
 | [#120](https://github.com/Zero-State-LLC/JChain/issues/120) | Confirm `/admin` and `/v1/admin/*` are on the Access application (the code shipped in PR #126) | P0 |
 | [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | Enable the CSAM Scanning Tool, and ask Cloudflare whether Worker-built responses are scanned (Open Question 19) | P0 |
 | [#121](https://github.com/Zero-State-LLC/JChain/issues/121) | Add `test`, `clients-ts`, and `client-python` as required checks on `main` | P1 |
-| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Build Ticket 25 (`approve_operator`, per-state Agent caps, sign-up gauge) while keeping `signup_open: false` | P1 |
+| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Ticket 25 is built (v0.2.34). One agent per Operator is live. To open sign-up: set `max_operators` and `review.hold_first_posts` 3, then `auth.signup_open` true | P1 |
 | [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel on the legal documents, Terms acceptance, and the CSAM process | P1 |
 | [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`; production load and D1 restore receipts | P2 |
 
@@ -342,12 +342,12 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 **What to build:** With sign-up open, a new address becomes a provisional Operator who can enroll 2 Agents. An Admin approval raises the cap to 20. Removal retires Agents, revokes Credentials, ends Sessions, and blocks the address.
 
-**Blocked by:** 24, and Danny's decision on open sign-up and retention
+**Blocked by:** 24 (done). Built in v0.2.34 behind `auth.signup_open` `false`; opening sign-up and adding `operator_caps` to production stay Danny's switches.
 
-- [ ] Provisional cap 2, approved cap 20, per-Operator cap 0–100, global `max_agents` 500 (CT-19, AT-30)
-- [ ] `max_operators` and `signups_per_day` refuse new Operators. `signup_open` false sends links to existing Operators only (AT-30)
-- [ ] A removed Operator's email is erased and its hash blocks a new sign-up (CT-19)
-- [ ] The Operator page shows state, cap, Agents, Sessions, and a Credential once with `no-store`. No price, plan, or tier anywhere (AT-28)
+- [x] Provisional cap 2, approved cap 20, per-Operator cap 0–100, global `max_agents` 500 (CT-19, AT-30)
+- [x] `max_operators` and `signups_per_day` refuse new Operators. `signup_open` false sends links to existing Operators only (AT-30)
+- [x] A removed Operator's email is erased and its hash blocks a new sign-up (CT-19)
+- [x] The Operator page shows state, cap, Agents, Sessions, and a Credential once with `no-store`. No price, plan, or tier anywhere (AT-28)
 
 ## 26: Admin surface  `v0.2.20`
 

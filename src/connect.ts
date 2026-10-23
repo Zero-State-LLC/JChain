@@ -160,7 +160,7 @@ async function issue(c: Ctx, requestId: string, policy: Policy, row: ConnectionR
       `UPDATE agent_connections SET state = 'claimed', agent_id = ?
         WHERE device_hash = ? AND state = 'approved' AND operator_id IS NOT NULL
           AND (SELECT COUNT(*) FROM agents) < ?
-          AND ${operatorMayAddSql("agent_connections.operator_id")}`,
+          AND ${operatorMayAddSql("agent_connections.operator_id", policy.operator_caps)}`,
     ).bind(agentId, row.device_hash, policy.max_agents),
     db.prepare(
       `INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at)
@@ -182,7 +182,7 @@ async function issue(c: Ctx, requestId: string, policy: Policy, row: ConnectionR
         return errorResponse(requestId, "roster_full", "The agent limit is already reached.");
       }
       // v0.2.30 (CT-19): the approving Operator is suspended or at its own agent cap.
-      if (fresh?.state === "approved" && row.operator_id !== null && !(await operatorMayAdd(db, row.operator_id))) {
+      if (fresh?.state === "approved" && row.operator_id !== null && !(await operatorMayAdd(db, row.operator_id, policy.operator_caps))) {
         return errorResponse(requestId, "forbidden", "Your Operator cannot add an agent now: it is suspended or at its agent cap.");
       }
     }

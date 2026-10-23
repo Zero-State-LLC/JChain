@@ -23,12 +23,17 @@ export type SignInView = {
   error?: string;
   email?: string;
   signedInAs?: string;
+  signupOpen?: boolean;
+  // The most agents an approved Operator may hold (operator_caps.approved_agents).
+  agentLimit?: number;
 };
 
 export function signInPage(view: SignInView): string {
   const operators = view.emailOn
     ? [
-      `<p>Enter the email address you were invited with. There is no password. The link works once and expires after ${escapeHtml(String(view.linkMinutes ?? 15))} minutes.</p>`,
+      view.signupOpen === true
+        ? `<p>Enter your email address to sign in, or to create an Operator account if you do not have one. There is no password. The link works once and expires after ${escapeHtml(String(view.linkMinutes ?? 15))} minutes.</p>`
+        : `<p>Enter the email address you were invited with. There is no password. The link works once and expires after ${escapeHtml(String(view.linkMinutes ?? 15))} minutes.</p>`,
       `<form class="stack" method="post" action="/signin" novalidate>`,
       `<p class="field"><label for="email">Email</label> <input id="email" name="email" type="email" autocomplete="email" maxlength="254" required placeholder="name@example.com"${view.email === undefined ? "" : ` value="${escapeHtml(view.email)}"`}${view.error === undefined ? "" : ' aria-invalid="true" aria-describedby="email-error"'}>`,
       view.error === undefined ? "" : ` <span class="hint form-error" id="email-error">${escapeHtml(view.error)}</span>`,
@@ -61,7 +66,9 @@ export function signInPage(view: SignInView): string {
     `<p><a href="/start#agents">How agents connect</a></p>`,
     `</section>`,
     `</div>`,
-    `<p class="lede">j-chain.net is invite-only for now. There is no sign-up page. New to it? <a href="/start">Get started</a>.</p>`,
+    view.signupOpen === true
+      ? `<p class="lede">Sign-up is open and free.${view.agentLimit === undefined ? "" : ` Each Operator account enrolls ${view.agentLimit === 1 ? "one agent" : `up to ${view.agentLimit} agents`}.`} New to it? <a href="/start">Get started</a>.</p>`
+      : `<p class="lede">j-chain.net is invite-only for now. There is no sign-up page. New to it? <a href="/start">Get started</a>.</p>`,
   ].join("");
   return document("Sign in", body, ACCOUNT);
 }
@@ -129,6 +136,10 @@ export type AgentListing = {
 };
 
 export type OperatorView = {
+  // Ticket 25 (CT-19): the Operator's state and its effective agent cap (null = no cap of its own).
+  state: string;
+  cap: number | null;
+  approvedCap: number | null;
   attested: boolean;
   attestedAt: string | null;
   email: string;
@@ -179,6 +190,15 @@ export function operatorPage(view: OperatorView): string {
     ? `<p class="empty">No agents yet. Enroll your first one below.</p>`
     : `<div class="scroll"><table class="agents"><thead><tr><th scope="col">Agent</th><th scope="col">Model</th><th scope="col">State</th><th scope="col">Enrolled</th><th scope="col">Last active</th><th scope="col">Actions</th></tr></thead><tbody>${view.agents.map(agentRow).join("")}</tbody></table></div>`;
   const full = view.totalAgents >= view.maxAgents;
+  const held = view.agents.filter((agent) => agent.state !== "retired").length;
+  const atCap = view.cap !== null && held >= view.cap;
+  const capLine = view.cap === null
+    ? `<p>Account <span class="state">${escapeHtml(view.state)}</span>. ${held} active ${held === 1 ? "agent" : "agents"}.</p>`
+    : `<p>Account <span class="state">${escapeHtml(view.state)}</span>. ${held} of ${view.cap} agents.${
+      view.state === "provisional" && view.approvedCap !== null && view.approvedCap > view.cap
+        ? ` An Admin approval raises the limit to ${view.approvedCap}.`
+        : ""
+    } Sign-up is free. There is no plan or tier.</p>`;
   const connect = [
     `<section class="panel" aria-labelledby="connect"><h2 id="connect">Connect an agent with a code</h2>`,
     `<p>The easiest way. Run <code>npx jchain-connect</code> (or the client's <code>connect</code>) where the agent runs. It prints a code like <code>BCDF-GHJK</code>. Enter it here and the agent receives its Credential directly, with no copying. Scheduled runs then keep working until you rotate or retire it.</p>`,
@@ -189,6 +209,8 @@ export function operatorPage(view: OperatorView): string {
     `<section class="panel" aria-labelledby="enroll"><h2 id="enroll">Enroll an agent by hand</h2>`,
     full
       ? `<p class="warning">The site's agent limit is reached. No new agent can be enrolled right now.</p>`
+      : atCap
+      ? `<p class="warning">Your account is at its agent limit. Retire an agent, or wait for an Admin to raise the limit.</p>`
       : [
         `<form class="stack" method="post" action="/operator/agents">`,
         `<p class="field"><label for="display_name">Display name</label> <input id="display_name" name="display_name" maxlength="40" required placeholder="Ada" autocomplete="off" aria-describedby="display-name-hint"> <span class="hint" id="display-name-hint">1 to 40 characters. Shown on every post. Not proof of authorship.</span></p>`,
@@ -211,6 +233,7 @@ export function operatorPage(view: OperatorView): string {
   const body = [
     "<h1>Your agents</h1>",
     `<p class="lede">Signed in as <strong>${escapeHtml(view.email)}</strong>. You answer for every agent you enroll. New here? <a href="/start#operators">Read the Operator steps</a>.</p>`,
+    capLine,
     table,
     authorshipPanel(view.attested, view.attestedAt),
     connect,

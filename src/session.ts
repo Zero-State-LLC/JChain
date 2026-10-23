@@ -161,6 +161,93 @@ export async function consumeLink(
   return { secret, maxAge: auth.session_days * 24 * 60 * 60 };
 }
 
+// Ticket 25 (CT-19, AT-30): sign-up while auth.signup_open is true.
+
+// A UTC day starts at 00:00:00Z; sign-ups are counted from it.
+function dayStart(now: number): string {
+  const date = new Date(now);
+  return utcSeconds(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())));
+}
+
+// SQL guards that refuse a new Operator past max_operators or signups_per_day. Binds: dayStart.
+function signupRoomSql(policy: Policy, auth: AuthPolicy): string {
+  return `(SELECT COUNT(*) FROM operators WHERE state != 'removed') < ${Math.trunc(policy.max_operators)}
+      AND (SELECT COUNT(*) FROM operators WHERE created_at >= ?) < ${Math.trunc(auth.signups_per_day)}`;
+}
+
+// May this address sign up now? Not an Operator, never removed, and inside both caps.
+// Checked before a link is sent, and again inside the batch that creates the Operator.
+export async function signupAllowed(db: D1Database, policy: Policy, auth: AuthPolicy, email: string, now = Date.now()): Promise<boolean> {
+  if (!auth.signup_open || policy.operator_caps === undefined) return false;
+  const row = await db.prepare(
+    `SELECT (NOT EXISTS (SELECT 1 FROM operators WHERE email = ?)
+             AND NOT EXISTS (SELECT 1 FROM removed_operator_emails WHERE email_hash = ?)
+             AND ${signupRoomSql(policy, auth)}) AS ok`,
+  ).bind(email, await sha256Hex(email), dayStart(now)).first<{ ok: number }>();
+  return Number(row?.ok ?? 0) === 1;
+}
+
+// A new single-use sign-up link. The address is stored only until the link ends.
+export async function issueSignupLink(db: D1Database, email: string, auth: AuthPolicy, now = Date.now()): Promise<string> {
+  const token = newPrefixedSecret("sl_");
+  await db.batch([
+    db.prepare(
+      "DELETE FROM signup_links WHERE email = ? AND (consumed_by IS NOT NULL OR expires_at <= ?)",
+    ).bind(email, utcSeconds(new Date(now))),
+    db.prepare(
+      "INSERT INTO signup_links (token_hash, email, created_at, expires_at, consumed_by) VALUES (?, ?, ?, ?, NULL)",
+    ).bind(
+      await sha256Hex(token),
+      email,
+      utcSeconds(new Date(now)),
+      utcSeconds(new Date(now + auth.link_minutes * MINUTE_MS)),
+    ),
+  ]);
+  return token;
+}
+
+// Consumes a sign-up link: creates a provisional Operator and its first Session in one D1
+// batch, under the same guards as signupAllowed. Null for a used, expired, or unknown link,
+// or when sign-up closed or a cap was reached since the link was sent.
+export async function consumeSignupLink(
+  db: D1Database,
+  token: string,
+  policy: Policy,
+  auth: AuthPolicy,
+  now = Date.now(),
+): Promise<{ secret: string; maxAge: number } | null> {
+  if (!isLinkToken(token) || !auth.signup_open || policy.operator_caps === undefined) return null;
+  const tokenHash = await sha256Hex(token);
+  const stamp = utcSeconds(new Date(now));
+  const link = await db.prepare(
+    "SELECT email FROM signup_links WHERE token_hash = ? AND consumed_by IS NULL AND expires_at > ?",
+  ).bind(tokenHash, stamp).first<{ email: string }>();
+  if (!link) return null;
+  const operatorId = uuidv7(now);
+  const sessionId = uuidv7(now);
+  const secret = newPrefixedSecret("ss_");
+  const results = await db.batch([
+    db.prepare(
+      "UPDATE signup_links SET consumed_by = ? WHERE token_hash = ? AND consumed_by IS NULL AND expires_at > ?",
+    ).bind(sessionId, tokenHash, stamp),
+    db.prepare(
+      `INSERT INTO operators (email, id, state, created_at)
+       SELECT email, ?, 'provisional', ? FROM signup_links
+        WHERE token_hash = ? AND consumed_by = ?
+          AND NOT EXISTS (SELECT 1 FROM operators WHERE email = signup_links.email)
+          AND NOT EXISTS (SELECT 1 FROM removed_operator_emails WHERE email_hash = ?)
+          AND ${signupRoomSql(policy, auth)}`,
+    ).bind(operatorId, stamp, tokenHash, sessionId, await sha256Hex(link.email), dayStart(now)),
+    db.prepare(
+      `INSERT INTO sessions (id, secret_hash, operator_id, created_at, last_used_at, revoked_at)
+       SELECT ?, ?, id, ?, ?, NULL FROM operators WHERE id = ?`,
+    ).bind(sessionId, await sha256Hex(secret), stamp, stamp, operatorId),
+  ]);
+  if (Number(results[1]?.meta.changes ?? 0) !== 1 || Number(results[2]?.meta.changes ?? 0) !== 1) return null;
+  console.log(JSON.stringify({ message: "operator signed up", operator_id: operatorId, session_id: sessionId }));
+  return { secret, maxAge: auth.session_days * 24 * 60 * 60 };
+}
+
 export async function revokeSession(db: D1Database, secret: string, now = Date.now()): Promise<void> {
   await db.prepare(
     "UPDATE sessions SET revoked_at = ? WHERE secret_hash = ? AND revoked_at IS NULL",
@@ -196,6 +283,11 @@ export async function purgeEndedSignIns(
       `DELETE FROM sessions WHERE id IN (
          SELECT id FROM sessions WHERE revoked_at IS NOT NULL AND revoked_at <= ? LIMIT ?)`,
     ).bind(dayAgo, limit),
+    // Ticket 25: a sign-up link holds an address, so it goes as soon as it has ended.
+    db.prepare(
+      `DELETE FROM signup_links WHERE token_hash IN (
+         SELECT token_hash FROM signup_links WHERE consumed_by IS NOT NULL OR expires_at <= ? LIMIT ?)`,
+    ).bind(stamp, limit),
   ];
   const auth = policy.auth;
   if (!enabled || auth === undefined) {
@@ -214,13 +306,15 @@ export async function purgeEndedSignIns(
   return results.reduce((sum, result) => sum + Number(result.meta.changes ?? 0), 0);
 }
 
-export function signInEmail(auth: AuthPolicy, to: string, link: string): MailMessage {
+export function signInEmail(auth: AuthPolicy, to: string, link: string, signup = false): MailMessage {
   return {
     from: auth.mail_from,
     to,
-    subject: "Your j-chain.net sign-in link",
+    subject: signup ? "Your j-chain.net sign-up link" : "Your j-chain.net sign-in link",
     text: [
-      "Use this link to sign in to j-chain.net:",
+      signup
+        ? "Use this link to create your j-chain.net Operator account and sign in:"
+        : "Use this link to sign in to j-chain.net:",
       "",
       link,
       "",

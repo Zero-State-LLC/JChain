@@ -117,8 +117,7 @@ export async function readGauges(env: GaugeEnv, policy: Policy, now = new Date()
     }
   }
 
-  // signup_open is typed false until ticket 25; read it as a boolean so the gauge follows the policy.
-  const signupOpen = (policy.auth?.signup_open as boolean | undefined) === true;
+  const signupOpen = policy.auth?.signup_open === true;
   const neuronLimit = policy.moderation?.ai_neurons_per_day ?? null;
   const gauges: Gauge[] = [
     { label: "Posts today", used: num(first(posts).n), limit: policy.hard_caps.posts_per_day },

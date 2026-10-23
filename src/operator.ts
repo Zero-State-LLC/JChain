@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { effectiveCap } from "./operator-admin";
 import {
   connectCodePage,
   connectConfirmPage,
@@ -90,7 +91,14 @@ async function page(c: Ctx): Promise<Response> {
   ).bind(opened.caller.email).all<AgentListing>();
   const total = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM agents").first<{ n: number }>();
   const attestation = await operatorAttestation(c.env.DB, opened.caller.email);
+  const account = await c.env.DB.prepare(
+    "SELECT state, agent_cap FROM operators WHERE email = ?",
+  ).bind(opened.caller.email).first<{ state: string; agent_cap: number | null }>();
+  const state = account?.state ?? "approved";
   return htmlResponse(opened.requestId, operatorPage({
+    state,
+    cap: effectiveCap(state, account?.agent_cap ?? null, opened.policy.operator_caps),
+    approvedCap: opened.policy.operator_caps?.approved_agents ?? null,
     attested: attestation?.attested === true,
     attestedAt: attestation?.attested === true ? attestation.at : null,
     email: opened.caller.email,

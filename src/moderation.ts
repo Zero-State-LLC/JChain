@@ -75,7 +75,7 @@ async function moderate(c: Ctx, format: Format): Promise<Response> {
     if (action.action === "remove_operator" && format === "html" && parsed.value.confirm !== "yes") {
       return moderationError(requestId, format, "validation_failed");
     }
-    const extras = parseOperatorExtras(action.action, parsed.value);
+    const extras = parseOperatorExtras(action.action, parsed.value, policy.operator_caps);
     if (!extras.ok) return moderationError(requestId, format, extras.code);
     const result = await applyOperatorAction(c.env.DB, principal.email, {
       action: action.action,

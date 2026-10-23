@@ -17,9 +17,11 @@ import { chargeSignInAddress, chargeSignInEmail } from "./quota";
 import {
   CLEAR_SESSION_COOKIE,
   consumeLink,
+  consumeSignupLink,
   currentSession,
   emailSignIn,
   issueLink,
+  issueSignupLink,
   isLinkToken,
   policyOf,
   readSessionCookie,
@@ -27,6 +29,7 @@ import {
   revokeSession,
   sessionCookie,
   signInEmail,
+  signupAllowed,
 } from "./session";
 
 // CT-18 as amended in v0.2.23. The sign-in page always renders. The email form
@@ -58,6 +61,8 @@ async function signInForm(c: Ctx): Promise<Response> {
     emailOn: enabled !== null,
     linkMinutes: enabled?.auth.link_minutes,
     signedInAs: session?.email,
+    signupOpen: enabled?.auth.signup_open === true && policyOf(c.env)?.operator_caps !== undefined,
+    agentLimit: policyOf(c.env)?.operator_caps?.approved_agents,
   }));
 }
 
@@ -81,6 +86,8 @@ async function requestLink(c: Ctx): Promise<Response> {
     return htmlResponse(requestId, signInPage({
       emailOn: true,
       linkMinutes: enabled.auth.link_minutes,
+      signupOpen: enabled.auth.signup_open && policy.operator_caps !== undefined,
+      agentLimit: policy.operator_caps?.approved_agents,
       error: "Enter a whole email address, like name@example.com.",
       email: typeof raw === "string" ? raw.slice(0, 254) : undefined,
     }), 422);
@@ -92,19 +99,23 @@ async function requestLink(c: Ctx): Promise<Response> {
     const operator = await c.env.DB.prepare(
       "SELECT id FROM operators WHERE email = ? AND state IN ('provisional', 'approved')",
     ).bind(email).first<{ id: string | null }>();
-    // Sign-up (ticket 25) is closed, so only an existing Operator gets a link.
-    if (operator?.id) {
+    // An existing Operator gets a sign-in link. While sign-up is open (ticket 25), an address
+    // that may sign up gets a sign-up link; otherwise nothing is sent.
+    const operatorId = operator?.id ?? null;
+    const signup = operatorId === null && await signupAllowed(c.env.DB, policy, auth, email);
+    if (operatorId !== null || signup) {
       // The page returns before this work, so a known address is not slower
       // than an unknown one. Failures are logged without the address.
-      const operatorId = operator.id;
       const task = (async () => {
         try {
           if (!(await chargeSignInEmail(c.env, auth.emails_per_day))) {
             console.error(JSON.stringify({ message: "sign-in email cap reached", request_id: requestId }));
             return;
           }
-          const token = await issueLink(c.env.DB, operatorId, auth);
-          await mailer.send(signInEmail(auth, email, `${policy.site_origin}/signin/${token}`));
+          const token = operatorId !== null
+            ? await issueLink(c.env.DB, operatorId, auth)
+            : await issueSignupLink(c.env.DB, email, auth);
+          await mailer.send(signInEmail(auth, email, `${policy.site_origin}/signin/${token}`, operatorId === null));
         } catch {
           console.error(JSON.stringify({ message: "sign-in email failed", request_id: requestId }));
         }
@@ -139,7 +150,9 @@ async function useLink(c: Ctx): Promise<Response> {
   const enabled = emailSignIn(c.env, policy);
   if (policy === null || enabled === null) return htmlError(requestId, "policy_missing", "Sign in", "/signin", "Sign in", ACCOUNT);
   if (!sameOrigin(c.req.raw, policy.site_origin)) return htmlError(requestId, "forbidden", "Sign in", "/signin", "Sign in", ACCOUNT);
-  const started = await consumeLink(c.env.DB, c.req.param("token") ?? "", enabled.auth);
+  const token = c.req.param("token") ?? "";
+  const started = await consumeLink(c.env.DB, token, enabled.auth)
+    ?? await consumeSignupLink(c.env.DB, token, policy, enabled.auth);
   if (started === null) {
     const response = htmlResponse(requestId, badLinkPage(), 400);
     response.headers.set("referrer-policy", "no-referrer");
