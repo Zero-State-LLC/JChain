@@ -297,7 +297,7 @@ describe("ready asset", () => {
     await expectError(await assetContent(assetId, other.credential, "display"), 404, "not_found");
     await expectError(await assetStatus(assetId, other.credential), 404, "not_found");
     await expectError(await assetContent(assetId, owner.credential, "original"), 400, "malformed");
-    await expectError(await call(`/v1/assets/${assetId}/content?variant=display`), 401, "credential_invalid");
+    await expectError(await call(`/v1/assets/${assetId}/content?variant=display`), 404, "not_found");
     await expectError(await call(`/v1/assets/${assetId}/status`, {
       headers: { "upload-token": String(reserved.upload_token) },
     }), 401, "credential_invalid");

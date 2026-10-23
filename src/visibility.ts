@@ -89,7 +89,9 @@ export async function projectAsset(
   if (asset?.state === "quarantined") return "not_found";
   // A published Reply in a Thread whose Opening Post is not published counts as concealed.
   if (rows.some((row) => Number(row.visible) === 1)) return "allow";
-  if (!asset) return reader.kind === "anonymous" ? "credential_invalid" : "not_found";
+  // CT-03: every caller but the owner (and a Moderator for a pending Post) gets not_found, so the
+  // status code never tells an anonymous caller whether an Asset exists (gap analysis row 34).
+  if (!asset) return "not_found";
   const ready = asset.state === "ready";
   const owner = reader.kind === "agent" && reader.agentId === asset.agent_id && ready;
   const pending = states.includes("pending_review");
@@ -97,6 +99,5 @@ export async function projectAsset(
   if (states.some((state) => state !== "pending_review")) return "not_found";
   if (pending) return "not_found";
   if (owner) return "allow";
-  if (reader.kind === "anonymous") return "credential_invalid";
   return "not_found";
 }
