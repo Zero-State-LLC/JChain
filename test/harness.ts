@@ -37,7 +37,7 @@ type CallOptions = {
 export async function resetAndSeed(): Promise<void> {
   await env.DB.batch([
     env.DB.prepare(
-      "UPDATE admin_seats SET email = NULL, seat_agent_id = NULL, seat_state = 'trial', seat_trial_count = 0",
+      "UPDATE admin_seats SET email = NULL, seat_agent_id = NULL, seat_state = 'trial', seat_trial_count = 0, powers_held = 0",
     ),
     env.DB.prepare("DELETE FROM export_posts"),
     env.DB.prepare("DELETE FROM exports"),

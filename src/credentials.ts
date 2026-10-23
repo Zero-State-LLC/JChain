@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import {
+  OWNER_ISSUES,
   RESUME,
   SUSPEND,
   mayManage,
@@ -57,6 +58,10 @@ async function rotate(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
   const result = await rotateCredential(c.env.DB, opened.caller, c.req.param("id"));
   if (!result.ok) return errorResponse(requestId, result.code, result.message);
+  // CT-10: a Moderator's rotate revokes and returns no secret. Only the owner gets one.
+  if (result.credential === null) {
+    return jsonResponse(requestId, { agent_id: result.agentId, credential: null, state: "revoked", message: OWNER_ISSUES });
+  }
   return jsonResponse(requestId, { agent_id: result.agentId, credential: result.credential }, 201);
 }
 

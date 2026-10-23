@@ -204,13 +204,16 @@ export async function answerConnection(
   operatorId: string,
   decision: "approve" | "deny",
   now = Date.now(),
+  // CT-29: statements that commit in the same batch, after the answer (the attestation).
+  alongside: D1PreparedStatement[] = [],
 ): Promise<boolean> {
   const stamp = utcSeconds(new Date(now));
-  const result = await db.prepare(
+  const answer = db.prepare(
     `UPDATE agent_connections SET state = ?, operator_id = ?, answered_at = ?
       WHERE user_code = ? AND state = 'pending' AND expires_at > ?`,
-  ).bind(decision === "approve" ? "approved" : "denied", operatorId, stamp, userCode, stamp).run();
-  return Number(result.meta.changes ?? 0) === 1;
+  ).bind(decision === "approve" ? "approved" : "denied", operatorId, stamp, userCode, stamp);
+  const results = await db.batch([answer, ...alongside]);
+  return Number(results[0]?.meta.changes ?? 0) === 1;
 }
 
 // Retention: a request is deleted one day after it expires. Codes live ten minutes.

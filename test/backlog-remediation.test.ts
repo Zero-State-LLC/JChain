@@ -14,10 +14,50 @@ import {
   OPERATOR_ID,
   STAFF,
   call,
+  clearSignInQuota,
   resetAndSeed,
 } from "./harness";
 
 const POSTPUBLISH = JSON.stringify(postpublishFixture);
+type SentMail = { from: string; to: string; subject: string; text: string };
+
+// The Worker env with an `auth` block and a stubbed send-email binding (as in ticket 36).
+function signInEnv(sent: SentMail[]): Env {
+  const auth = {
+    signup_open: false,
+    link_minutes: 15,
+    session_days: 30,
+    idle_days: 7,
+    sessions_per_operator: 10,
+    links_per_email_hour: 3,
+    emails_per_day: 300,
+    signups_per_day: 50,
+    mail_from: "signin@jchain.example.test",
+  };
+  const policy = JSON.stringify({ ...JSON.parse(env.POLICY as string), auth });
+  const binding = { send: async (message: SentMail) => { sent.push(message); return { messageId: "test" }; } };
+  return new Proxy(env, {
+    get(target, property) {
+      if (property === "POLICY") return policy;
+      if (property === "EMAIL") return binding;
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as Env;
+}
+
+async function signIn(bindings: Env, sent: SentMail[], email: string): Promise<string> {
+  const headers = { "content-type": "application/x-www-form-urlencoded", origin: "https://jchain.example.test" };
+  await call("/signin", { method: "POST", raw: new TextEncoder().encode(new URLSearchParams({ email }).toString()), headers, env: bindings });
+  const token = sent.at(-1)?.text.match(/https:\/\/[^\s]+\/signin\/(sl_[A-Za-z0-9_-]{43})/)?.[1];
+  expect(token).toBeDefined();
+  const done = await call(`/signin/${token!}`, { method: "POST", headers: { origin: "https://jchain.example.test" }, env: bindings });
+  expect(done.status).toBe(303);
+  const secret = (done.headers.get("set-cookie") ?? "").match(/__Host-jc_session=(ss_[A-Za-z0-9_-]{43})/)?.[1];
+  expect(secret).toBeDefined();
+  return `__Host-jc_session=${secret!}`;
+}
+
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const CSP = "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'";
 
@@ -94,19 +134,18 @@ describe("archived boards (AT-32)", () => {
 describe("admin surface (AT-31, AT-33, AT-16)", () => {
   it("serves the admin page and seat routes only to an Admin Seat via Cloudflare Access", async () => {
     const ada = await enroll("Ada", OPERATOR);
-    const sessionId = uuidv7();
-    const sessionSecret = "s".repeat(43);
-    const { sha256Hex } = await import("../src/credential");
-    const now = utcSeconds();
-    await env.DB.prepare(
-      `INSERT INTO sessions (id, operator_id, secret_hash, created_at, last_used_at, revoked_at)
-       VALUES (?, (SELECT id FROM operators WHERE email = ?), ?, ?, ?, NULL)`,
-    ).bind(sessionId, ADMIN2, await sha256Hex(sessionSecret), now, now).run();
-    const adminSessionCookie = `__Host-jchain_session=${sessionSecret}`;
+    // AT-31: a real Session, signed in by email as the seat-2 Admin (an Operator too),
+    // with email sign-in on. The Session works on /operator and nowhere on the admin surface.
+    const sent: SentMail[] = [];
+    const bindings = signInEnv(sent);
+    await env.DB.batch([env.DB.prepare("DELETE FROM sessions"), env.DB.prepare("DELETE FROM signin_links")]);
+    await clearSignInQuota(ADMIN2);
+    const adminSessionCookie = await signIn(bindings, sent, ADMIN2);
+    expect((await call("/operator", { headers: { cookie: adminSessionCookie }, env: bindings })).status).toBe(200);
 
     for (const options of [
       {},
-      { headers: { cookie: adminSessionCookie } },
+      { headers: { cookie: adminSessionCookie, origin: "https://jchain.example.test" }, env: bindings },
       { bearer: ada.credential },
     ]) {
       await expectError(await call("/admin", options), 401, "access_required");

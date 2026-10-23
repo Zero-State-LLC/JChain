@@ -314,7 +314,8 @@ async function movePost(
               AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
         ).bind(uuidv7(), actorEmail, occurredAt, agentId, actionId),
         c.env.DB.prepare(
-          `UPDATE agents SET state = 'suspended'
+          // CT-10 (gap row 5): a Moderator suspension, so the Operator cannot resume it.
+          `UPDATE agents SET state = 'suspended', suspended_by = 'moderator'
             WHERE id = ? AND state = 'active' AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
         ).bind(agentId, actionId),
       );
@@ -426,7 +427,10 @@ async function moveAgent(
     privateNote: action.privateNote,
     guard,
     guardExtra: from,
-    update: `UPDATE agents SET state = ? WHERE ${guard}`,
+    // CT-10 (gap row 5): a Moderator suspension is recorded, so its Operator cannot lift it.
+    update: name === "suspend_agent"
+      ? `UPDATE agents SET state = ?, suspended_by = 'moderator' WHERE ${guard}`
+      : `UPDATE agents SET state = ?, suspended_by = NULL WHERE ${guard}`,
     updateValue: next,
   });
   if (!ok) return moderationError(requestId, format, "state_conflict");

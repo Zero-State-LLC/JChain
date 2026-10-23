@@ -24,6 +24,8 @@ type SeatRow = {
   seat_agent_id: string | null;
   seat_state: string;
   seat_trial_count: number;
+  // 1 after a pause or readmit until the other Admin restores the seat's powers.
+  powers_held?: number;
 };
 
 export function mountSeats(app: Hono<AppEnv>): void {
@@ -54,6 +56,8 @@ async function flagPost(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
   const postId = c.req.param("id");
   if (postId === undefined || !isUuidV7(postId)) return errorResponse(requestId, "not_found");
+  // CT-22: a human principal (no bearer) is forbidden. A bad bearer stays credential_invalid.
+  if (c.req.raw.headers.get("authorization") === null) return errorResponse(requestId, "forbidden");
   const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
@@ -100,16 +104,18 @@ async function flagPost(c: Ctx): Promise<Response> {
   const flagId = uuidv7();
   if (trial) {
     // Shadow trial (Open Question 17): recorded, counted, and the Post stays published.
-    const results = await c.env.DB.batch([
+    // A seat whose powers are held (after a pause or readmit) does not promote (AT-43).
+    const results = await uniqueBatch(c.env.DB, [
       insertFlag(c.env.DB, flagId, seat.seat, principal.agentId, postId, reason, true, now),
       flagEvent(c.env.DB, "post.flagged_trial", postId, flagId, now),
       c.env.DB.prepare(
         `UPDATE admin_seats
             SET seat_trial_count = seat_trial_count + 1,
-                seat_state = CASE WHEN seat_trial_count + 1 >= ? THEN 'active' ELSE seat_state END
+                seat_state = CASE WHEN seat_trial_count + 1 >= ? AND powers_held = 0 THEN 'active' ELSE seat_state END
           WHERE seat = ? AND EXISTS (SELECT 1 FROM seat_flags WHERE id = ?)`,
       ).bind(threshold, seat.seat, flagId),
     ]);
+    if (results === null) return errorResponse(requestId, "state_conflict");
     if (Number(results[0]?.meta.changes ?? 0) !== 1) return errorResponse(requestId, "state_conflict");
     console.log(JSON.stringify({ message: "seat flag trial", post_id: postId, seat: seat.seat, trial: 1 }));
     return jsonResponse(requestId, { post_id: postId, state: "published", trial: 1, event_type: "post.flagged_trial" });
@@ -167,7 +173,8 @@ async function flagPost(c: Ctx): Promise<Response> {
     // CT-21: a prohibited hide's quarantine adds the Asset's hashes, marked prohibited.
     statements.push(blockAssetHashes(c.env.DB, post.asset_id, true, now, actionId));
   }
-  const results = await c.env.DB.batch(statements);
+  const results = await uniqueBatch(c.env.DB, statements);
+  if (results === null) return errorResponse(requestId, "state_conflict");
   if (Number(results[0]?.meta.changes ?? 0) !== 1) return errorResponse(requestId, "state_conflict");
   const hidden = Number(results[hideIndex]?.meta.changes ?? 0) === 1;
   if (prohibited && !hidden) return errorResponse(requestId, "state_conflict");
@@ -183,6 +190,17 @@ async function flagPost(c: Ctx): Promise<Response> {
     trial: 0,
     event_type: "post.flagged",
   });
+}
+
+// Gap row 23: the unique (seat, post_id) index refuses a concurrent second flag by the same
+// seat. The batch is rolled back, and the caller answers state_conflict.
+async function uniqueBatch(db: D1Database, statements: D1PreparedStatement[]): Promise<D1Result[] | null> {
+  try {
+    return await db.batch(statements);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("UNIQUE")) return null;
+    throw error;
+  }
 }
 
 // The flag row is written only while the Post is published, so a raced flag writes nothing.
@@ -223,65 +241,108 @@ async function adminSeat(c: Ctx): Promise<Response> {
   const body = await readObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const action = body.value.action;
-  if (typeof action !== "string" || !(SEAT_ACTIONS as readonly string[]).includes(action)) {
-    return errorResponse(requestId, "validation_failed");
-  }
+  if (!isSeatAction(action)) return errorResponse(requestId, "validation_failed");
   const seat = await c.env.DB.prepare(
-    "SELECT seat, email, seat_agent_id, seat_state, seat_trial_count FROM admin_seats WHERE seat = ?",
+    "SELECT seat, email, seat_agent_id, seat_state, seat_trial_count, powers_held FROM admin_seats WHERE seat = ?",
   ).bind(seatNumber).first<SeatRow>();
   if (!seat) return errorResponse(requestId, "not_found");
 
-  const threshold = trialThreshold(c.get("policy"));
-  const now = utcSeconds();
-  let nextState = seat.seat_state;
-  let nextAgent = seat.seat_agent_id;
-  let trialCount = seat.seat_trial_count;
   if (action === "bind_seat_agent") {
+    if (Object.keys(body.value).some((key) => key !== "action" && key !== "agent_id")) {
+      return errorResponse(requestId, "malformed");
+    }
     const agentId = body.value.agent_id;
     if (typeof agentId !== "string" || !isUuidV7(agentId)) return errorResponse(requestId, "validation_failed");
-    const agent = await c.env.DB.prepare(
-      "SELECT id FROM agents WHERE id = ? AND state = 'active'",
-    ).bind(agentId).first<{ id: string }>();
-    if (!agent) return errorResponse(requestId, "not_found");
-    if (!(await seatAgentOwned(c.env.DB, seat.email, agentId))) {
-      return errorResponse(requestId, "validation_failed", "A Seat Agent must be an active Agent of that seat's own Admin.");
-    }
-    nextAgent = agentId;
-    nextState = seatStartState(c.get("policy"));
-    trialCount = 0;
   } else if (Object.keys(body.value).some((key) => key !== "action")) {
     return errorResponse(requestId, "malformed");
   }
-  if (action === "bind_seat_agent" && Object.keys(body.value).some((key) => key !== "action" && key !== "agent_id")) {
-    return errorResponse(requestId, "malformed");
-  }
-  if (action === "pause_seat_agent") nextState = "paused";
-  if (action === "readmit_seat_agent") {
-    // CT-22: readmit returns the seat to its start state, so the trial restarts.
-    nextState = threshold > 0 ? "trial" : "active";
-    trialCount = 0;
-  }
-  if (action === "restore_seat_powers") {
-    if (seat.email === null || seat.email === principal.email) return errorResponse(requestId, "forbidden");
-    nextState = "active";
-  }
-
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      "UPDATE admin_seats SET seat_agent_id = ?, seat_state = ?, seat_trial_count = ? WHERE seat = ?",
-    ).bind(nextAgent, nextState, trialCount, seatNumber),
-    c.env.DB.prepare(
-      `INSERT INTO moderation_actions (
-         id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
-       ) VALUES (?, ?, 'admin_seat', ?, ?, 'rules', NULL, NULL, ?)`,
-    ).bind(uuidv7(), principal.email, String(seatNumber), action, now),
-  ]);
+  const applied = await applySeatAction(
+    c.env.DB,
+    c.get("policy"),
+    seat,
+    principal.email,
+    action,
+    typeof body.value.agent_id === "string" ? body.value.agent_id : undefined,
+  );
+  if (!applied.ok) return errorResponse(requestId, applied.code, applied.message);
   return jsonResponse(requestId, {
     seat: seatNumber,
-    seat_state: nextState,
-    seat_agent_id: nextAgent,
-    seat_trial_count: trialCount,
+    seat_state: applied.seatState,
+    seat_agent_id: applied.seatAgentId,
+    seat_trial_count: applied.trialCount,
   });
+}
+
+export type SeatAction = (typeof SEAT_ACTIONS)[number];
+
+export function isSeatAction(value: unknown): value is SeatAction {
+  return typeof value === "string" && (SEAT_ACTIONS as readonly string[]).includes(value);
+}
+
+type SeatApplied =
+  | { ok: true; seatState: string; seatAgentId: string | null; trialCount: number }
+  | { ok: false; code: "forbidden" | "not_found" | "validation_failed" | "state_conflict"; message?: string };
+
+// CT-22 Admin controls, shared by the JSON route and the admin form (AT-43, Part F item 8).
+// A pause or a readmit holds the seat's powers: the readmitted seat runs its trial again and
+// stays flag-only after it, until the other seat's Admin restores its powers. Restore needs a
+// paused or held seat, so a fresh trial cannot be skipped. Binding never lifts a hold.
+export async function applySeatAction(
+  db: D1Database,
+  policy: Policy,
+  seat: SeatRow,
+  actorEmail: string,
+  action: SeatAction,
+  agentId?: string,
+): Promise<SeatApplied> {
+  const threshold = trialThreshold(policy);
+  let nextState = seat.seat_state;
+  let nextAgent = seat.seat_agent_id;
+  let trialCount = seat.seat_trial_count;
+  let held = seat.powers_held === 1 ? 1 : 0;
+  if (action === "bind_seat_agent") {
+    if (agentId === undefined || agentId === "") return { ok: false, code: "validation_failed" };
+    const agent = await db.prepare("SELECT id FROM agents WHERE id = ? AND state = 'active'").bind(agentId).first();
+    if (!agent) return { ok: false, code: "not_found" };
+    if (!(await seatAgentOwned(db, seat.email, agentId))) {
+      return { ok: false, code: "validation_failed", message: "A Seat Agent must be an active Agent of that seat's own Admin." };
+    }
+    nextAgent = agentId;
+    nextState = held === 1 ? "trial" : seatStartState(policy);
+    trialCount = 0;
+  } else if (action === "pause_seat_agent") {
+    nextState = "paused";
+    held = 1;
+  } else if (action === "readmit_seat_agent") {
+    // Readmit restarts the trial, and the seat stays flag-only until the other Admin restores it.
+    nextState = "trial";
+    trialCount = 0;
+    held = 1;
+  } else {
+    if (seat.email === null || seat.email === actorEmail) return { ok: false, code: "forbidden" };
+    if (seat.seat_state !== "paused" && held !== 1) {
+      return { ok: false, code: "state_conflict", message: "Only a paused or readmitted seat can have its powers restored." };
+    }
+    // A readmitted seat still finishes its trial; one that finished it is active at once.
+    nextState = trialCount >= threshold ? "active" : "trial";
+    held = 0;
+  }
+  const actionId = uuidv7();
+  const guard = "seat = ? AND seat_state = ? AND powers_held = ? AND seat_trial_count = ?";
+  const guardBinds = [seat.seat, seat.seat_state, seat.powers_held === 1 ? 1 : 0, seat.seat_trial_count];
+  const results = await db.batch([
+    db.prepare(
+      `INSERT INTO moderation_actions (
+         id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+       ) SELECT ?, ?, 'admin_seat', ?, ?, 'rules', NULL, NULL, ? FROM admin_seats WHERE ${guard}`,
+    ).bind(actionId, actorEmail, String(seat.seat), action, utcSeconds(), ...guardBinds),
+    db.prepare(
+      `UPDATE admin_seats SET seat_agent_id = ?, seat_state = ?, seat_trial_count = ?, powers_held = ?
+        WHERE ${guard} AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+    ).bind(nextAgent, nextState, trialCount, held, ...guardBinds, actionId),
+  ]);
+  if (Number(results[1]?.meta.changes ?? 0) !== 1) return { ok: false, code: "state_conflict" };
+  return { ok: true, seatState: nextState, seatAgentId: nextAgent, trialCount };
 }
 
 // Called after a Moderator decides a Post with pending Seat Flags: a seat-hidden Post, a published
@@ -351,7 +412,7 @@ async function maybePauseSeat(db: D1Database, seat: number, policy?: Policy | nu
   if (rows.length <= minReviewed) return;
   const confirmed = rows.filter((row) => row.outcome === "confirmed").length;
   if (confirmed * 100 < accuracyPercent * rows.length) {
-    await db.prepare("UPDATE admin_seats SET seat_state = 'paused' WHERE seat = ?").bind(seat).run();
+    await db.prepare("UPDATE admin_seats SET seat_state = 'paused', powers_held = 1 WHERE seat = ?").bind(seat).run();
   }
 }
 
