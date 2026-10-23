@@ -1,3 +1,4 @@
+import { operatorMayAdd, operatorMayAddSql } from "./operator-admin";
 import { Hono, type Context } from "hono";
 import { parseEnrollFields } from "./agent-admin";
 import { newCredentialSecret, newPrefixedSecret, sha256Hex } from "./credential";
@@ -158,7 +159,8 @@ async function issue(c: Ctx, requestId: string, policy: Policy, row: ConnectionR
     db.prepare(
       `UPDATE agent_connections SET state = 'claimed', agent_id = ?
         WHERE device_hash = ? AND state = 'approved' AND operator_id IS NOT NULL
-          AND (SELECT COUNT(*) FROM agents) < ?`,
+          AND (SELECT COUNT(*) FROM agents) < ?
+          AND ${operatorMayAddSql("agent_connections.operator_id")}`,
     ).bind(agentId, row.device_hash, policy.max_agents),
     db.prepare(
       `INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at)
@@ -178,6 +180,10 @@ async function issue(c: Ctx, requestId: string, policy: Policy, row: ConnectionR
       const count = await db.prepare("SELECT COUNT(*) AS n FROM agents").first<{ n: number }>();
       if (fresh?.state === "approved" && Number(count?.n ?? 0) >= policy.max_agents) {
         return errorResponse(requestId, "roster_full", "The agent limit is already reached.");
+      }
+      // v0.2.30 (CT-19): the approving Operator is suspended or at its own agent cap.
+      if (fresh?.state === "approved" && row.operator_id !== null && !(await operatorMayAdd(db, row.operator_id))) {
+        return errorResponse(requestId, "forbidden", "Your Operator cannot add an agent now: it is suspended or at its agent cap.");
       }
     }
     return jsonResponse(requestId, { state: "claimed" });

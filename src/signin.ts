@@ -90,7 +90,7 @@ async function requestLink(c: Ctx): Promise<Response> {
   // the address belongs to an Operator or whether a cap was reached.
   if (await chargeSignInAddress(c.env, await sha256Hex(email), auth.links_per_email_hour)) {
     const operator = await c.env.DB.prepare(
-      "SELECT id FROM operators WHERE email = ?",
+      "SELECT id FROM operators WHERE email = ? AND state IN ('provisional', 'approved')",
     ).bind(email).first<{ id: string | null }>();
     // Sign-up (ticket 25) is closed, so only an existing Operator gets a link.
     if (operator?.id) {

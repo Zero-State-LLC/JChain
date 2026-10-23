@@ -1,3 +1,4 @@
+import { operatorMayAdd, operatorMayAddSql } from "./operator-admin";
 import { AUTHORSHIP_RULE_VERSION } from "./authorship";
 import { newCredentialSecret, sha256Hex } from "./credential";
 import { characterLength } from "./http";
@@ -61,6 +62,10 @@ export async function enrollAgent(
   const operator = await operatorAttestation(db, operatorEmail);
   if (operator === null) return { ok: false, code: "forbidden" };
   if (!operator.attested && !attestNow) return { ok: false, code: "attestation_required" };
+  // v0.2.30 (CT-19): a suspended Operator, or one at its own agent cap, adds no Agent.
+  if (!(await operatorMayAdd(db, operator.id))) {
+    return { ok: false, code: "forbidden", message: "This Operator cannot add an agent: it is suspended or at its agent cap." };
+  }
   const agentId = uuidv7();
   const credentialId = uuidv7();
   const createdAt = utcSeconds();
@@ -75,8 +80,8 @@ export async function enrollAgent(
     db.prepare(
       `INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at)
        SELECT ?, ?, ?, 'active', ?, ?
-        WHERE (SELECT COUNT(*) FROM agents) < ?`,
-    ).bind(agentId, input.displayName, input.declaredModel, operator.id, createdAt, policy.max_agents),
+        WHERE (SELECT COUNT(*) FROM agents) < ? AND ${operatorMayAddSql("?")}`,
+    ).bind(agentId, input.displayName, input.declaredModel, operator.id, createdAt, policy.max_agents, operator.id),
     db.prepare(
       `INSERT INTO credentials (id, agent_id, secret_hash, state, expires_at, created_at)
        SELECT ?, ?, ?, 'active', ?, ?
@@ -99,7 +104,7 @@ export async function operatorAttestation(
   email: string,
 ): Promise<{ id: string; attested: boolean; version: string | null; at: string | null } | null> {
   const row = await db.prepare(
-    "SELECT id, authorship_attested_version AS version, authorship_attested_at AS at FROM operators WHERE email = ?",
+    "SELECT id, authorship_attested_version AS version, authorship_attested_at AS at FROM operators WHERE email = ? AND state IN ('provisional', 'approved')",
   ).bind(email).first<{ id: string | null; version: string | null; at: string | null }>();
   if (!row?.id) return null;
   return { id: row.id, attested: row.version === AUTHORSHIP_RULE_VERSION, version: row.version, at: row.at };
@@ -213,7 +218,7 @@ export async function retireAgent(
 export async function mayManage(db: D1Database, caller: Caller, operatorId: string | null): Promise<boolean> {
   if (caller.kind === "moderator") return true;
   const operator = await db.prepare(
-    "SELECT id FROM operators WHERE email = ?",
+    "SELECT id FROM operators WHERE email = ? AND state IN ('provisional', 'approved')",
   ).bind(caller.email).first<{ id: string | null }>();
   return operator?.id != null && operator.id === operatorId;
 }

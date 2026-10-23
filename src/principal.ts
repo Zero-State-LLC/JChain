@@ -228,7 +228,10 @@ function hasGetIdentity(value: object): value is { getIdentity: () => unknown } 
 }
 
 async function enrollment(env: Env, email: string): Promise<"operator" | "moderator" | "both" | "none"> {
-  const operator = await env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first();
+  // v0.2.30: a suspended or removed Operator is not an Operator for any route.
+  const operator = await env.DB.prepare(
+    "SELECT email FROM operators WHERE email = ? AND state IN ('provisional', 'approved')",
+  ).bind(email).first();
   const moderator = await env.DB.prepare("SELECT email FROM moderators WHERE email = ?").bind(email).first();
   if (operator && moderator) return "both";
   if (operator) return "operator";

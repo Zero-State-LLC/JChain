@@ -555,7 +555,7 @@ async function reportPage(c: PageCtx): Promise<Response> {
   const email = await accessEmail(c.executionCtx, c.req.raw);
   const operator = email === null
     ? null
-    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first<{ email: string }>();
+    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ? AND state IN ('provisional', 'approved')").bind(email).first<{ email: string }>();
   if (!operator) {
     const body = `${links}<h1>Report</h1><p class="lede">Browser reports are for an Operator.</p>`;
     return htmlResponse(requestId, document("Report", body));
