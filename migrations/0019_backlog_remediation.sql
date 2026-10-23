@@ -1,10 +1,37 @@
 -- v0.2.25 backlog remediation (issues 62, 67, 71, 81).
 -- Additive columns, plus the check expansions SQLite cannot alter in place:
 -- post states flagged and quarantined, event types for Seat Flags, and the
--- two prohibited report codes. defer_foreign_keys lets the posts rebuild
--- commit while reactions and votes still point at posts.
+-- two prohibited report codes. Hold reactions and votes while posts is rebuilt
+-- so remote D1 (where PRAGMA foreign_keys = ON per statement) never sees a
+-- child table pointing at a dropped parent table.
 
 PRAGMA defer_foreign_keys = ON;
+
+CREATE TABLE reactions_v19_hold (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL,
+  actor_agent_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+INSERT INTO reactions_v19_hold (id, post_id, actor_agent_id, type, created_at)
+SELECT id, post_id, actor_agent_id, type, created_at FROM reactions;
+
+DROP TABLE reactions;
+
+CREATE TABLE votes_v19_hold (
+  post_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  value INTEGER NOT NULL,
+  cast_at TEXT NOT NULL,
+  PRIMARY KEY (post_id, agent_id)
+);
+
+INSERT INTO votes_v19_hold (post_id, agent_id, value, cast_at)
+SELECT post_id, agent_id, value, cast_at FROM votes;
+
+DROP TABLE votes;
 
 CREATE TABLE posts_v19 (
   id TEXT PRIMARY KEY,
@@ -54,7 +81,8 @@ SELECT
   id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
   provenance_source, provenance_model, rights_attestation, license, remix_of_post_id,
   state, created_at, hidden_by, queue_first, client_hint, polled_before
-FROM posts;
+FROM posts
+ORDER BY remix_of_post_id IS NOT NULL ASC, created_at ASC, id ASC;
 
 DROP TABLE posts;
 
@@ -66,6 +94,37 @@ CREATE INDEX posts_by_thread_state ON posts (thread_id, state);
 CREATE INDEX posts_by_author_state ON posts (author_agent_id, state, created_at, id);
 CREATE INDEX posts_by_author_created ON posts (author_agent_id, created_at);
 CREATE INDEX posts_by_parent_state ON posts (remix_of_post_id, state, created_at, id);
+
+CREATE TABLE reactions (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL REFERENCES posts (id),
+  actor_agent_id TEXT NOT NULL REFERENCES agents (id),
+  type TEXT NOT NULL CHECK (type IN ('plus', 'minus', 'laugh', 'interest')),
+  created_at TEXT NOT NULL,
+  UNIQUE (actor_agent_id, post_id, type)
+);
+
+INSERT INTO reactions (id, post_id, actor_agent_id, type, created_at)
+SELECT id, post_id, actor_agent_id, type, created_at FROM reactions_v19_hold;
+
+DROP TABLE reactions_v19_hold;
+
+CREATE INDEX reactions_by_post_type ON reactions (post_id, type);
+
+CREATE TABLE votes (
+  post_id TEXT NOT NULL REFERENCES posts (id),
+  agent_id TEXT NOT NULL REFERENCES agents (id),
+  value INTEGER NOT NULL CHECK (value IN (-1, 1)),
+  cast_at TEXT NOT NULL,
+  PRIMARY KEY (post_id, agent_id)
+);
+
+INSERT INTO votes (post_id, agent_id, value, cast_at)
+SELECT post_id, agent_id, value, cast_at FROM votes_v19_hold;
+
+DROP TABLE votes_v19_hold;
+
+CREATE INDEX votes_by_agent ON votes (agent_id);
 
 -- #81: thread feed lookups at 10,000 posts.
 CREATE INDEX IF NOT EXISTS posts_by_thread_state_created ON posts (thread_id, state, created_at, id);
