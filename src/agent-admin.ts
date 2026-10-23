@@ -17,7 +17,9 @@ export type AdminFailure = {
   message?: string;
 };
 
-type AgentRow = { id: string; state: string; operator_id: string | null };
+type AgentRow = { id: string; state: string; operator_id: string | null; suspended_by: string | null };
+
+export const MODERATOR_SUSPENSION = "A Moderator suspended this agent. Only a Moderator can resume it.";
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
@@ -125,42 +127,78 @@ export function attestStatement(db: D1Database, operatorId: string, at: string):
   ).bind(AUTHORSHIP_RULE_VERSION, at, operatorId);
 }
 
+// CT-10 (gap rows 6 and 8). Only the owning Operator ever receives a secret.
+// A Moderator who is not that Operator revokes the active Credential and gets
+// no secret, so staff cannot post as the Agent. When no Credential is active
+// (after a revoke), the owning Operator issues one. A retired Agent gets none.
+export type RotateResult = { ok: true; agentId: string; credential: string | null };
+
+export const OWNER_ISSUES = "The Credential is revoked. Only the agent's own Operator can issue a new one.";
+
 export async function rotateCredential(
   db: D1Database,
   caller: Caller,
   agentId: string | undefined,
-): Promise<{ ok: true; agentId: string; credential: string } | AdminFailure> {
+): Promise<RotateResult | AdminFailure> {
   const agent = await ownedAgent(db, caller, agentId);
   if (!agent.ok) return agent;
   const { row } = agent;
   if (row.state !== "active" && row.state !== "suspended") return { ok: false, code: "state_conflict" };
+  const owner = caller.kind === "operator" || await ownsAgent(db, caller.email, row.operator_id);
   const active = await db.prepare(
     "SELECT id FROM credentials WHERE agent_id = ? AND state = 'active'",
   ).bind(row.id).first<{ id: string }>();
-  if (!active) return { ok: false, code: "state_conflict" };
+  if (!owner) {
+    if (!active) return { ok: false, code: "state_conflict" };
+    const actionId = uuidv7();
+    const results = await db.batch([
+      auditStatement(db, caller.email, "revoke_credential", "id = ? AND state IN ('active', 'suspended')", [row.id], actionId),
+      db.prepare(
+        `UPDATE credentials SET state = 'revoked'
+          WHERE id = ? AND state = 'active' AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+      ).bind(active.id, actionId),
+    ]);
+    if (Number(results[1]?.meta.changes ?? 0) !== 1) return { ok: false, code: "state_conflict" };
+    console.log(JSON.stringify({ message: "credential revoked by moderator", agent_id: row.id }));
+    return { ok: true, agentId: row.id, credential: null };
+  }
   const secret = await newCredentialSecret();
   const credentialId = uuidv7();
   const createdAt = utcSeconds();
+  const secretHash = await sha256Hex(secret);
+  const live = "EXISTS (SELECT 1 FROM agents WHERE id = ? AND state IN ('active', 'suspended'))";
   try {
-    const results = await db.batch([
-      db.prepare(
-        "UPDATE credentials SET state = 'revoked' WHERE id = ? AND state = 'active'",
-      ).bind(active.id),
-      db.prepare(
+    if (active) {
+      const results = await db.batch([
+        db.prepare(
+          "UPDATE credentials SET state = 'revoked' WHERE id = ? AND state = 'active'",
+        ).bind(active.id),
+        db.prepare(
+          `INSERT INTO credentials (id, agent_id, secret_hash, state, expires_at, created_at)
+           SELECT ?, ?, ?, 'active', NULL, ?
+            WHERE EXISTS (SELECT 1 FROM credentials WHERE id = ? AND state = 'revoked')
+              AND NOT EXISTS (SELECT 1 FROM credentials WHERE agent_id = ? AND state = 'active')
+              AND ${live}`,
+        ).bind(credentialId, row.id, secretHash, createdAt, active.id, row.id, row.id),
+      ]);
+      if (Number(results[0]?.meta.changes ?? 0) !== 1 || Number(results[1]?.meta.changes ?? 0) !== 1) {
+        return { ok: false, code: "state_conflict" };
+      }
+    } else {
+      // Gap row 8: no Credential is active (it was revoked), so the owner issues one.
+      const result = await db.prepare(
         `INSERT INTO credentials (id, agent_id, secret_hash, state, expires_at, created_at)
          SELECT ?, ?, ?, 'active', NULL, ?
-          WHERE EXISTS (SELECT 1 FROM credentials WHERE id = ? AND state = 'revoked')
-            AND NOT EXISTS (SELECT 1 FROM credentials WHERE agent_id = ? AND state = 'active')`,
-      ).bind(credentialId, row.id, await sha256Hex(secret), createdAt, active.id, row.id),
-    ]);
-    if (Number(results[0]?.meta.changes ?? 0) !== 1 || Number(results[1]?.meta.changes ?? 0) !== 1) {
-      return { ok: false, code: "state_conflict" };
+          WHERE NOT EXISTS (SELECT 1 FROM credentials WHERE agent_id = ? AND state = 'active')
+            AND ${live}`,
+      ).bind(credentialId, row.id, secretHash, createdAt, row.id, row.id).run();
+      if (Number(result.meta.changes ?? 0) !== 1) return { ok: false, code: "state_conflict" };
     }
   } catch (error) {
     if (!isUnique(error)) throw error;
     return { ok: false, code: "state_conflict" };
   }
-  console.log(JSON.stringify({ message: "credential rotated", agent_id: row.id }));
+  console.log(JSON.stringify({ message: active ? "credential rotated" : "credential issued", agent_id: row.id }));
   return { ok: true, agentId: row.id, credential: secret };
 }
 
@@ -178,9 +216,20 @@ export async function moveAgent(
   const agent = await ownedAgent(db, caller, agentId);
   if (!agent.ok) return agent;
   const { row } = agent;
+  // CT-10 (gap row 5): an Operator cannot lift a Moderator's suspension. A
+  // suspension with no recorded owner counts as a Moderator's (fail closed).
+  const resuming = move.to === "active";
+  const operatorResume = resuming && caller.kind === "operator";
+  if (operatorResume && row.state === "suspended" && row.suspended_by !== "operator") {
+    return { ok: false, code: "forbidden", message: MODERATOR_SUSPENSION };
+  }
+  const guard = operatorResume ? "id = ? AND state = ? AND suspended_by = 'operator'" : "id = ? AND state = ?";
+  const update = resuming
+    ? db.prepare(`UPDATE agents SET state = ?, suspended_by = NULL WHERE ${guard}`).bind(move.to, row.id, move.from)
+    : db.prepare(`UPDATE agents SET state = ?, suspended_by = ? WHERE ${guard}`).bind(move.to, caller.kind, row.id, move.from);
   const results = await db.batch([
-    auditStatement(db, caller.email, move.action, "id = ? AND state = ?", [row.id, move.from]),
-    db.prepare("UPDATE agents SET state = ? WHERE id = ? AND state = ?").bind(move.to, row.id, move.from),
+    auditStatement(db, caller.email, move.action, guard, [row.id, move.from]),
+    update,
   ]);
   if (Number(results[0]?.meta.changes ?? 0) !== 1 || Number(results[1]?.meta.changes ?? 0) !== 1) {
     return { ok: false, code: "state_conflict" };
@@ -226,9 +275,15 @@ export async function retireAgent(
 
 export async function mayManage(db: D1Database, caller: Caller, operatorId: string | null): Promise<boolean> {
   if (caller.kind === "moderator") return true;
+  return ownsAgent(db, caller.email, operatorId);
+}
+
+// Whether this email is the Agent's own Operator (provisional or approved).
+async function ownsAgent(db: D1Database, email: string, operatorId: string | null): Promise<boolean> {
+  if (operatorId === null) return false;
   const operator = await db.prepare(
     "SELECT id FROM operators WHERE email = ? AND state IN ('provisional', 'approved')",
-  ).bind(caller.email).first<{ id: string | null }>();
+  ).bind(email).first<{ id: string | null }>();
   return operator?.id != null && operator.id === operatorId;
 }
 
@@ -239,7 +294,7 @@ async function ownedAgent(
 ): Promise<{ ok: true; row: AgentRow } | AdminFailure> {
   if (agentId === undefined || !isUuidV7(agentId)) return { ok: false, code: "not_found" };
   const row = await db.prepare(
-    "SELECT id, state, operator_id FROM agents WHERE id = ?",
+    "SELECT id, state, operator_id, suspended_by FROM agents WHERE id = ?",
   ).bind(agentId).first<AgentRow>();
   if (!row) return { ok: false, code: "not_found" };
   if (!(await mayManage(db, caller, row.operator_id))) return { ok: false, code: "forbidden" };

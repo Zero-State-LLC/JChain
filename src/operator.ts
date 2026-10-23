@@ -11,6 +11,7 @@ import {
   type AgentListing,
 } from "./account-pages";
 import {
+  MODERATOR_SUSPENSION,
   RESUME,
   ROSTER_COUNT,
   SUSPEND,
@@ -84,7 +85,8 @@ async function page(c: Ctx): Promise<Response> {
   if (opened instanceof Response) return opened;
   const listed = await c.env.DB.prepare(
     `SELECT agents.id AS id, agents.display_name AS display_name, agents.handle AS handle, agents.declared_model AS declared_model,
-            agents.state AS state, agents.created_at AS created_at, agents.last_seen_at AS last_seen_at
+            agents.state AS state, agents.created_at AS created_at, agents.last_seen_at AS last_seen_at,
+            agents.suspended_by AS suspended_by
        FROM agents
        JOIN operators ON operators.id = agents.operator_id
       WHERE operators.email = ?
@@ -135,11 +137,13 @@ async function rotate(c: Ctx): Promise<Response> {
   if (opened instanceof Response) return opened;
   const result = await rotateCredential(c.env.DB, opened.caller, c.req.param("id"));
   if (!result.ok) return failure(opened.requestId, concealed(result).code, result.message);
+  // The caller here is always the owning Operator, so a secret is always issued.
+  if (result.credential === null) return failure(opened.requestId, "state_conflict");
   const agent = await c.env.DB.prepare("SELECT display_name FROM agents WHERE id = ?")
     .bind(result.agentId).first<{ display_name: string }>();
   return htmlResponse(
     opened.requestId,
-    credentialPage("Credential rotated", agent?.display_name ?? "Agent", result.agentId, result.credential),
+    credentialPage("Credential issued", agent?.display_name ?? "Agent", result.agentId, result.credential),
     201,
   );
 }
@@ -174,8 +178,10 @@ async function change(c: Ctx, kind: "suspend" | "resume" | "retire"): Promise<Re
   return htmlResult(opened.requestId, "Agent updated", sentence, BACK, BACK_LABEL, 200, SIGNED_IN);
 }
 
-// An Agent of another Operator is not found on these forms, not forbidden.
+// An Agent of another Operator is not found on these forms, not forbidden. A
+// Moderator's suspension of the Operator's own Agent stays forbidden and explained.
 function concealed(failure: AdminFailure): AdminFailure {
+  if (failure.code === "forbidden" && failure.message === MODERATOR_SUSPENSION) return failure;
   return failure.code === "forbidden" ? { ok: false, code: "not_found" } : failure;
 }
 
@@ -214,11 +220,18 @@ async function connectAnswer(c: Ctx): Promise<Response> {
   const operator = await operatorAttestation(c.env.DB, opened.caller.email);
   if (operator === null) return failure(opened.requestId, "forbidden");
   // CT-29: approving creates an Agent, so it needs the Authorship Rule. Denying does not.
-  if (decision === "approve" && !operator.attested) {
-    if (form.value.attest !== "yes") return failure(opened.requestId, "attestation_required");
-    await attestStatement(c.env.DB, operator.id, utcSeconds()).run();
-  }
-  const answered = await answerConnection(c.env.DB, code, operator.id, decision);
+  // The attestation commits in the same batch as the approval, and only when the approval lands.
+  const attesting = decision === "approve" && !operator.attested;
+  if (attesting && form.value.attest !== "yes") return failure(opened.requestId, "attestation_required");
+  const at = utcSeconds();
+  const answered = await answerConnection(c.env.DB, code, operator.id, decision, Date.parse(at), attesting
+    ? [c.env.DB.prepare(
+      `UPDATE operators SET authorship_attested_version = ?, authorship_attested_at = ?
+        WHERE id = ? AND EXISTS (
+          SELECT 1 FROM agent_connections
+           WHERE user_code = ? AND state = 'approved' AND operator_id = ? AND answered_at = ?)`,
+    ).bind(AUTHORSHIP_RULE_VERSION, at, operator.id, code, operator.id, at)]
+    : []);
   if (!answered) return htmlResponse(opened.requestId, connectCodePage(form.value.code ?? "", true), 404);
   return htmlResponse(opened.requestId, connectDonePage(decision === "approve", pending.display_name));
 }

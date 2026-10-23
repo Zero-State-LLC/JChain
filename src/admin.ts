@@ -14,7 +14,7 @@ import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { requireAdminSeat } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
-import { seatAgentOwned, seatStartState } from "./seats";
+import { applySeatAction, isSeatAction } from "./seats";
 import { policySection } from "./policy-page";
 import { operatorsSection, readOperators } from "./operator-admin";
 import { gaugesSection, readAnalytics, readGauges, usageSection } from "./gauges";
@@ -158,43 +158,20 @@ async function seatForm(c: Ctx): Promise<Response> {
   const form = await readForm(c.req.raw);
   if (!form.ok || typeof form.value.action !== "string") return htmlRefuse(opened.requestId, "malformed");
   const action = form.value.action;
+  if (!isSeatAction(action)) return htmlRefuse(opened.requestId, "validation_failed");
   const row = await c.env.DB.prepare(
-    "SELECT seat, email, seat_state, seat_agent_id, seat_trial_count FROM admin_seats WHERE seat = ?",
-  ).bind(seat).first<SeatRow & { email: string | null }>();
+    "SELECT seat, email, seat_state, seat_agent_id, seat_trial_count, powers_held FROM admin_seats WHERE seat = ?",
+  ).bind(seat).first<SeatRow & { email: string | null; powers_held: number }>();
   if (!row) return htmlRefuse(opened.requestId, "not_found");
-  let nextState = row.seat_state;
-  let nextAgent = row.seat_agent_id;
-  let trialCount = row.seat_trial_count;
-  if (action === "bind_seat_agent") {
-    const agentId = form.value.agent_id;
-    if (typeof agentId !== "string" || agentId === "") return htmlRefuse(opened.requestId, "validation_failed");
-    const agent = await c.env.DB.prepare("SELECT id FROM agents WHERE id = ? AND state = 'active'").bind(agentId).first();
-    if (!agent) return htmlRefuse(opened.requestId, "not_found");
-    if (!(await seatAgentOwned(c.env.DB, row.email, agentId))) return htmlRefuse(opened.requestId, "validation_failed");
-    nextAgent = agentId;
-    nextState = seatStartState(opened.policy);
-    trialCount = 0;
-  } else if (action === "pause_seat_agent") {
-    nextState = "paused";
-  } else if (action === "readmit_seat_agent") {
-    nextState = seatStartState(opened.policy);
-    trialCount = 0;
-  } else if (action === "restore_seat_powers") {
-    if (row.email === null || row.email === opened.email) return htmlRefuse(opened.requestId, "forbidden");
-    nextState = "active";
-  } else {
-    return htmlRefuse(opened.requestId, "validation_failed");
+  const agentId = typeof form.value.agent_id === "string" ? form.value.agent_id : undefined;
+  const applied = await applySeatAction(c.env.DB, opened.policy, row, opened.email, action, agentId);
+  if (!applied.ok) {
+    if (applied.code === "state_conflict") {
+      return htmlResult(opened.requestId, "Admin", applied.message ?? "The seat is not in a state that allows this.", "/admin", "Admin", 409);
+    }
+    return htmlRefuse(opened.requestId, applied.code);
   }
-  await c.env.DB.batch([
-    c.env.DB.prepare("UPDATE admin_seats SET seat_agent_id = ?, seat_state = ?, seat_trial_count = ? WHERE seat = ?")
-      .bind(nextAgent, nextState, trialCount, seat),
-    c.env.DB.prepare(
-      `INSERT INTO moderation_actions (
-         id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
-       ) VALUES (?, ?, 'admin_seat', ?, ?, 'rules', NULL, NULL, ?)`,
-    ).bind(uuidv7(), opened.email, String(seat), action, utcSeconds()),
-  ]);
-  return htmlResult(opened.requestId, "Admin", `Seat ${seat} is ${nextState}.`, "/admin", "Admin", 200);
+  return htmlResult(opened.requestId, "Admin", `Seat ${seat} is ${applied.seatState}.`, "/admin", "Admin", 200);
 }
 
 function boardSection(boards: BoardRow[]): string {

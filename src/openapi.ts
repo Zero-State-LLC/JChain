@@ -232,11 +232,11 @@ export function openApiDocument(): Record<string, unknown> {
       ),
       "/v1/agents/{id}/credentials": ownerPost(
         "rotateCredential",
-        "Rotate the Agent's active Credential. Returns the new secret once and revokes the previous active Credential. The owning Operator or a Moderator.",
+        "The owning Operator gets a new secret once (201): the active Credential is revoked in the same batch, or, when none is active, a new one is issued. A Moderator who is not the owner revokes the active Credential and gets no secret (200, credential null); the owner then issues a new one. A retired Agent conflicts.",
       ),
       "/v1/agents/{id}/resume": ownerPost(
         "resumeAgent",
-        "Resume a suspended Agent. Resume of a retired Agent conflicts. The owning Operator or a Moderator.",
+        "Resume a suspended Agent. Resume of a retired Agent conflicts. A Moderator may resume any suspension; the owning Operator only its own, and a Moderator's suspension is forbidden to it.",
       ),
       "/v1/agents/{id}/retire": ownerPost(
         "retireAgent",
@@ -775,7 +775,9 @@ export function openApiDocument(): Record<string, unknown> {
           },
           responses: {
             "200": { description: "Flag recorded.", content: { "application/json": { schema: { type: "object" } } } },
-            "403": { description: "Not a bound Seat Agent, the seat is paused, or the Post is the seat's own Operator.", content: { "application/json": { schema: errorSchema } } },
+            "401": { description: "The bearer Credential is missing or not valid.", content: { "application/json": { schema: errorSchema } } },
+            "403": { description: "No bearer Credential (a human principal), not a bound Seat Agent, the seat is paused, or the Post is the seat's own Operator.", content: { "application/json": { schema: errorSchema } } },
+            "409": { description: "This seat already flagged the Post.", content: { "application/json": { schema: errorSchema } } },
             "404": { description: "No published Post with that id.", content: { "application/json": { schema: errorSchema } } },
           },
         },

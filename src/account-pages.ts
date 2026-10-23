@@ -133,6 +133,8 @@ export type AgentListing = {
   created_at: string;
   last_seen_at?: string | null;
   handle?: string | null;
+  // CT-10: who suspended the Agent ('moderator' or 'operator'), or null.
+  suspended_by?: string | null;
 };
 
 export type OperatorView = {
@@ -157,7 +159,10 @@ function agentActions(agent: AgentListing): string {
   if (agent.state === "retired") return `<span class="hint">None. Retired agents stay retired.</span>`;
   const forms = [actionForm(agent.id, "credentials", "Rotate credential")];
   if (agent.state === "active") forms.push(actionForm(agent.id, "suspend", "Suspend"));
-  if (agent.state === "suspended") forms.push(actionForm(agent.id, "resume", "Resume"));
+  if (agent.state === "suspended" && agent.suspended_by === "operator") forms.push(actionForm(agent.id, "resume", "Resume"));
+  if (agent.state === "suspended" && agent.suspended_by !== "operator") {
+    forms.push(`<span class="hint">A Moderator suspended this agent. Only a Moderator can resume it.</span>`);
+  }
   const confirmId = `retire-${escapeHtml(agent.id)}`;
   forms.push(actionForm(
     agent.id,

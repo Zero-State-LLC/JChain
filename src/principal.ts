@@ -82,11 +82,13 @@ export async function requireAdmin(env: Env, request: Request, ctx: object): Pro
 // Admin surface gate (AT-31, CT-20): an Access email that is bound to an Admin
 // Seat. A Session, Credential, or missing Access identity gets access_required;
 // a non-seat Access email gets forbidden. The seat email is never returned.
+// An Admin is a Moderator, so a seat email that is not an enrolled Moderator is
+// forbidden too (the same check as requireAdmin).
 export async function requireAdminSeat(env: Env, request: Request, ctx: object): Promise<Principal> {
   if (request.headers.get("authorization") !== null) return { ok: false, code: "access_required" };
   const email = await humanEmail(ctx, request);
   if (email === null) return { ok: false, code: "access_required" };
-  if (!(await holdsAdminSeat(env, email))) return { ok: false, code: "forbidden" };
+  if (!(await isAdminEmail(env, email))) return { ok: false, code: "forbidden" };
   return { ok: true, kind: "admin", email };
 }
 
