@@ -113,6 +113,28 @@ describe("AT-44 appeals of automatic hides", () => {
     expect((audit.results ?? []).map((row) => row.action).sort()).toEqual(["restore", "restore_asset"]);
   });
 
+  it("offers the Admin-only image restore on a scan hide before any appeal", async () => {
+    const ada = await enroll("Ada", OPERATOR);
+    const post = await seedHidden(ada.agentId, "scan");
+    await env.DB.prepare("UPDATE posts SET queue_first = 1 WHERE id = ?").bind(post.postId).run();
+    const queue = await (await call("/moderation", { email: STAFF })).text();
+    const first = queue.slice(queue.indexOf('id="queue-first"'), queue.indexOf('id="queue-quarantined-uploads"'));
+    expect(first).toContain(post.postId);
+    expect(first).toContain("scan hide");
+    expect(first).toContain("image quarantined");
+    expect(first).toContain(`name="target_id" value="${String(post.assetId)}"`);
+    const hidden = queue.slice(queue.indexOf('id="queue-hidden"'), queue.indexOf('id="queue-rejected"'));
+    expect(hidden).toContain(post.postId);
+    expect(hidden).toContain('name="action" value="restore_asset"');
+    expect(hidden).toContain("Restore image (Admin)");
+    // Under a legal hold the form is withheld, since restore_asset refuses it.
+    await env.DB.prepare("UPDATE posts SET legal_hold = 1, legal_hold_reason = 'csam' WHERE id = ?").bind(post.postId).run();
+    const held = await (await call("/moderation", { email: STAFF })).text();
+    const heldHidden = held.slice(held.indexOf('id="queue-hidden"'), held.indexOf('id="queue-rejected"'));
+    expect(heldHidden).toContain("quarantined under a legal hold");
+    expect(heldHidden).not.toContain(`name="target_id" value="${String(post.assetId)}"`);
+  });
+
   it("refuses restore_asset under legal hold or after deletion started", async () => {
     const ada = await enroll("Ada", OPERATOR);
     const held = await seedHidden(ada.agentId, "scan");
@@ -127,15 +149,21 @@ describe("AT-44 appeals of automatic hides", () => {
     const ada = await enroll("Ada", OPERATOR);
     const post = await seedHidden(ada.agentId, "seat_agents");
     const review = await expectJson(await call(`/v1/posts/${post.postId}/review`, { bearer: ada.credential, policy: POSTPUBLISH }), 200);
-    expect(review).toMatchObject({ state: "flagged", hidden_by: "seat_agents" });
+    expect(review).toMatchObject({ state: "hidden", review_state: "hidden", hidden_by: "seat_agents" });
     await expectError(await moderate(STAFF, "post", post.postId, "uphold"), 409, "state_conflict");
     await expectJson(await appeal(ada.credential, post.postId, "k", {}), 201);
-    expect(await expectJson(await moderate(STAFF, "post", post.postId, "uphold"), 200)).toMatchObject({ state: "flagged", appeal: "upheld" });
+    expect(await expectJson(await moderate(STAFF, "post", post.postId, "uphold"), 200)).toMatchObject({ state: "hidden", appeal: "upheld" });
     const flags = await env.DB.prepare("SELECT outcome FROM seat_flags WHERE post_id = ?").bind(post.postId).all<{ outcome: string }>();
     expect(flags.results).toEqual([{ outcome: "confirmed" }]);
     const after = await expectJson(await call(`/v1/posts/${post.postId}/review`, { bearer: ada.credential, policy: POSTPUBLISH }), 200);
     expect(after).toMatchObject({ appeal: { state: "decided", outcome: "uphold" } });
     await expectError(await moderate(STAFF, "post", post.postId, "uphold"), 409, "state_conflict");
+
+    // A legacy 'flagged' Post (no path writes one since the C-12b realignment) stays appealable.
+    const legacy = await seedHidden(ada.agentId, "flagged");
+    const legacyReview = await expectJson(await call(`/v1/posts/${legacy.postId}/review`, { bearer: ada.credential, policy: POSTPUBLISH }), 200);
+    expect(legacyReview).toMatchObject({ state: "flagged", review_state: "hidden", hidden_by: "seat_agents" });
+    expect(typeof legacyReview.appealable_until).toBe("string");
   });
 
   it("logs hide_to_decision_ms from the original hide when an appeal is upheld (NFR-10)", async () => {
@@ -212,10 +240,11 @@ async function seedPost(authorId: string, state: string, assetId: string | null 
   return { threadId, postId };
 }
 
-// An automatic hide: the scan hides and quarantines; a Seat Flag moves the Post to flagged.
+// An automatic hide: the scan hides and quarantines; Seat Flags hide with hidden_by seat_agents.
+// "flagged" seeds the legacy pre-realignment Seat Flag state.
 async function seedHidden(
   authorId: string,
-  by: "scan" | "seat_agents",
+  by: "scan" | "seat_agents" | "flagged",
   at = Date.now(),
 ): Promise<{ postId: string; assetId: string | null }> {
   const stamp = utcSeconds(new Date(at));
@@ -231,14 +260,15 @@ async function seedHidden(
         .bind(uuidv7().replaceAll("-", "").padEnd(64, "0").slice(0, 64), assetId, stamp),
     ]);
   }
-  const post = await seedPost(authorId, by === "scan" ? "hidden" : "flagged", assetId);
+  const post = await seedPost(authorId, by === "flagged" ? "flagged" : "hidden", assetId);
   const statements = [
     env.DB.prepare("INSERT INTO events (id, type, resource_id, occurred_at) VALUES (?, ?, ?, ?)")
-      .bind(uuidv7(), by === "scan" ? "post.withdrawn" : "post.flagged", post.postId, stamp),
+      .bind(uuidv7(), by === "flagged" ? "post.flagged" : "post.withdrawn", post.postId, stamp),
   ];
-  if (by === "scan") {
-    statements.push(env.DB.prepare("UPDATE posts SET hidden_by = 'scan' WHERE id = ?").bind(post.postId));
-  } else {
+  if (by !== "flagged") {
+    statements.push(env.DB.prepare("UPDATE posts SET hidden_by = ? WHERE id = ?").bind(by, post.postId));
+  }
+  if (by !== "scan") {
     statements.push(env.DB.prepare(
       "INSERT INTO seat_flags (id, seat, agent_id, post_id, reason, trial, outcome, created_at) VALUES (?, 1, ?, ?, 'off-topic', 0, 'pending', ?)",
     ).bind(uuidv7(), authorId, post.postId, stamp));

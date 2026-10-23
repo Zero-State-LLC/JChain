@@ -161,11 +161,21 @@ async function readSeats(db: D1Database, policy: Policy): Promise<SeatGauge[]> {
   ).all<{ seat: number; seat_state: string; seat_agent_id: string | null }>();
   const out: SeatGauge[] = [];
   for (const seat of seats.results ?? []) {
+    // CT-22: the same flags the pause rule counts, so only decisions by the other Admin Seat.
     const flags = await db.prepare(
       `SELECT SUM(outcome = 'confirmed') AS confirmed, COUNT(*) AS reviewed FROM (
-         SELECT outcome FROM seat_flags
-          WHERE seat = ? AND trial = 0 AND outcome IN ('confirmed', 'overturned')
-          ORDER BY resolved_at DESC, id DESC LIMIT ?)`,
+         SELECT seat_flags.outcome AS outcome FROM seat_flags
+          WHERE seat_flags.seat = ? AND seat_flags.trial = 0 AND seat_flags.outcome IN ('confirmed', 'overturned')
+            AND EXISTS (
+              SELECT 1
+                FROM moderation_actions
+                JOIN admin_seats ON lower(admin_seats.email) = lower(moderation_actions.actor_email)
+               WHERE moderation_actions.target_type = 'post'
+                 AND moderation_actions.target_id = seat_flags.post_id
+                 AND moderation_actions.created_at = seat_flags.resolved_at
+                 AND admin_seats.seat != seat_flags.seat
+            )
+          ORDER BY seat_flags.resolved_at DESC, seat_flags.id DESC LIMIT ?)`,
     ).bind(seat.seat, window).first<{ confirmed: number | null; reviewed: number }>();
     const reviewed = num(flags?.reviewed);
     out.push({

@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { VALID_WEBP } from "./fixtures/bytes";
+import { uuidv7 } from "../src/ids";
 import postpublishFixture from "./fixtures/policy-postpublish.json";
 import { ADMIN, ADMIN2, BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, resetAndSeed } from "./harness";
 
@@ -79,40 +80,54 @@ describe("Ticket 49: Event stream carries hides, flags, quarantines, and restore
     ]);
   });
 
-  it("surfaces post.withdrawn when an active Seat Agent flags a Post, and post.restored when approved or restored", async () => {
+  it("surfaces post.withdrawn when both Seat Agents' off-topic flags hide a Post, and post.restored on restore", async () => {
     const author = await enroll("Ada", OPERATOR);
-    const seatAgent = await enroll("SeatOne", ADMIN2);
+    // Seat 1's Admin needs an Operator row to own its Seat Agent.
+    await env.DB.prepare(
+      "INSERT INTO operators (email, id, authorship_attested_version, authorship_attested_at) VALUES (?, ?, '2026-10-22', '2026-10-22T00:00:00Z')",
+    ).bind(ADMIN, uuidv7()).run();
+    const seatOne = await enroll("SeatOne", ADMIN);
+    const seatTwo = await enroll("SeatTwo", ADMIN2);
+    await expectSuccess(await call("/v1/admin/seats/1", {
+      email: ADMIN2,
+      body: { action: "bind_seat_agent", agent_id: seatOne.agentId },
+      policy: POSTPUBLISH,
+    }));
     await expectSuccess(await call("/v1/admin/seats/2", {
       email: ADMIN,
-      body: { action: "bind_seat_agent", agent_id: seatAgent.agentId },
+      body: { action: "bind_seat_agent", agent_id: seatTwo.agentId },
       policy: POSTPUBLISH,
     }));
 
     const { postId, publishedEventId } = await publishOpeningPost(author.credential);
-
-    // Active Seat Agent flags the Post (trial actions = 0 in POSTPUBLISH fixture above)
-    const flagged = await expectSuccess(await call(`/v1/posts/${postId}/flag`, {
+    const flag = (credential: string) => call(`/v1/posts/${postId}/flag`, {
       method: "PUT",
-      bearer: seatAgent.credential,
+      bearer: credential,
       body: { reason: "off-topic" },
       policy: POSTPUBLISH,
-    }));
-    expect(flagged.state).toBe("flagged");
+    });
 
+    // One active off-topic flag (trial actions = 0 in POSTPUBLISH above) only queues the Post.
+    expect((await expectSuccess(await flag(seatTwo.credential))).state).toBe("published");
+    const afterOne = await pollEvents(author.credential);
+    expect(afterOne.map((e) => e.type)).toEqual(["post.published"]);
+
+    // The other seat agrees: the Post is hidden and post.withdrawn is surfaced.
+    expect((await expectSuccess(await flag(seatOne.credential))).state).toBe("hidden");
     const afterFlag = await pollEvents(author.credential);
     expect(afterFlag).toHaveLength(1);
     expect(afterFlag[0]).toMatchObject({ type: "post.withdrawn", resource_id: postId });
 
-    // Moderator approves the flagged Post -> post.restored
-    const approvedFromFlag = await expectSuccess(await moderate(MODERATOR, "post", postId, "approve"));
-    expect(approvedFromFlag.state).toBe("published");
-    expect(approvedFromFlag.event_id).toMatch(UUID_V7);
-    expect(approvedFromFlag.event_id).not.toBe(publishedEventId);
+    // A Moderator restores the seat-hidden Post -> post.restored
+    const restored = await expectSuccess(await moderate(MODERATOR, "post", postId, "restore"));
+    expect(restored.state).toBe("published");
+    expect(restored.event_id).toMatch(UUID_V7);
+    expect(restored.event_id).not.toBe(publishedEventId);
 
-    const afterApprove = await pollEvents(author.credential);
-    expect(afterApprove.map((e) => ({ event_id: e.event_id, type: e.type }))).toEqual([
+    const afterRestore = await pollEvents(author.credential);
+    expect(afterRestore.map((e) => ({ event_id: e.event_id, type: e.type }))).toEqual([
       { event_id: publishedEventId, type: "post.published" },
-      { event_id: String(approvedFromFlag.event_id), type: "post.restored" },
+      { event_id: String(restored.event_id), type: "post.restored" },
     ]);
   });
 

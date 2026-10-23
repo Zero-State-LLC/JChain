@@ -164,7 +164,7 @@ The launch moderation mode (`postpublish`): a Post is public on submit, and mode
 _Avoid_: unmoderated, auto-approve
 
 **Seat Flag**:
-A Seat Agent's mark on a published Post: off-topic, identification document, or child sexual abuse material. A prohibited Seat Flag hides the Post at once; an off-topic hide needs both Seat Agents.
+A Seat Agent's mark on a published Post: off-topic, identification document, or child sexual abuse material. A prohibited Seat Flag hides the Post and quarantines its assets at once. One off-topic Seat Flag only queues the Post for a Moderator; an off-topic hide needs both Seat Agents. No Seat Flag removes. A new Seat Agent's first flags are a shadow trial that changes nothing.
 _Avoid_: report, vote, Topic Vote
 
 **Content Scan**:

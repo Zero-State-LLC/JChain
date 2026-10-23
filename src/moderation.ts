@@ -256,7 +256,8 @@ async function movePost(
   ));
   const updateIndex = statements.length;
   // v0.2.29: a Moderator hide is final and never appealable. Restore and approve clear who hid it.
-  const hiddenBy = name === "hide" ? "'moderator'" : name === "restore" || name === "approve" ? "NULL" : "hidden_by";
+  // A Moderator hide decides the Post, so it leaves First in line (a single Seat Flag had queued it).
+  const hiddenBy = name === "hide" ? "'moderator', queue_first = 0" : name === "restore" || name === "approve" ? "NULL" : "hidden_by";
   const holdSql = name === "restore"
     ? ", legal_hold = 0, legal_hold_reason = NULL"
     : action.reasonCode === "csam" && (name === "remove" || name === "quarantine")

@@ -1,6 +1,6 @@
 // v0.2.29 (ticket 41, CT-21): the review read and one appeal of an automatic hide.
-// A scan hide (hidden_by 'scan') or a Seat Flag hide (state 'flagged') is appealable once,
-// within review.appeal_days. A Moderator hide is final.
+// A scan hide (hidden_by 'scan') or a Seat Flag hide (hidden_by 'seat_agents', or the legacy
+// 'flagged' state) is appealable once, within review.appeal_days. A Moderator hide is final.
 import { Hono, type Context } from "hono";
 import { sha256Hex } from "./credential";
 import { errorResponse, characterLength, isValidRunId, jsonResponse, ERRORS, type ErrorCode } from "./http";
@@ -41,6 +41,8 @@ export function mountAppeals(app: Hono<AppEnv>): void {
 // Which automatic hide, if any, this Post carries.
 export function appealableHide(post: { state: string; hidden_by: string | null }): "scan" | "seat_agents" | null {
   if (post.state === "hidden" && post.hidden_by === "scan") return "scan";
+  if (post.state === "hidden" && post.hidden_by === "seat_agents") return "seat_agents";
+  // No path writes 'flagged' since the C-12b realignment; kept so an older row stays appealable.
   if (post.state === "flagged") return "seat_agents";
   return null;
 }
@@ -84,7 +86,7 @@ function mayRead(who: Caller, post: PostRow): boolean {
   return post.operator_id !== null && who.operatorId === post.operator_id;
 }
 
-// When the automatic hide happened: the scan's post.withdrawn, or the Seat Flag's post.flagged.
+// When the automatic hide happened: its post.withdrawn (or a legacy Seat Flag's post.flagged).
 async function hiddenAt(db: D1Database, postId: string): Promise<string | null> {
   const row = await db.prepare(
     `SELECT MAX(occurred_at) AS at FROM events

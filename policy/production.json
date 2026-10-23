@@ -52,10 +52,10 @@
   "turnstile_site_key": "0x4AAAAAAFfupvyBiVdT993c",
   "review": {
     "hold_first_posts": 0,
-    "seat_trial_actions": 50,
+    "seat_trial_actions": 10,
     "seat_accuracy_percent": 70,
     "seat_accuracy_window": 100,
-    "seat_accuracy_min_reviewed": 20,
+    "seat_accuracy_min_reviewed": 5,
     "appeal_days": 7,
     "appeals_per_day": 3
   },
