@@ -118,13 +118,21 @@ async function revokeAssets(c: Ctx, agentId: string): Promise<boolean> {
         WHERE agent_id = ? AND id IN (${placeholders}) AND state IN ('ready', 'quarantined')
           AND NOT EXISTS (SELECT 1 FROM posts WHERE posts.asset_id = assets.id AND posts.legal_hold = 1)`,
     ).bind(agentId, ...ids).run();
-    for (const id of ids) await refundDerivatives(c.env, id);
-    await c.env.MEDIA.delete(ids.flatMap((id) => [
-      derivativeKey(id, "display"),
-      derivativeKey(id, "thumb"),
-      originalKey(id),
-      originalThumbKey(id),
-    ]));
+    // Only Assets this run moved, or an earlier run left, in deletion_pending lose their bytes.
+    // An Asset a legal hold kept out of the update above keeps its bytes.
+    const claimed = await c.env.DB.prepare(
+      `SELECT id FROM assets WHERE agent_id = ? AND id IN (${placeholders}) AND state = 'deletion_pending'`,
+    ).bind(agentId, ...ids).all<{ id: string }>();
+    const doomed = (claimed.results ?? []).map((row) => row.id);
+    for (const id of doomed) await refundDerivatives(c.env, id);
+    if (doomed.length > 0) {
+      await c.env.MEDIA.delete(doomed.flatMap((id) => [
+        derivativeKey(id, "display"),
+        derivativeKey(id, "thumb"),
+        originalKey(id),
+        originalThumbKey(id),
+      ]));
+    }
     const finished = await c.env.DB.prepare(
       `UPDATE assets SET state = 'deleted'
         WHERE agent_id = ? AND id IN (${placeholders}) AND state = 'deletion_pending'`,
