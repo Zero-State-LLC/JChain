@@ -526,6 +526,7 @@ async function queuePage(c: PageCtx): Promise<Response> {
     stopSection(engaged),
     metricsSection(await readMetrics(c.env.DB)),
     authorshipSection(await readAuthorshipSignals(c.env.DB)),
+    handlesSection(await recentHandles(c.env.DB)),
     firstSection(first),
     reportSection(reports.kept),
     nextLink("/moderation", opened.limit, kept, "reports_cursor", reports.next, "Reports", "Next reports"),
@@ -554,7 +555,7 @@ async function reportPage(c: PageCtx): Promise<Response> {
   const email = await accessEmail(c.executionCtx, c.req.raw);
   const operator = email === null
     ? null
-    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first<{ email: string }>();
+    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ? AND state IN ('provisional', 'approved')").bind(email).first<{ email: string }>();
   if (!operator) {
     const body = `${links}<h1>Report</h1><p class="lede">Browser reports are for an Operator.</p>`;
     return htmlResponse(requestId, document("Report", body));
@@ -714,6 +715,40 @@ function reportSection(items: ReportRow[]): string {
       ].join("");
     }).join("");
   return `<section class="queue" aria-labelledby="reports"><h2 id="reports">Reports</h2>${body}</section>`;
+}
+
+// v0.2.28 H3 (ticket 43): newest current handles, each with a Revoke form for Moderators.
+type HandleRow = { handle: string; agent_id: string; claimed_at: string; display_name: string };
+
+async function recentHandles(db: D1Database): Promise<HandleRow[]> {
+  const listed = await db.prepare(
+    `SELECT agent_handles.handle AS handle, agent_handles.agent_id AS agent_id,
+            agent_handles.claimed_at AS claimed_at, agents.display_name AS display_name
+       FROM agent_handles JOIN agents ON agents.id = agent_handles.agent_id
+      WHERE agent_handles.state = 'current'
+      ORDER BY agent_handles.claimed_at DESC, agent_handles.handle ASC
+      LIMIT 50`,
+  ).all<HandleRow>();
+  return listed.results ?? [];
+}
+
+function handlesSection(rows: HandleRow[]): string {
+  const reasons = ACTION_REASONS.map((reason) => `<option value="${reason}"${reason === "harassment" ? " selected" : ""}>${reason}</option>`).join("");
+  const body = rows.length === 0
+    ? `<p class="empty">No agent has claimed a handle yet.</p>`
+    : `<ul>${rows.map((row) => [
+      "<li>",
+      `<a href="/agents/${escapeHtml(row.agent_id)}">${escapeHtml(row.display_name)}</a> <span class="handle">@${escapeHtml(row.handle)}</span> `,
+      `<time datetime="${escapeHtml(row.claimed_at)}">${escapeHtml(row.claimed_at)}</time> `,
+      `<form class="danger" method="post" action="/moderation/actions">`,
+      `<input type="hidden" name="target_type" value="agent">`,
+      `<input type="hidden" name="target_id" value="${escapeHtml(row.agent_id)}">`,
+      `<input type="hidden" name="action" value="revoke_handle">`,
+      `<label><span class="visually-hidden">Reason to revoke @${escapeHtml(row.handle)}</span><select name="reason_code">${reasons}</select></label>`,
+      `<button type="submit">Revoke handle</button>`,
+      "</form></li>",
+    ].join("")).join("")}</ul>`;
+  return `<section aria-labelledby="queue-handles"><h2 id="queue-handles">Handles</h2><p class="hint">The newest handles. Revoking one retires every handle that agent held, and none can be claimed again.</p>${body}</section>`;
 }
 
 type AppealQueueRow = QueueRow & { appealed_at: string; detail: string | null; hidden_by: string | null; asset_state: string | null };

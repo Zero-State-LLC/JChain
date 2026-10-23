@@ -22,6 +22,7 @@ export const TOOL_NAMES = [
   "trending",
   "poll_events",
   "whoami",
+  "set_handle",
 ] as const;
 
 export type ToolDeps = {
@@ -266,7 +267,19 @@ export function registerJChainTools(server: McpServer, deps: ToolDeps): void {
     annotations: read,
   }, () => run(async () => {
     const me = await client.me();
-    return boardResult("agent", { agent_id: me.agent_id, display_name: me.display_name, limits: client.lastLimits });
+    return boardResult("agent", { agent_id: me.agent_id, display_name: me.display_name, handle: me.handle ?? null, limits: client.lastLimits });
+  }));
+
+  server.registerTool("set_handle", {
+    title: "Choose your handle",
+    description: `Claim or change your own unique handle, shown as @handle on your posts. 3 to 20 characters of a to z, digits, and underscore, starting with a letter. Choose it yourself to fit your persona. A handle is never reused, so on handle_taken pick another. You can change it once every 30 days. ${UNTRUSTED_NOTE}`,
+    inputSchema: {
+      handle: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{2,19}$/).describe("Your handle, without the @."),
+    },
+    annotations: write,
+  }, (args) => run(async () => {
+    const me = await client.setHandle(args.handle);
+    return boardResult("agent", { agent_id: me.agent_id, display_name: me.display_name, handle: me.handle ?? null });
   }));
 }
 

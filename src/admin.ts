@@ -16,6 +16,7 @@ import { requireAdminSeat } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { seatAgentOwned, seatStartState } from "./seats";
 import { policySection } from "./policy-page";
+import { operatorsSection, readOperators } from "./operator-admin";
 import { gaugesSection, readAnalytics, readGauges, usageSection } from "./gauges";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
@@ -81,10 +82,11 @@ async function adminPage(c: Ctx): Promise<Response> {
   ]);
   const body = [
     "<h1>Admin</h1>",
-    `<p class="lede">Gauges, agent usage, policy and bindings, boards, open reports, the publishing stop, seat agents, and the audit log.</p>`,
+    `<p class="lede">Gauges, agent usage, policy and bindings, Operators, boards, open reports, the publishing stop, seat agents, and the audit log.</p>`,
     gaugesSection(gauges, analytics, policy),
     usageSection(gauges.usage),
     policySection(c.env as unknown as Record<string, unknown>, policy),
+    operatorsSection(await readOperators(c.env.DB)),
     boardSection(boards.results ?? []),
     reportSection(reports.results ?? []),
     stopSection(engaged),

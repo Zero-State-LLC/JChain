@@ -8,6 +8,7 @@ import { parsePolicy, type Policy } from "./policy";
 import { isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { settleSeatFlags } from "./seats";
+import { applyOperatorAction, isOperatorAction, parseOperatorExtras } from "./operator-admin";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -68,6 +69,27 @@ async function moderate(c: Ctx, format: Format): Promise<Response> {
   if (!parsed.ok) return moderationError(requestId, format, "malformed");
   const action = parseAction(parsed.value);
   if (!action.ok) return moderationError(requestId, format, action.code);
+  if (action.targetType === "operator" && isOperatorAction(action.action)) {
+    // v0.2.30 (ticket 44, CT-20): Operator pairs are Admin only.
+    if (!(await isAdminEmail(c.env, principal.email))) return moderationError(requestId, format, "forbidden");
+    if (action.action === "remove_operator" && format === "html" && parsed.value.confirm !== "yes") {
+      return moderationError(requestId, format, "validation_failed");
+    }
+    const extras = parseOperatorExtras(action.action, parsed.value);
+    if (!extras.ok) return moderationError(requestId, format, extras.code);
+    const result = await applyOperatorAction(c.env.DB, principal.email, {
+      action: action.action,
+      operatorId: action.targetId,
+      ...(extras.value === undefined ? {} : { value: extras.value }),
+      ...(extras.email === undefined ? {} : { email: extras.email }),
+    }, action.reasonCode, action.privateNote);
+    if (!result.ok) {
+      if (format === "json") return errorResponse(requestId, result.code, result.message);
+      return htmlResult(requestId, "Admin", result.message ?? "The action could not be applied.", "/admin", "Admin", result.code === "not_found" ? 404 : result.code === "forbidden" ? 403 : result.code === "validation_failed" ? 422 : 409);
+    }
+    if (format === "json") return jsonResponse(requestId, result.body);
+    return htmlResult(requestId, "Admin", result.sentence, "/admin", "Admin", 200);
+  }
   if (action.targetType === "post" && action.action === "uphold") {
     return upholdAppeal(c, requestId, principal.email, action, format);
   }
@@ -646,7 +668,9 @@ function parseAction(
   body: Record<string, unknown>,
 ): { ok: true } & ActionInput | { ok: false; code: "malformed" | "validation_failed" } {
   const allowed = new Set(["target_type", "target_id", "action", "reason_code", "private_note"]);
-  if (!Object.keys(body).every((key) => allowed.has(key))) return { ok: false, code: "malformed" };
+  // v0.2.30: Operator pairs carry a value, an email, or a confirmation.
+  const operatorKeys = body.target_type === "operator" ? ["value", "email", "confirm"] : [];
+  if (!Object.keys(body).every((key) => allowed.has(key) || operatorKeys.includes(key))) return { ok: false, code: "malformed" };
   if (!["target_type", "target_id", "action", "reason_code"].every((key) => Object.hasOwn(body, key))) {
     return { ok: false, code: "malformed" };
   }

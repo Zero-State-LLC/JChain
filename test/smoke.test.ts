@@ -24,7 +24,7 @@ describe("smoke check", () => {
     const result = await runSmoke("https://jchain.example.test/", local);
     expect(result.lines.filter((line) => line.startsWith("FAIL "))).toEqual([]);
     expect(result.ok).toBe(true);
-    expect(result.lines.some((line) => line.startsWith("ok version ") && line.includes("spec=0.2.29"))).toBe(true);
+    expect(result.lines.some((line) => line.startsWith("ok version ") && line.includes("spec=0.2.30"))).toBe(true);
   });
 
   it("fails when /version spec is not SPEC_VERSION", async () => {

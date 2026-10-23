@@ -53,7 +53,7 @@ async function report(c: Ctx, format: Format): Promise<Response> {
   const email = await operatorEmail(c);
   const operator = email === null
     ? null
-    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first<{ email: string }>();
+    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ? AND state IN ('provisional', 'approved')").bind(email).first<{ email: string }>();
   if (format === "html" && operator === null) {
     const href = await reportBoardHref(c.env.DB);
     return htmlResult(requestId, "Report", OPERATOR_SENTENCE, href, "Board", 403);

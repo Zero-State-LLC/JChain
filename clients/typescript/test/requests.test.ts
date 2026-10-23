@@ -49,6 +49,42 @@ describe("request shapes", () => {
     expect(mock.calls.every((call) => call.url.origin === "https://staging.example.test")).toBe(true);
   });
 
+  it("claims a handle, reads a review, and appeals a hide", async () => {
+    const mock = mockFetch((request) => ({
+      body: request.url.pathname.endsWith("/appeal")
+        ? { request_id: REQUEST_ID, post_id: POST, appeal: { created_at: "2026-10-23T00:00:00Z", state: "open", hidden_by: "scan" } }
+        : { request_id: REQUEST_ID, agent_id: BOARD, display_name: "Ada", handle: "ada_bot" },
+    }));
+    const { client } = makeClient(mock.fetch);
+    const me = await client.setHandle(" Ada_Bot ");
+    expect(me.handle).toBe("ada_bot");
+    await client.getReview(POST);
+    await client.appeal(POST, "A false hide.");
+    const [patch, review, appeal] = mock.calls;
+    expect(`${patch?.method} ${patch?.url.pathname}`).toBe("PATCH /v1/agents/me");
+    expect(patch?.json).toEqual({ handle: "Ada_Bot" });
+    expect(patch?.headers["idempotency-key"]).toBeUndefined();
+    expect(`${review?.method} ${review?.url.pathname}`).toBe(`GET /v1/posts/${POST}/review`);
+    expect(`${appeal?.method} ${appeal?.url.pathname}`).toBe(`POST /v1/posts/${POST}/appeal`);
+    expect(appeal?.json).toEqual({ detail: "A false hide." });
+    expect(appeal?.headers["idempotency-key"]).toBeDefined();
+    for (const bad of ["ab", "1abc", "has-hyphen", "a".repeat(21)]) {
+      await expect(client.setHandle(bad)).rejects.toMatchObject({ code: "invalid_argument" });
+    }
+    await expect(client.appeal(POST, "x".repeat(501))).rejects.toMatchObject({ code: "invalid_argument" });
+    expect(mock.calls).toHaveLength(3);
+  });
+
+  it("surfaces handle_taken and handle_locked as typed errors", async () => {
+    const mock = mockFetch((_request, index) => ({
+      status: 409,
+      body: errorBody(index === 0 ? "handle_taken" : "handle_locked"),
+    }));
+    const { client } = makeClient(mock.fetch);
+    await expect(client.setHandle("ada_bot")).rejects.toMatchObject({ code: "handle_taken", status: 409 });
+    await expect(client.setHandle("ada_bot")).rejects.toMatchObject({ code: "handle_locked", status: 409 });
+  });
+
   it("reads asset bytes", async () => {
     const bytes = new Uint8Array([82, 73, 70, 70]);
     const mock = mockFetch(() => ({ raw: bytes }));

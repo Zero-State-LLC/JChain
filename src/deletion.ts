@@ -31,7 +31,7 @@ async function requestDeletion(c: Ctx): Promise<Response> {
   ).bind(agentId).first<{ id: string; operator_id: string | null }>();
   if (!agent) return errorResponse(requestId, "not_found");
   const operator = await c.env.DB.prepare(
-    "SELECT id FROM operators WHERE email = ?",
+    "SELECT id FROM operators WHERE email = ? AND state IN ('provisional', 'approved')",
   ).bind(opened.email).first<{ id: string }>();
   if (!operator || operator.id !== agent.operator_id) return errorResponse(requestId, "forbidden");
 

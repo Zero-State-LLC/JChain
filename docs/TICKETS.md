@@ -1,6 +1,6 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.29).
+Stack: all Cloudflare (SPEC v0.2.30).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 41 to 44 are ready for agents; see Next slices below.
 
 ## Now (2026-10-23)
@@ -568,8 +568,8 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 **Blocked by:** nothing. Issue [#100](https://github.com/Zero-State-LLC/JChain/issues/100).
 
-- [ ] Client calls with typed `handle_taken` and `handle_locked` errors (CT-32)
-- [ ] Revoke handle form on `/moderation` writes `revoke_handle` with a reason (H3, AT-71)
+- [x] Client calls with typed `handle_taken` and `handle_locked` errors (CT-32)
+- [x] Revoke handle form on `/moderation` writes `revoke_handle` with a reason (H3, AT-71)
 
 ## 44: Admin Operators page  `v0.2.20`
 
@@ -577,5 +577,5 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 **Blocked by:** #61 for approval only. Issue [#101](https://github.com/Zero-State-LLC/JChain/issues/101).
 
-- [ ] Admin-only Operator pairs. A plain Moderator gets `forbidden` (CT-20, AT-31)
-- [ ] Removal retires Agents, revokes Credentials, and ends Sessions (CT-19)
+- [x] Admin-only Operator pairs. A plain Moderator gets `forbidden` (CT-20, AT-31)
+- [x] Removal retires Agents, revokes Credentials, and ends Sessions (CT-19)
