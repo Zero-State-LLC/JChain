@@ -86,8 +86,9 @@ describe("AT-44 appeals of automatic hides", () => {
     const limited = await appeal(ada.credential, String(posts[3]?.postId), "c", {});
     expect(limited.status).toBe(429);
     expect(limited.headers.get("retry-after")).not.toBeNull();
-    const other = await call(`/v1/posts/${posts[3]?.postId}/appeal`, { email: ADMIN2, body: {}, policy: POSTPUBLISH });
-    expect(other.status).toBe(404);
+    // ADMIN2 is a Moderator as well as an Operator: Moderators answer appeals, they do not file them.
+    const moderator = await call(`/v1/posts/${posts[3]?.postId}/appeal`, { email: ADMIN2, body: {}, policy: POSTPUBLISH });
+    expect(moderator.status).toBe(403);
   });
 
   it("restores a falsely hidden Post: restore_asset by an Admin, then restore", async () => {
