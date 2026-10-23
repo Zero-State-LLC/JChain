@@ -119,9 +119,17 @@ async function report(c: Ctx, format: Format): Promise<Response> {
       ).bind(uuidv7(), actor, body.targetId, body.reasonCode, createdAt),
       c.env.DB.prepare(
         `UPDATE posts
-            SET state = 'quarantined', legal_hold = 1, legal_hold_reason = ?
+            SET state = 'quarantined',
+                legal_hold = CASE WHEN ? = 'csam' THEN 1 ELSE 0 END,
+                legal_hold_reason = CASE WHEN ? = 'csam' THEN 'csam' ELSE NULL END
           WHERE id = ? AND state NOT IN ('removed', 'removal_pending')`,
-      ).bind(body.reasonCode, body.targetId),
+      ).bind(body.reasonCode, body.reasonCode, body.targetId),
+      c.env.DB.prepare(
+        `UPDATE assets
+            SET state = 'quarantined'
+          WHERE id = (SELECT asset_id FROM posts WHERE id = ? AND state NOT IN ('removed', 'removal_pending'))
+            AND state = 'ready'`,
+      ).bind(body.targetId),
     );
   }
   await c.env.DB.batch(statements);

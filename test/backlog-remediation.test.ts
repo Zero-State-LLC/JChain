@@ -149,7 +149,15 @@ describe("prohibited reports and legal hold (AT-35, AT-38)", () => {
       const post = await env.DB.prepare(
         "SELECT state, legal_hold, legal_hold_reason FROM posts WHERE id = ?",
       ).bind(seeded.postId).first<{ state: string; legal_hold: number; legal_hold_reason: string }>();
-      expect(post).toEqual({ state: "quarantined", legal_hold: 1, legal_hold_reason: reason });
+      expect(post).toEqual({
+        state: "quarantined",
+        legal_hold: reason === "csam" ? 1 : 0,
+        legal_hold_reason: reason === "csam" ? "csam" : null,
+      });
+      const asset = await env.DB.prepare(
+        "SELECT state FROM assets WHERE id = (SELECT asset_id FROM posts WHERE id = ?)",
+      ).bind(seeded.postId).first<{ state: string }>();
+      expect(asset?.state).toBe("quarantined");
       const event = await env.DB.prepare(
         "SELECT type FROM events WHERE resource_id = ? AND type = 'post.withdrawn'",
       ).bind(seeded.postId).first<{ type: string }>();
@@ -159,6 +167,46 @@ describe("prohibited reports and legal hold (AT-35, AT-38)", () => {
       ).bind(seeded.postId).first<{ action: string; reason_code: string }>();
       expect(action).toEqual({ action: "quarantine", reason_code: reason });
     }
+  });
+
+
+  it("lets a Moderator remove or restore an id-document quarantine and requires an Admin Seat for a csam legal hold", async () => {
+    const author = await enroll("Bea", ADMIN2);
+    const idDoc = await seedPost(author.agentId);
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      body: { target_type: "post", target_id: idDoc.postId, reason_code: "id-document" },
+    }), 201);
+    const removedIdDoc = await expectJson(await call("/v1/moderation/actions", {
+      email: STAFF,
+      body: { target_type: "post", target_id: idDoc.postId, action: "remove", reason_code: "id-document" },
+    }), 200);
+    expect(removedIdDoc.state).toBe("removal_pending");
+
+    const csam = await seedPost(author.agentId);
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      body: { target_type: "post", target_id: csam.postId, reason_code: "csam" },
+    }), 201);
+    await expectError(await call("/v1/moderation/actions", {
+      email: STAFF,
+      body: { target_type: "post", target_id: csam.postId, action: "restore", reason_code: "rules" },
+    }), 403, "forbidden");
+    const assetRow = await env.DB.prepare("SELECT asset_id FROM posts WHERE id = ?").bind(csam.postId).first<{ asset_id: string }>();
+    await env.DB.prepare("UPDATE posts SET legal_hold = 0, legal_hold_reason = NULL WHERE id = ?").bind(csam.postId).run();
+    await expectJson(await call("/v1/moderation/actions", {
+      email: ADMIN,
+      body: { target_type: "asset", target_id: assetRow?.asset_id, action: "restore_asset", reason_code: "rules" },
+    }), 200);
+    await env.DB.prepare("UPDATE posts SET legal_hold = 1, legal_hold_reason = 'csam' WHERE id = ?").bind(csam.postId).run();
+    const restored = await expectJson(await call("/v1/moderation/actions", {
+      email: ADMIN,
+      body: { target_type: "post", target_id: csam.postId, action: "restore", reason_code: "rules" },
+    }), 200);
+    expect(restored.state).toBe("published");
+    const cleared = await env.DB.prepare("SELECT state, legal_hold, legal_hold_reason FROM posts WHERE id = ?")
+      .bind(csam.postId).first<{ state: string; legal_hold: number; legal_hold_reason: string | null }>();
+    expect(cleared).toEqual({ state: "published", legal_hold: 0, legal_hold_reason: null });
   });
 
   it("leaves an anonymous prohibited report open for triage", async () => {
@@ -447,16 +495,20 @@ async function seedPost(
   authorId: string,
   state = "published",
   stamp = utcSeconds(),
-): Promise<{ threadId: string; postId: string }> {
+): Promise<{ threadId: string; postId: string; assetId: string }> {
   const threadId = uuidv7();
   const postId = uuidv7();
+  const assetId = await seedAsset(authorId, "ready", stamp);
   await env.DB.batch([
     env.DB.prepare("INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)").bind(threadId, BOARD_ID, stamp),
     env.DB.prepare(
-      "INSERT INTO posts (id, thread_id, author_agent_id, title, caption, state, created_at) VALUES (?, ?, ?, 'Title', 'caption', ?, ?)",
-    ).bind(postId, threadId, authorId, state, stamp),
+      `INSERT INTO posts (
+         id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
+         provenance_source, rights_attestation, license, state, created_at
+       ) VALUES (?, ?, ?, ?, 'Title', 'caption', 'alt', 'human', 'mine', 'cc0', ?, ?)`,
+    ).bind(postId, threadId, authorId, assetId, state, stamp),
   ]);
-  return { threadId, postId };
+  return { threadId, postId, assetId };
 }
 
 async function seedAsset(agentId: string, state: string, createdAt: string): Promise<string> {
@@ -465,7 +517,7 @@ async function seedAsset(agentId: string, state: string, createdAt: string): Pro
     `INSERT INTO assets (
        id, agent_id, state, content_type, byte_size, sha256, original_stored, created_at, expires_at
      ) VALUES (?, ?, ?, 'image/webp', 4, ?, 0, ?, ?)`,
-  ).bind(id, agentId, state, SHA, createdAt, createdAt).run();
+  ).bind(id, agentId, state, id.replaceAll("-", "").padEnd(64, "b"), createdAt, createdAt).run();
   return id;
 }
 
