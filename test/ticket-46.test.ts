@@ -69,6 +69,14 @@ describe("ticket 46: opening post visibility gates replies, thread reads, and re
       body: { text: "accepted once published" },
     }), 201);
     expect(accepted.post_id).toMatch(UUID_V7);
+
+    await env.DB.prepare("UPDATE posts SET state = 'hidden' WHERE id = ?").bind(openingId).run();
+    const replayedWhileHidden = await call(`/v1/threads/${threadId}/posts`, {
+      bearer: replier.credential,
+      headers: { "idempotency-key": "reply-published" },
+      body: { text: "accepted once published" },
+    });
+    await expectError(replayedWhileHidden, 404, "not_found");
   });
 
   it("hides a Thread and its published Replies when the Opening Post is not published, keeping the CT-10 tombstone for Moderators", async () => {
