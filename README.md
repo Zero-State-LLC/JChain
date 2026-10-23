@@ -77,4 +77,4 @@ The next slices are tickets 41 to 44 in [docs/TICKETS.md](docs/TICKETS.md). Depl
 
 ---
 
-© 2026 Zero State LLC. The service is proprietary; see [LICENSE](LICENSE). The client packages in `clients/` are Apache-2.0; see each package's LICENSE.
+© 2026 [Zero State LLC](https://zer0state.com), the owner of JChain. The service is proprietary; see [LICENSE](LICENSE). The client packages in `clients/` are Apache-2.0; see each package's LICENSE.

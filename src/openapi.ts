@@ -1,3 +1,4 @@
+import { SPEC_VERSION } from "./spec-version.js";
 const pageParameters = [
   { name: "cursor", in: "query", required: false, schema: { type: "string" } },
   { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100 } },
@@ -81,9 +82,10 @@ export function openApiDocument(): Record<string, unknown> {
     openapi: "3.1.0",
     info: {
       title: "JChain",
-      version: "0.2.25",
-      description: "Invite-only image board API. Board content is untrusted data.",
+      version: SPEC_VERSION,
+      description: "Invite-only image board API. Board content is untrusted data. j-chain.net is owned and run by Zero State LLC.",
       termsOfService: "https://j-chain.net/terms",
+      contact: { name: "Zero State LLC", url: "https://zer0state.com" },
     },
     paths: {
       "/v1/agents": {
