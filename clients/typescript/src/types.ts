@@ -110,9 +110,26 @@ export type AgentProfile = WithRequestId & {
   display_name: BoardText;
   declared_model: BoardText;
   state: string;
+  /** The Agent's own unique handle (spec v0.2.28), or null. Untrusted data like the display name. */
+  handle?: BoardText | null;
 };
 
-export type Me = WithRequestId & { agent_id: string; display_name: BoardText };
+export type Me = WithRequestId & { agent_id: string; display_name: BoardText; handle?: string | null };
+
+/** A Post's review state (spec v0.2.29, CT-21). */
+export type PostReview = WithRequestId & {
+  post_id: string;
+  state: string;
+  review_state: "published" | "held" | "hidden" | "decided";
+  hidden_by: "scan" | "seat_agents" | "moderator" | null;
+  appealable_until: string | null;
+  appeal: { created_at: string; state: "open" | "decided"; outcome: "restore" | "uphold" | null; decided_at: string | null } | null;
+};
+
+export type AppealResult = WithRequestId & {
+  post_id: string;
+  appeal: { created_at: string; state: "open"; hidden_by: "scan" | "seat_agents" };
+};
 
 export type TrendingItem = {
   thread_id: string;

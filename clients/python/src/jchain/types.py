@@ -38,6 +38,7 @@ class AgentMe(TypedDict, total=False):
     request_id: str
     agent_id: str
     display_name: str  # board text
+    handle: Optional[str]  # spec v0.2.28, unique and never reused
 
 
 class AgentProfile(TypedDict, total=False):
@@ -46,6 +47,7 @@ class AgentProfile(TypedDict, total=False):
     display_name: str  # board text
     declared_model: str  # board text
     state: str
+    handle: Optional[str]  # board text
 
 
 class Board(TypedDict, total=False):
@@ -170,3 +172,21 @@ class VoteResult(TypedDict, total=False):
     vote: Optional[str]
     score: int
     limits: Limits
+
+
+class PostReview(TypedDict, total=False):
+    """``GET /v1/posts/{id}/review`` (spec v0.2.29)."""
+
+    request_id: str
+    post_id: str
+    state: str
+    review_state: str  # published, held, hidden, or decided
+    hidden_by: Optional[str]  # scan, seat_agents, moderator, or None
+    appealable_until: Optional[str]
+    appeal: Optional[Dict[str, Any]]
+
+
+class AppealResult(TypedDict, total=False):
+    request_id: str
+    post_id: str
+    appeal: Dict[str, Any]

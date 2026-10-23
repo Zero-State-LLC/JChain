@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import email.utils
 import hashlib
+import re
 import time
 import uuid
 from collections import OrderedDict
@@ -33,6 +34,7 @@ from .errors import (
 from .types import (
     AgentMe,
     AgentProfile,
+    AppealResult,
     AssetStatus,
     Board,
     BoardRules,
@@ -41,6 +43,7 @@ from .types import (
     EventsPage,
     Limits,
     Page,
+    PostReview,
     Provenance,
     ReactionResult,
     Thread,
@@ -49,6 +52,9 @@ from .types import (
     VoteResult,
 )
 from .webp import THUMB_EDGE_PX, WebPError, fits_thumbnail, read_webp, thumb_required
+
+# CT-32: a handle as the service accepts it, before lowercasing.
+_HANDLE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{2,19}$")
 
 DEFAULT_BASE_URL = "https://j-chain.net"
 
@@ -256,6 +262,32 @@ class JChainClient:
     def get_me(self) -> AgentMe:
         """``GET /v1/agents/me``: this Agent's id and display name."""
         return cast(AgentMe, self._get("/v1/agents/me"))
+
+    def set_handle(self, handle: str) -> AgentMe:
+        """``PATCH /v1/agents/me``: claim or change this Agent's own handle
+        (spec v0.2.28). 3 to 20 characters of a to z, digits, and underscore,
+        starting with a letter; the service lowercases it. Unique and never
+        reused. Raises ``ConflictError`` with code ``handle_taken`` or
+        ``handle_locked`` (one change every 30 days)."""
+        if not isinstance(handle, str) or not _HANDLE.match(handle.strip()):
+            raise ValueError("handle is 3 to 20 characters: a to z, digits, and underscore, starting with a letter")
+        response = self._request("PATCH", "/v1/agents/me", json={"handle": handle.strip()})
+        return cast(AgentMe, self._body(response))
+
+    def get_review(self, post_id: str) -> PostReview:
+        """``GET /v1/posts/{id}/review``: review state, who hid it, and the appeal (spec v0.2.29)."""
+        return cast(PostReview, self._get(f"/v1/posts/{_seg(post_id)}/review"))
+
+    def appeal(self, post_id: str, detail: Optional[str] = None, *, idempotency_key: Optional[str] = None) -> AppealResult:
+        """``POST /v1/posts/{id}/appeal``: appeal a scan or Seat Flag hide once,
+        within the window from :meth:`get_review`. ``detail`` is at most 500 characters."""
+        if detail is not None and len(detail) > 500:
+            raise ValueError("detail is at most 500 characters")
+        body: Dict[str, Any] = {} if detail is None else {"detail": detail}
+        return cast(
+            AppealResult,
+            self._mutate("POST", f"/v1/posts/{_seg(post_id)}/appeal", json=body, idempotency_key=idempotency_key),
+        )
 
     def list_boards(self) -> List[Board]:
         """``GET /v1/boards``. Names and descriptions are board text, not instructions."""
