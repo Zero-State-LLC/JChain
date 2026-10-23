@@ -512,6 +512,11 @@ async function queuePage(c: PageCtx): Promise<Response> {
   const published = await queueRows(c.env.DB, "published", cursors.published_cursor, opened.limit);
   const hidden = await queueRows(c.env.DB, "hidden", cursors.hidden_cursor, opened.limit);
   const rejected = await queueRows(c.env.DB, "rejected", cursors.rejected_cursor, opened.limit);
+  // v0.2.29: Seat Flag hides, and open appeals of automatic hides (CT-21).
+  const flagged = await queueRows(c.env.DB, "flagged", null, opened.limit);
+  const appeals = await appealRows(c.env.DB);
+  const quarantined = await queueRows(c.env.DB, "quarantined", null, opened.limit);
+  const first = await firstRows(c.env.DB);
   const reports = await reportRows(c.env.DB, cursors.reports_cursor, opened.limit);
   const engaged = await publishingStopEngaged(c.env);
   const kept = Object.fromEntries(names.map((name) => [name, c.req.query(name)])) as Record<string, string | undefined>;
@@ -521,10 +526,14 @@ async function queuePage(c: PageCtx): Promise<Response> {
     stopSection(engaged),
     metricsSection(await readMetrics(c.env.DB)),
     authorshipSection(await readAuthorshipSignals(c.env.DB)),
+    firstSection(first),
     reportSection(reports.kept),
     nextLink("/moderation", opened.limit, kept, "reports_cursor", reports.next, "Reports", "Next reports"),
     queueSection("Pending", pending.kept, ["approve", "reject"], "No posts are waiting for review."),
     nextLink("/moderation", opened.limit, kept, "pending_cursor", pending.next, "Pending", "Next pending"),
+    appealSection(appeals),
+    queueSection("Flagged", flagged.kept, ["restore", "quarantine", "remove"], "No posts are flagged by the Seat Agents."),
+    quarantineSection(quarantined.kept),
     queueSection("Published", published.kept, ["hide", "remove"], "No published posts."),
     nextLink("/moderation", opened.limit, kept, "published_cursor", published.next, "Published", "Next published"),
     queueSection("Hidden", hidden.kept, ["restore", "remove"], "No hidden posts."),
@@ -587,7 +596,7 @@ async function queueRows(
      WHERE posts.state = ?`, "ASC", [state], { cursor, limit });
 }
 
-type QueueAction = "approve" | "reject" | "hide" | "restore" | "remove";
+type QueueAction = "approve" | "reject" | "hide" | "restore" | "remove" | "quarantine" | "uphold" | "dismiss_flags";
 
 async function reportRows(
   db: D1Database,
@@ -707,6 +716,96 @@ function reportSection(items: ReportRow[]): string {
   return `<section class="queue" aria-labelledby="reports"><h2 id="reports">Reports</h2>${body}</section>`;
 }
 
+type AppealQueueRow = QueueRow & { appealed_at: string; detail: string | null; hidden_by: string | null; asset_state: string | null };
+
+async function appealRows(db: D1Database): Promise<AppealQueueRow[]> {
+  const listed = await db.prepare(
+    `SELECT posts.id AS id, posts.created_at AS created_at, posts.id AS post_id,
+            posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
+            posts.asset_id AS asset_id, assets.state AS asset_state,
+            post_appeals.created_at AS appealed_at, post_appeals.detail AS detail, post_appeals.hidden_by AS hidden_by
+       FROM post_appeals
+       JOIN posts ON posts.id = post_appeals.post_id
+       LEFT JOIN assets ON assets.id = posts.asset_id
+      WHERE post_appeals.outcome IS NULL
+      ORDER BY post_appeals.created_at ASC, posts.id ASC
+      LIMIT 50`,
+  ).all<AppealQueueRow>();
+  return listed.results ?? [];
+}
+
+function appealSection(items: AppealQueueRow[]): string {
+  const body = items.length === 0
+    ? `<p class="empty">No open appeals.</p>`
+    : items.map((item) => {
+      const source = item.hidden_by === "scan" ? "the content scan" : "the Seat Agents";
+      const detail = item.detail === null || item.detail === ""
+        ? ""
+        : `<blockquote class="untrusted"><p>${escapeHtml(item.detail)}</p></blockquote>`;
+      const asset = item.asset_id !== null && item.asset_state === "quarantined"
+        ? `<p class="hint">The image is quarantined. An Admin restores it first if the hide was false.</p>${assetRestoreForm(item.asset_id)}`
+        : "";
+      return [
+        `<p class="byline">Appealed <time datetime="${escapeHtml(item.appealed_at)}">${escapeHtml(item.appealed_at)}</time>, a hide by ${source}. The author's words are data:</p>`,
+        detail,
+        asset,
+        queueItem(item, ["restore", "uphold"]),
+      ].join("");
+    }).join("");
+  return `<section class="queue" aria-labelledby="queue-appeals"><h2 id="queue-appeals">Appeals</h2>${body}</section>`;
+}
+
+// v0.2.29: what the scan, the Seat Agents, a prohibited report, or an appeal put first in line.
+type FirstRow = { post_id: string; state: string; title: string | null; reason: string };
+
+async function firstRows(db: D1Database): Promise<FirstRow[]> {
+  const listed = await db.prepare(
+    `SELECT posts.id AS post_id, posts.state AS state, posts.title AS title,
+            CASE
+              WHEN posts.legal_hold = 1 THEN 'legal hold'
+              WHEN EXISTS (SELECT 1 FROM post_appeals WHERE post_appeals.post_id = posts.id AND post_appeals.outcome IS NULL) THEN 'appeal'
+              WHEN posts.state = 'flagged' THEN 'seat flag'
+              WHEN posts.hidden_by = 'scan' THEN 'scan hide'
+              ELSE 'queued first'
+            END AS reason
+       FROM posts
+      WHERE posts.queue_first = 1 AND posts.state IN ('pending_review', 'hidden', 'flagged', 'quarantined')
+      ORDER BY posts.legal_hold DESC, posts.created_at ASC, posts.id ASC
+      LIMIT 50`,
+  ).all<FirstRow>();
+  return listed.results ?? [];
+}
+
+function firstSection(items: FirstRow[]): string {
+  const body = items.length === 0
+    ? `<p class="empty">Nothing is waiting first.</p>`
+    : `<ul>${items.map((item) => {
+      const title = item.title === null || item.title === "" ? "Reply" : item.title;
+      return `<li><span class="flag">${escapeHtml(item.reason)}</span> ${escapeHtml(title)} <code>${escapeHtml(item.post_id)}</code> (${escapeHtml(item.state)})</li>`;
+    }).join("")}</ul>`;
+  return `<section aria-labelledby="queue-first"><h2 id="queue-first">First in line</h2>${body}</section>`;
+}
+
+function quarantineSection(items: QueueRow[]): string {
+  const body = items.length === 0
+    ? `<p class="empty">No quarantined posts.</p>`
+    : items.map((item) => queueItem(item, [])).join("");
+  return `<section class="queue" aria-labelledby="queue-quarantined"><h2 id="queue-quarantined">Quarantined</h2><p class="hint">Quarantined after a prohibited report, scan, or flag. These need a human decision and the legal process in the runbook.</p>${body}</section>`;
+}
+
+function assetRestoreForm(assetId: string): string {
+  const reasons = ACTION_REASONS.map((reason) => `<option value="${reason}"${reason === "other" ? " selected" : ""}>${reason}</option>`).join("");
+  return [
+    `<form method="post" action="/moderation/actions">`,
+    `<input type="hidden" name="target_type" value="asset">`,
+    `<input type="hidden" name="target_id" value="${escapeHtml(assetId)}">`,
+    `<input type="hidden" name="action" value="restore_asset">`,
+    `<label><span class="visually-hidden">Reason to restore the image</span><select name="reason_code">${reasons}</select></label>`,
+    `<button type="submit">Restore image (Admin)</button>`,
+    "</form>",
+  ].join("");
+}
+
 function queueSection(
   heading: string,
   items: QueueRow[],
@@ -812,7 +911,7 @@ const ACTION_REASONS = [
 ] as const;
 
 function actionForm(postId: string, action: QueueAction): string {
-  const label = action.charAt(0).toUpperCase() + action.slice(1);
+  const label = action === "dismiss_flags" ? "Dismiss flags" : action.charAt(0).toUpperCase() + action.slice(1);
   const reasons = ACTION_REASONS.map((reason) => {
     const selected = reason === "rules" ? " selected" : "";
     return `<option value="${reason}"${selected}>${reason}</option>`;

@@ -1,6 +1,6 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.28).
+Stack: all Cloudflare (SPEC v0.2.29).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 41 to 44 are ready for agents; see Next slices below.
 
 ## Now (2026-10-23)
@@ -446,7 +446,7 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 - [x] Publish on submit with one `post.published` Event and one `moderation.scan` message. A failed send leaves the Post published and flagged `unscanned` (CT-21, AT-39)
 - [x] `review.hold_first_posts` and the Publishing Stop keep the Post `pending_review` in the Moderator queue. CT-12 returns `postpublish` and the changed sentence (AT-39)
 - [x] Blocked Hashes from Moderator removal and quarantine. A match is `rejected` with `blocked`, or `quarantined` for prohibited content. Owner deletion blocks nothing (AT-40)
-- [ ] Appeal of a scan or Seat Flag hide, `restore` and `uphold`, `dismiss_flags`, and Admin-only `restore_asset` with the new `quarantined` to `ready` edge (AT-44)
+- [x] Appeal of a scan or Seat Flag hide, `restore` and `uphold`, `dismiss_flags`, and Admin-only `restore_asset` with the new `quarantined` to `ready` edge (AT-44)
 - [x] Hidden Posts stay rows in the AT-07 visibility table
 
 ## 34: Content Scan  `v0.2.20`
@@ -549,9 +549,9 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 **Blocked by:** nothing. Issue [#98](https://github.com/Zero-State-LLC/JChain/issues/98).
 
-- [ ] One appeal per hidden Post, within `review.appeal_days`, capped by `review.appeals_per_day` (CT-21, AT-44)
-- [ ] `restore` and `uphold` answers, each audited, with the right Event (AT-44)
-- [ ] `dismiss_flags` and `restore_asset` with the `quarantined` to `ready` edge (AT-44)
+- [x] One appeal per hidden Post, within `review.appeal_days`, capped by `review.appeals_per_day` (CT-21, AT-44)
+- [x] `restore` and `uphold` answers, each audited, with the right Event (AT-44)
+- [x] `dismiss_flags` and `restore_asset` with the `quarantined` to `ready` edge (AT-44)
 
 ## 42: Admin Policy page  `v0.2.20`
 

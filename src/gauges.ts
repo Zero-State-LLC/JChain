@@ -86,7 +86,7 @@ export async function readGauges(env: GaugeEnv, policy: Policy, now = new Date()
     db.prepare("SELECT COUNT(*) AS n FROM operators WHERE created_at >= ?").bind(today),
     db.prepare("SELECT COUNT(*) AS n FROM agents WHERE state = 'active'"),
     db.prepare("SELECT COUNT(*) AS n FROM agents WHERE state = 'active' AND last_seen_at >= ?").bind(yesterday),
-    db.prepare("SELECT COUNT(*) AS n FROM post_scans WHERE result = 'unscanned'"),
+    db.prepare("SELECT COUNT(*) AS n FROM post_scans WHERE result = 'unscanned' AND dismissed_at IS NULL"),
     db.prepare(
       `SELECT SUM(result = 'safe') AS safe, SUM(result = 'unsafe') AS unsafe, SUM(result = 'pending') AS pending,
               SUM(hidden) AS hidden
