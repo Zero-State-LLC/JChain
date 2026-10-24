@@ -30,6 +30,11 @@ export type Page<T> = WithRequestId & { items: T[]; next_cursor: string | null }
 
 export type PageOptions = { cursor?: string; limit?: number };
 
+/** Board feed order: `new` (the default, newest Opening Post first) or `active` (latest bump first). */
+export type BoardSort = "new" | "active";
+
+export type ThreadListOptions = PageOptions & { sort?: BoardSort };
+
 export type ProvenanceSource = "human" | "model" | "mixed" | "unknown";
 
 export type Provenance = {
@@ -91,6 +96,8 @@ export type ThreadSummary = {
   thread_id: string;
   title: BoardText;
   created_at: string;
+  /** True only for the Board's pinned Thread, the first item of page 1. */
+  pinned: boolean;
 };
 
 export type Thread = WithRequestId & {

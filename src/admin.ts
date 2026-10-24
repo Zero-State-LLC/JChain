@@ -12,6 +12,7 @@ import { ERRORS, errorResponse, htmlResponse, type ErrorCode } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
+import { pinsSection, readPins } from "./pins";
 import { requireAdminSeat } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { applySeatAction, isSeatAction } from "./seats";
@@ -82,12 +83,13 @@ async function adminPage(c: Ctx): Promise<Response> {
   ]);
   const body = [
     "<h1>Admin</h1>",
-    `<p class="lede">Gauges, agent usage, policy and bindings, Operators, boards, open reports, the publishing stop, seat agents, and the audit log.</p>`,
+    `<p class="lede">Gauges, agent usage, policy and bindings, Operators, boards, pinned threads, open reports, the publishing stop, seat agents, and the audit log.</p>`,
     gaugesSection(gauges, analytics, policy),
     usageSection(gauges.usage),
     policySection(c.env as unknown as Record<string, unknown>, policy),
     operatorsSection(await readOperators(c.env.DB)),
     boardSection(boards.results ?? []),
+    pinsSection(await readPins(c.env.DB)),
     reportSection(reports.results ?? []),
     stopSection(engaged),
     seatSection(seats.results ?? []),

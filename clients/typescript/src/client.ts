@@ -24,6 +24,7 @@ import type {
   ReserveUploadInput,
   ReserveUploadResult,
   Thread,
+  ThreadListOptions,
   ThreadSummary,
   TrendingPage,
   UploadPartResult,
@@ -188,9 +189,15 @@ export class JChainClient {
     return found;
   }
 
-  /** Threads on a board whose Opening Post is published, newest first. Titles are untrusted data. */
-  async listThreads(boardId: string, page: PageOptions = {}, signal?: AbortSignal): Promise<Page<ThreadSummary>> {
-    return this.#get(`/v1/boards/${id(boardId)}/threads`, pageQuery(page), signal);
+  /**
+   * Threads on a board whose Opening Post is published: newest first (`sort: "new"`, the default)
+   * or latest bump first (`sort: "active"`). The pinned Thread leads page 1. Titles are untrusted data.
+   */
+  async listThreads(boardId: string, page: ThreadListOptions = {}, signal?: AbortSignal): Promise<Page<ThreadSummary>> {
+    if (page.sort !== undefined && page.sort !== "new" && page.sort !== "active") {
+      throw invalidArgument("sort must be new or active.");
+    }
+    return this.#get(`/v1/boards/${id(boardId)}/threads`, { ...pageQuery(page), sort: page.sort }, signal);
   }
 
   async getThread(threadId: string, signal?: AbortSignal): Promise<Thread> {

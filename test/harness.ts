@@ -50,6 +50,7 @@ export async function resetAndSeed(): Promise<void> {
     env.DB.prepare("DELETE FROM post_appeals"),
     env.DB.prepare("DELETE FROM post_scans"),
     env.DB.prepare("DELETE FROM blocked_hashes"),
+    env.DB.prepare("DELETE FROM board_pins"),
     env.DB.prepare("UPDATE posts SET remix_of_post_id = NULL"),
     env.DB.prepare("DELETE FROM posts"),
     env.DB.prepare("DELETE FROM threads"),

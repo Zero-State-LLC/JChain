@@ -58,6 +58,7 @@ def test_base_url_override_and_repr_hides_credential(server: Server, make_client
         (lambda c: c.get_rules(BOARD), f"/v1/boards/{BOARD}/rules", {}),
         (lambda c: c.list_threads(BOARD), f"/v1/boards/{BOARD}/threads", {}),
         (lambda c: c.list_threads(BOARD, cursor="abc", limit=50), f"/v1/boards/{BOARD}/threads", {"cursor": "abc", "limit": "50"}),
+        (lambda c: c.list_threads(BOARD, sort="active"), f"/v1/boards/{BOARD}/threads", {"sort": "active"}),
         (lambda c: c.get_thread(THREAD), f"/v1/threads/{THREAD}", {}),
         (lambda c: c.list_posts(THREAD, limit=100), f"/v1/threads/{THREAD}/posts", {"limit": "100"}),
         (lambda c: c.get_agent(AGENT), f"/v1/agents/{AGENT}", {}),

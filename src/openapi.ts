@@ -444,8 +444,11 @@ export function openApiDocument(): Record<string, unknown> {
       },
       "/v1/boards/{id}/threads": readerGet(
         "listBoardThreads",
-        "Threads whose Opening Post is published, newest first.",
-        pageParameters,
+        "Threads whose Opening Post is published. sort=new (the default) is newest Opening Post first. sort=active is latest bump first: the newest published Post, where a Thread's Replies after its 300th published Reply do not bump it. Any other sort is malformed. The Board's pinned Thread, while visible, is the first item of page 1 in either order with pinned true, and is left out of later pages. Each item is { thread_id, title, created_at, pinned }. The cursor carries the sort; a cursor with a different sort is malformed. An Active cursor keeps the order page 1 saw, so Posts written later never make a Thread repeat or go missing while paging.",
+        [
+          ...pageParameters,
+          { name: "sort", in: "query", required: false, schema: { type: "string", enum: ["new", "active"], default: "new" } },
+        ],
       ),
       "/v1/uploads": {
         post: {
@@ -723,6 +726,54 @@ export function openApiDocument(): Record<string, unknown> {
             "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
             "401": { description: "Access required.", content: { "application/json": { schema: errorSchema } } },
             "403": { description: "Not a moderator, or the cookie write is not same-origin.", content: { "application/json": { schema: errorSchema } } },
+            "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
+          },
+        },
+      },
+      "/v1/admin/pins": {
+        post: {
+          operationId: "adminPin",
+          summary: "Pin or unpin a Thread on its Board. Admin Seat with Cloudflare Access only; a Session or Credential gets access_required and a Moderator without a seat gets forbidden. At most one pinned Thread per Board: pinning another Thread on the same Board replaces the pin, audited as one unpin_thread and one pin_thread row. Only a Thread whose Opening Post is published can be pinned. Pinning the pinned Thread, or unpinning a Thread that is not pinned, is state_conflict. A pin is not a Post state.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["action", "thread_id"],
+                  properties: {
+                    action: { type: "string", enum: ["pin_thread", "unpin_thread"] },
+                    thread_id: { type: "string", format: "uuid" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "The pin after the action.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["board_id", "thread_id", "pinned", "replaced_thread_id"],
+                    properties: {
+                      board_id: { type: "string", format: "uuid" },
+                      thread_id: { type: "string", format: "uuid" },
+                      pinned: { type: "boolean" },
+                      replaced_thread_id: { type: ["string", "null"] },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { description: "Malformed request.", content: { "application/json": { schema: errorSchema } } },
+            "401": { description: "Access required.", content: { "application/json": { schema: errorSchema } } },
+            "403": { description: "Not an Admin Seat, or the write is not same-origin.", content: { "application/json": { schema: errorSchema } } },
+            "404": { description: "No such Thread.", content: { "application/json": { schema: errorSchema } } },
+            "409": { description: "Already pinned, not pinned, or the Opening Post is not published.", content: { "application/json": { schema: errorSchema } } },
+            "422": { description: "Unknown action or a bad thread id.", content: { "application/json": { schema: errorSchema } } },
             "503": { description: "Policy missing.", content: { "application/json": { schema: errorSchema } } },
           },
         },

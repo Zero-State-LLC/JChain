@@ -1,4 +1,13 @@
 import { agentIdForHandle } from "./handles";
+import {
+  bumpSql,
+  decodeBoardCursor,
+  encodeBoardCursor,
+  parseSort,
+  snapshotId,
+  visiblePinnedThread,
+  type BoardSort,
+} from "./board-order";
 import { Hono, type Context } from "hono";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7 } from "./ids";
@@ -85,36 +94,84 @@ async function agentPosts(c: Ctx): Promise<Response> {
   return jsonResponse(opened.requestId, await postPage(c.env.DB, rows, opened.limit));
 }
 
+// CT-06 board feed (Danny, 2026-10-24): `sort=new` (the default, C-07) or `sort=active`. The
+// Board's pinned Thread leads page 1 of either order while its Opening Post is visible, and is
+// left out of every later page. The cursor carries the sort, so a next page needs no `sort`.
 async function boardThreads(c: Ctx): Promise<Response> {
-  const opened = await openList(c);
-  if (opened instanceof Response) return opened;
+  const requestId = c.get("requestId");
+  const principal = await requireReader(c.env, c.req.raw, c.executionCtx);
+  if (!principal.ok) return errorResponse(requestId, principal.code);
+  const limit = parseLimit(c.req.query("limit"));
+  if (limit === "malformed") return errorResponse(requestId, "malformed");
+  const sortParam = parseSort(c.req.query("sort"));
+  if (sortParam === "malformed") return errorResponse(requestId, "malformed");
+  const rawCursor = c.req.query("cursor");
+  const cursor = rawCursor === undefined ? null : decodeBoardCursor(rawCursor);
+  if (rawCursor !== undefined && cursor === null) return errorResponse(requestId, "malformed");
+  if (cursor !== null && sortParam !== null && cursor.sort !== sortParam) {
+    return errorResponse(requestId, "malformed");
+  }
+  const sort: BoardSort = cursor?.sort ?? sortParam ?? "new";
   const boardId = c.req.param("id");
-  if (boardId === undefined || !isUuidV7(boardId)) return errorResponse(opened.requestId, "not_found");
+  if (boardId === undefined || !isUuidV7(boardId)) return errorResponse(requestId, "not_found");
   const board = await c.env.DB.prepare("SELECT id FROM boards WHERE id = ?").bind(boardId).first();
-  if (!board) return errorResponse(opened.requestId, "not_found");
-  const cursorSql = opened.cursor === null
-    ? ""
-    : " AND (posts.created_at < ? OR (posts.created_at = ? AND posts.id < ?))";
+  if (!board) return errorResponse(requestId, "not_found");
+
+  const pinned = cursor === null ? await visiblePinnedThread(c.env.DB, boardId) : null;
+  const excluded = cursor === null ? pinned : cursor.pinned;
+  const snapshot = sort === "active" ? cursor?.snapshot ?? snapshotId() : null;
+  const keyExpression = sort === "active" ? bumpSql("posts", snapshot) : "posts.created_at";
+  // The snapshot is a validated UUIDv7 (hex and hyphens only), checked again by bumpSql.
+  const snapshotSql = snapshot === null ? "" : ` AND posts.id <= '${snapshot}'`;
+  const keyset = cursor === null || cursor.key === null || cursor.id === null
+    ? null
+    : { key: cursor.key, id: cursor.id };
+  const cursorSql = keyset === null ? "" : " WHERE (feed.sort_key < ? OR (feed.sort_key = ? AND feed.id < ?))";
+  const budget = pinned === null ? limit : limit - 1;
   const statement = c.env.DB.prepare(
-    `SELECT posts.id AS id, threads.id AS thread_id, posts.title AS title, posts.created_at AS created_at
-       FROM posts
-       JOIN threads ON threads.id = posts.thread_id
-      WHERE threads.board_id = ? AND ${VISIBLE_POST} AND posts.title IS NOT NULL${cursorSql}
-      ORDER BY posts.created_at DESC, posts.id DESC
+    `SELECT feed.id AS id, feed.thread_id AS thread_id, feed.title AS title, feed.created_at AS created_at,
+            feed.sort_key AS sort_key
+       FROM (
+         SELECT posts.id AS id, threads.id AS thread_id, posts.title AS title, posts.created_at AS created_at,
+                ${keyExpression} AS sort_key
+           FROM posts
+           JOIN threads ON threads.id = posts.thread_id
+          WHERE threads.board_id = ? AND ${VISIBLE_POST} AND posts.title IS NOT NULL
+            AND threads.id IS NOT ?${snapshotSql}
+       ) AS feed${cursorSql}
+      ORDER BY feed.sort_key DESC, feed.id DESC
       LIMIT ?`,
   );
-  const bound = opened.cursor === null
-    ? statement.bind(boardId, opened.limit + 1)
-    : statement.bind(boardId, opened.cursor.createdAt, opened.cursor.createdAt, opened.cursor.id, opened.limit + 1);
-  const listed = await bound.all<{ id: string; thread_id: string; title: string; created_at: string }>();
+  const bound = keyset === null
+    ? statement.bind(boardId, excluded, budget + 1)
+    : statement.bind(boardId, excluded, keyset.key, keyset.key, keyset.id, budget + 1);
+  const listed = await bound.all<{ id: string; thread_id: string; title: string; created_at: string; sort_key: string }>();
   const rows = listed.results ?? [];
-  const body = page(rows, opened.limit, "id");
-  body.items = rows.slice(0, opened.limit).map((row) => ({
-    thread_id: row.thread_id,
-    title: row.title,
-    created_at: row.created_at,
-  }));
-  return jsonResponse(opened.requestId, body);
+  const more = rows.length > budget;
+  const kept = rows.slice(0, budget);
+  const items: Record<string, unknown>[] = [];
+  if (pinned !== null) {
+    const head = await c.env.DB.prepare(
+      `SELECT threads.id AS thread_id, posts.title AS title, posts.created_at AS created_at
+         FROM posts JOIN threads ON threads.id = posts.thread_id
+        WHERE threads.id = ? AND posts.title IS NOT NULL AND ${VISIBLE_POST}`,
+    ).bind(pinned).first<{ thread_id: string; title: string; created_at: string }>();
+    if (head) items.push({ thread_id: head.thread_id, title: head.title, created_at: head.created_at, pinned: true });
+  }
+  for (const row of kept) {
+    items.push({ thread_id: row.thread_id, title: row.title, created_at: row.created_at, pinned: false });
+  }
+  const last = kept[kept.length - 1];
+  const nextCursor = more
+    ? encodeBoardCursor({
+      sort,
+      pinned: excluded,
+      snapshot,
+      key: last?.sort_key ?? keyset?.key ?? null,
+      id: last?.id ?? keyset?.id ?? null,
+    })
+    : null;
+  return jsonResponse(requestId, { items, next_cursor: nextCursor });
 }
 
 async function threadResource(c: Ctx): Promise<Response> {
@@ -211,20 +268,6 @@ async function openList(c: Ctx): Promise<Opened | Response> {
   const cursor = decodeCursor(rawCursor);
   if (cursor === null) return errorResponse(requestId, "malformed");
   return { requestId, limit, cursor };
-}
-
-function page<T extends { id: string; created_at: string }>(
-  rows: T[],
-  limit: number,
-  idKey: "id",
-): { items: Record<string, unknown>[]; next_cursor: string | null } {
-  const more = rows.length > limit;
-  const kept = more ? rows.slice(0, limit) : rows;
-  const last = kept[kept.length - 1];
-  return {
-    items: kept.map((row) => "caption" in row ? postItem(row as unknown as PostRow, []) : row as unknown as Record<string, unknown>),
-    next_cursor: more && last !== undefined ? encodeCursor(last.created_at, last[idKey]) : null,
-  };
 }
 
 async function postPage(

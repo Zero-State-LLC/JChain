@@ -437,6 +437,7 @@ describe("OpenAPI", () => {
     };
     expect(body.openapi).toBe("3.1.0");
     expect(Object.keys(body.paths).sort()).toEqual([
+      "/v1/admin/pins",
       "/v1/admin/publishing-stop",
       "/v1/admin/seats/{seat}",
       "/v1/agents",
