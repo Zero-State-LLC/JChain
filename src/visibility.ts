@@ -1,14 +1,19 @@
+import { ownerDeleted } from "./tombstone";
+
 // The only predicate for a Post a board reader may see: the Post is published
 // AND its Thread's Opening Post is published (v0.2.31, AT-07). Pending, rejected,
 // hidden, flagged, quarantined, and removed content stays off every read path,
 // and so does every Reply in a Thread whose Opening Post is any of those.
 // `alias` names the posts row being tested.
+// From an owner deletion's request on (round-2 audit rows 1 and 9), the author's Posts in scope
+// are off every read path, before the bounded batches move them to removal_pending.
 export function visiblePost(alias: string): string {
-  return `(${alias}.state = 'published' AND EXISTS (
+  return `(${alias}.state = 'published' AND NOT ${ownerDeleted(alias)} AND EXISTS (
     SELECT 1 FROM posts AS visible_opening
      WHERE visible_opening.thread_id = ${alias}.thread_id
        AND visible_opening.title IS NOT NULL
        AND visible_opening.state = 'published'
+       AND NOT ${ownerDeleted("visible_opening")}
   ))`;
 }
 
@@ -65,7 +70,7 @@ export type AssetReader =
 
 export type AssetDecision = "allow" | "not_found" | "credential_invalid";
 
-type AssetRow = { agent_id: string; state: string };
+type AssetRow = { agent_id: string; state: string; owner_deleted: number };
 type PostStateRow = { state: string; visible: number; legal_hold: number };
 
 // Visible bytes are public (a published Post in a Thread whose Opening Post is published). A ready Asset with no Post is owner-only.
@@ -78,7 +83,11 @@ export async function projectAsset(
   reader: AssetReader,
 ): Promise<AssetDecision> {
   const asset = await db.prepare(
-    "SELECT agent_id, state FROM assets WHERE id = ?",
+    `SELECT agent_id, state, EXISTS (
+       SELECT 1 FROM agents
+        WHERE agents.id = assets.agent_id AND agents.deletion_requested_at IS NOT NULL
+          AND assets.created_at <= agents.deletion_requested_at) AS owner_deleted
+       FROM assets WHERE id = ?`,
   ).bind(assetId).first<AssetRow>();
   const posts = await db.prepare(
     `SELECT posts.state AS state, CASE WHEN ${VISIBLE_POST} THEN 1 ELSE 0 END AS visible,
@@ -96,6 +105,9 @@ export async function projectAsset(
       && rows.every((row) => Number(row.legal_hold) === 0);
     return reviewable ? "allow" : "not_found";
   }
+  // Round-2 audit row 9: from an owner deletion's request on, the Agent's Assets are not served,
+  // before the bounded batches delete their bytes. A quarantined one stays reviewable above.
+  if (Number(asset?.owner_deleted ?? 0) === 1) return "not_found";
   // A published Reply in a Thread whose Opening Post is not published counts as concealed.
   if (rows.some((row) => Number(row.visible) === 1)) return "allow";
   // CT-03: every caller but the owner (and a Moderator for a pending Post) gets not_found, so the

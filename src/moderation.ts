@@ -8,6 +8,7 @@ import { parsePolicy, type Policy } from "./policy";
 import { isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { siblingQuarantineStatements } from "./quarantine";
+import { ownerDeleted } from "./tombstone";
 import { logHideToDecision } from "./latency";
 import { settleSeatFlags } from "./seats";
 import { applyOperatorAction, isOperatorAction, parseOperatorExtras } from "./operator-admin";
@@ -153,7 +154,8 @@ async function movePost(
               SELECT 1 FROM posts AS other
                WHERE other.asset_id = posts.asset_id AND other.id != posts.id
                  AND other.state IN ('removal_pending', 'removed')
-            ) AS archived_sibling
+            ) AS archived_sibling,
+            ${ownerDeleted("posts")} AS owner_deleted
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
        LEFT JOIN assets ON assets.id = posts.asset_id
@@ -164,12 +166,22 @@ async function movePost(
     quarantined_by: string | null;
     shared_hold: number;
     archived_sibling: number;
+    owner_deleted: number;
     legal_hold: number;
     thread_state: string;
     asset_id: string | null;
     asset_state: string | null;
   }>();
   if (!post) return moderationError(requestId, format, "not_found");
+  // Round-2 audit row 1: the author's owner deletion is in progress. Nothing it covers publishes
+  // again. A Clear of a quarantined Post is applied as an Archive (remove), so the Moderator still
+  // decides it and its image follows normal retention; approve and any other restore refuse.
+  if (Number(post.owner_deleted) === 1 && (name === "approve" || name === "restore")) {
+    if (name === "restore" && post.state === "quarantined") {
+      return movePost(c, requestId, actorEmail, { ...action, action: "remove" }, format);
+    }
+    return moderationError(requestId, format, "state_conflict");
+  }
   // v0.2.36 (quarantine-first): any Moderator may Clear (restore) a quarantined Post, which
   // releases its quarantined Asset and its Blocked Hashes in the same batch, or Archive (remove) it.
   // Releasing a Post under a legal hold stays Admin only (#116).
@@ -181,11 +193,16 @@ async function movePost(
   const fromQuarantine = name === "restore" && post.state === "quarantined";
   const group = fromQuarantine && post.asset_id !== null
     ? ((await c.env.DB.prepare(
-      `SELECT id, legal_hold FROM posts
+      `SELECT id, legal_hold, ${ownerDeleted("posts")} AS owner_deleted FROM posts
         WHERE asset_id = ? AND id != ? AND state = 'quarantined'
         ORDER BY created_at, id`,
-    ).bind(post.asset_id, action.targetId).all<{ id: string; legal_hold: number }>()).results ?? [])
+    ).bind(post.asset_id, action.targetId).all<{ id: string; legal_hold: number; owner_deleted: number }>()).results ?? [])
     : [];
+  // Round-2 audit row 1: a group Clear never republishes a Post its author asked to delete.
+  // Archive that Post first.
+  if (group.some((member) => Number(member.owner_deleted) === 1)) {
+    return moderationError(requestId, format, "state_conflict");
+  }
   const groupHold = group.some((member) => Number(member.legal_hold) === 1);
   const sharedHold = Number(post.shared_hold) === 1;
   const needsAdmin = post.legal_hold === 1 || sharedHold || groupHold;
@@ -270,7 +287,8 @@ async function movePost(
       SELECT 1 FROM posts AS other
        WHERE other.asset_id = posts.asset_id AND other.id != posts.id
          AND other.state IN ('removal_pending', 'removed')
-    )${actorIsAdmin ? "" : " AND posts.legal_hold = 0"}`
+    )
+    AND NOT ${ownerDeleted("posts")}${actorIsAdmin ? "" : " AND posts.legal_hold = 0"}`
     : guard(name);
   // The where binds: the target id, then (for a Clear) the group ids read above.
   const whereBinds: unknown[] = [action.targetId, ...(fromQuarantine ? group.map((member) => member.id) : [])];
@@ -364,7 +382,7 @@ async function movePost(
   // post.restored, its open appeal answered, and its open reports triaged.
   for (const member of group) {
     const memberEvent = uuidv7();
-    const memberGuard = `posts.id = ? AND posts.state = 'quarantined'
+    const memberGuard = `posts.id = ? AND posts.state = 'quarantined' AND NOT ${ownerDeleted("posts")}
       AND EXISTS (SELECT 1 FROM moderation_actions WHERE moderation_actions.id = ?)`;
     statements.push(
       c.env.DB.prepare(
@@ -962,13 +980,15 @@ function guard(name: MoveName): string {
     )
     AND (posts.asset_id IS NULL OR EXISTS (
       SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
-    ))`;
+    ))
+    AND NOT ${ownerDeleted("posts")}`;
   }
   if (name === "restore") {
     return `posts.id = ? AND posts.state IN ('hidden', 'flagged', 'quarantined')
     AND (posts.asset_id IS NULL OR EXISTS (
       SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state = 'ready'
-    ))`;
+    ))
+    AND NOT ${ownerDeleted("posts")}`;
   }
   if (name === "hide") return "posts.id = ? AND posts.state = 'published'";
   if (name === "remove") return "posts.id = ? AND posts.state IN ('published', 'hidden', 'rejected', 'flagged', 'quarantined')";
