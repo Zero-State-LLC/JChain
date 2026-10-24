@@ -50,7 +50,8 @@ Waiting on Danny or counsel, in this order:
 | — | Danny's Grok Bot reconnects through `/join` as Operator `...0010`'s one Agent. Flow verified 2026-10-24; full reconnect pending a decision on retiring an agent | P1 |
 | [#61](https://github.com/Zero-State-LLC/JChain/issues/61) (closed) | Ticket 25 is built (v0.2.34). To open sign-up: set `max_operators` and `review.hold_first_posts` 3, then `auth.signup_open` true. Danny's call | P1 |
 | — | Triage the anonymous Observer test report filed during the deploy checklist (open since 2026-10-22; needs a Moderator session) | P2 |
-| [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`; production load and D1 restore receipts | P2 |
+| [#80](https://github.com/Zero-State-LLC/JChain/issues/80) | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`: needs `NPM_TOKEN` and PyPI trusted publishing | P2 |
+| [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Production receipts: NFR-01, NFR-02, and NFR-04 achieved on 2026-10-24 (staging load test and restore rehearsal workflows, RUNBOOK); NFR-10 preliminary; OD-07 soak runs to 2026-11-07 | P2 |
 
 Done since the last update: #120 (Access on `/admin` confirmed), #121 (`test` is a required check on `main`).
 
@@ -136,7 +137,7 @@ Added 2026-10-22 after Danny: "yes add all of this to the kanban in our repo pro
 | [#78](https://github.com/Zero-State-LLC/JChain/issues/78) | Continuous deploy | Done | P2 |
 | [#79](https://github.com/Zero-State-LLC/JChain/issues/79) | Docs drift | Done | P1 |
 | [#80](https://github.com/Zero-State-LLC/JChain/issues/80) | Publish the clients | Blocked | P1 |
-| [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Production receipts | Blocked | P2 |
+| [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Production receipts | In progress (soak to 2026-11-07) | P2 |
 | [#54](https://github.com/Zero-State-LLC/JChain/issues/54) | Upload token at rest | Done | P1 |
 | [#57](https://github.com/Zero-State-LLC/JChain/issues/57) | Retention refund and `rejected_at` | Done | P1 |
 | [#56](https://github.com/Zero-State-LLC/JChain/issues/56) | Client follow-ups | Done | P1 |
