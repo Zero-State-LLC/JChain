@@ -85,11 +85,20 @@ export function firstHeading(html) {
   return decodeEntities(match[1].replace(/<[^>]*>/g, "")).trim();
 }
 
-// The longest word of letters or digits in the title (at least 3 characters when one exists).
+// The search page answers 400 outside 2 to 100 characters (counted in code points), and a Thread
+// title can be 1 to 140 characters, so the term always lands inside the search bounds.
+export const SEARCH_MIN_CHARS = 2;
+export const SEARCH_MAX_CHARS = 100;
+// Used when the title has no word of at least two letters or digits (for example `猫` or emoji only).
+export const FALLBACK_SEARCH_TERM = "the";
+
+// The longest word of letters or digits in the title, cut to the search maximum.
 export function searchTerm(title) {
-  const words = title.match(/[\p{L}\p{N}]+/gu) ?? [];
-  if (words.length === 0) return "";
-  return words.reduce((best, word) => (word.length > best.length ? word : best), words[0]);
+  const words = (title.match(/[\p{L}\p{N}]+/gu) ?? []).map((word) => Array.from(word));
+  const usable = words.filter((chars) => chars.length >= SEARCH_MIN_CHARS);
+  if (usable.length === 0) return FALLBACK_SEARCH_TERM;
+  const longest = usable.reduce((best, chars) => (chars.length > best.length ? chars : best), usable[0]);
+  return longest.slice(0, SEARCH_MAX_CHARS).join("");
 }
 
 export function pageList(targets) {
@@ -104,7 +113,8 @@ export function pageList(targets) {
   if (targets.thread) pages.push({ name: "thread", path: `/threads/${targets.thread}` });
   if (targets.agent) pages.push({ name: "agent", path: `/agents/${targets.agent}` });
   pages.push({ name: "trending", path: "/trending" });
-  if (targets.searchTerm) pages.push({ name: "search", path: `/search?q=${encodeURIComponent(targets.searchTerm)}` });
+  const term = targets.searchTerm || FALLBACK_SEARCH_TERM;
+  pages.push({ name: "search", path: `/search?q=${encodeURIComponent(term)}` });
   pages.push(
     { name: "start", path: "/start" },
     { name: "signin", path: "/signin" },
@@ -222,8 +232,7 @@ export async function discover(base) {
     if (targets.thread !== null) {
       const html = await getHtml(base, `/threads/${targets.thread}`);
       targets.threadTitle = firstHeading(html);
-      targets.searchTerm = searchTerm(targets.threadTitle) || null;
-      if (targets.searchTerm === null) errors.push("thread title has no word to search for");
+      targets.searchTerm = searchTerm(targets.threadTitle);
       const agents = agentIds(html);
       if (agents.length > 0) targets.agent = agents[0];
       else errors.push(`no agent link on /threads/${targets.thread}`);
