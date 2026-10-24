@@ -7,8 +7,9 @@ import { chargeHour, clearNamedQuota } from "../src/quota";
 import { runRetention } from "../src/retention";
 import {
   SEARCH_PER_ADDRESS_HOUR,
-  markedSnippet,
-  searchExpression,
+  highlight,
+  likePattern,
+  searchTerms,
 } from "../src/search";
 import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, resetAndSeed } from "./harness";
 
@@ -57,11 +58,14 @@ describe("AT-83 search finds published Posts by title, caption, and alt text", (
     expect(results(byAlt)).toEqual(["Picture"]);
     expect(byAlt).toContain(`<img class="search-thumb" src="/v1/assets/${described.assetId}/content?variant=thumb" alt="a cobalt heron on one leg">`);
 
-    // Every term is required, case and accents do not matter.
+    // Every term is required, in any field, and ASCII case does not matter. A term matches
+    // inside a word.
     expect(results(await search("SAFFRON dusk"))).toEqual(["Plain"]);
     expect(results(await search("saffron okapi"))).toEqual([]);
+    expect(results(await search("okapi heron"))).toEqual([]);
+    expect(results(await search("glac"))).toEqual(["Plain"]);
     await thread({ title: "Café crème", caption: "", stamp: "2026-02-04T00:00:00Z" });
-    expect(results(await search("cafe"))).toEqual(["Café crème"]);
+    expect(results(await search("café"))).toEqual(["Café crème"]);
 
     // The thread page carries the anchor.
     const threadPage = await (await call(`/threads/${titled.threadId}`)).text();
@@ -127,18 +131,20 @@ describe("AT-84 search lists only what every anonymous reader may see", () => {
     expect(results(await search("ibex"))).toEqual([]);
   });
 
-  it("indexes only Post text", async () => {
-    const columns = await env.DB.prepare("PRAGMA table_info(post_search)").all<{ name: string }>();
-    expect(columns.results.map((column) => column.name)).toEqual(["title", "caption", "alt_text"]);
-    const ids = await env.DB.prepare("PRAGMA table_info(post_search_ids)").all<{ name: string }>();
-    expect(ids.results.map((column) => column.name)).toEqual(["id", "post_id"]);
-    // Deleted tokens are removed from the index pages at once, not at a later merge.
-    const secure = await env.DB.prepare("SELECT v FROM post_search_config WHERE k = 'secure-delete'").first<{ v: number }>();
-    expect(Number(secure?.v)).toBe(1);
+  it("keeps the database exportable: no migration creates a virtual table", () => {
+    const migrations = env.TEST_MIGRATIONS;
+    expect(migrations.length).toBeGreaterThan(0);
+    for (const migration of migrations) {
+      const sql = migration.queries.join("\n");
+      expect(
+        /CREATE\s+VIRTUAL\s+TABLE/i.test(sql),
+        `${migration.name} creates a virtual table. D1 cannot export a database that holds one (developers.cloudflare.com/d1/best-practices/import-export-data), and the restore rehearsal (#81, NFR-04) depends on export. Put a full-text index in a separate D1 database instead.`,
+      ).toBe(false);
+    }
   });
 });
 
-describe("AT-85 erased text leaves the index in the same write", () => {
+describe("AT-85 erased text can no longer match", () => {
   it("owner deletion", async () => {
     const ada = await enroll("Erin");
     const post = await thread({
@@ -150,13 +156,13 @@ describe("AT-85 erased text leaves the index in the same write", () => {
       stamp: utcSeconds(new Date(Date.now() - 60_000)),
     });
     await reply(post.threadId, "jubilant axolotl reply", utcSeconds(new Date(Date.now() - 30_000)), "published", ada.agentId);
-    for (const word of ["tapir", "marmoset", "pangolin", "axolotl"]) expect(await indexed(word), word).toBe(1);
+    for (const word of ["tapir", "marmoset", "pangolin", "axolotl"]) expect(await stored(word), word).toBe(1);
 
     const deleted = await call("/v1/deletion-requests", { email: OPERATOR, body: { agent_id: ada.agentId } });
     expect(deleted.status).toBe(200);
     expect(await postState(post.postId)).toBe("removed");
     for (const word of ["tapir", "marmoset", "pangolin", "axolotl"]) {
-      expect(await indexed(word), word).toBe(0);
+      expect(await stored(word), word).toBe(0);
       expect(results(await search(word))).toEqual([]);
     }
   });
@@ -174,57 +180,57 @@ describe("AT-85 erased text leaves the index in the same write", () => {
 
     await runRetention(env, Date.now());
     expect(await postState(post.postId)).toBe("removed");
-    expect(await indexed("narwhal")).toBe(0);
-    expect(await indexed("quokka")).toBe(0);
+    expect(await stored("narwhal")).toBe(0);
+    expect(await stored("quokka")).toBe(0);
   });
 
   it("the retention scrub of a Post removed before the tombstone", async () => {
     const post = await thread({ title: "Antique wombat", caption: "russet bilby", state: "removed", stamp: "2026-02-01T00:00:00Z" });
-    expect(await indexed("wombat")).toBe(1);
+    expect(await stored("wombat")).toBe(1);
     await runRetention(env, Date.now());
     const row = await env.DB.prepare("SELECT title, caption FROM posts WHERE id = ?").bind(post.postId).first<{ title: string; caption: string }>();
     expect(row).toEqual({ title: "", caption: "" });
-    expect(await indexed("wombat")).toBe(0);
-    expect(await indexed("bilby")).toBe(0);
-  });
-
-  it("a deleted row", async () => {
-    const post = await thread({ title: "Fleeting dugong", caption: "", stamp: "2026-02-01T00:00:00Z" });
-    expect(await indexed("dugong")).toBe(1);
-    await env.DB.prepare("DELETE FROM posts WHERE id = ?").bind(post.postId).run();
-    expect(await indexed("dugong")).toBe(0);
-    const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM post_search_ids WHERE post_id = ?").bind(post.postId).first<{ n: number }>();
-    expect(Number(left?.n)).toBe(0);
+    expect(await stored("wombat")).toBe(0);
+    expect(await stored("bilby")).toBe(0);
   });
 });
 
-describe("AT-86 the query is bounded and is never FTS5 syntax", () => {
-  it("turns every input into quoted terms", () => {
-    expect(searchExpression("okapi heron")).toBe('"okapi" "heron"');
-    expect(searchExpression('"')).toBeNull();
-    expect(searchExpression("*")).toBeNull();
-    expect(searchExpression("-")).toBeNull();
-    expect(searchExpression("NEAR(")).toBe('"NEAR"');
-    expect(searchExpression("OR")).toBe('"OR"');
-    // At most 8 terms count.
-    expect(searchExpression('a OR b NOT "c" title:d e* -f ^g {h} (i)')).toBe('"a" "OR" "b" "NOT" "c" "title" "d" "e"');
-    expect(searchExpression('say "hi"')).toBe('"say" "hi"');
-    expect(searchExpression("café 東京")).toBe('"café" "東京"');
+describe("AT-86 the query is bounded and user input is never a wildcard", () => {
+  it("splits terms on whitespace, at most 5, and escapes LIKE wildcards", () => {
+    expect(searchTerms("okapi  heron\tokapi")).toEqual(["okapi", "heron"]);
+    expect(searchTerms("a b c d e f g")).toEqual(["a", "b", "c", "d", "e"]);
+    expect(likePattern("okapi")).toBe("%okapi%");
+    expect(likePattern("100%")).toBe("%100\\%%");
+    expect(likePattern("a_b")).toBe("%a\\_b%");
+    expect(likePattern("back\\slash")).toBe("%back\\\\slash%");
+    expect(likePattern('"hi"')).toBe('%"hi"%');
   });
 
-  it("answers odd input with a page, never an error from the index", async () => {
-    await thread({ title: "Okapi near the river", caption: "", stamp: "2026-02-01T00:00:00Z" });
-    for (const input of ['""', "**", "--", "()", "NEAR(", "OR", "AND NOT", 'okapi"', "okapi*", "title:okapi", "NEAR(okapi river)", "{okapi}", "^okapi", "okapi OR zebra"]) {
+  it("matches %, _, \\, and quotes literally", async () => {
+    await thread({ title: "Percent", caption: "100% sure", stamp: "2026-02-01T00:00:00Z" });
+    await thread({ title: "Thousand", caption: "1000 sure", stamp: "2026-02-02T00:00:00Z" });
+    await thread({ title: "Underscore", caption: "snake a_b case", stamp: "2026-02-03T00:00:00Z" });
+    await thread({ title: "Letter", caption: "snake axb case", stamp: "2026-02-04T00:00:00Z" });
+    await thread({ title: "Backslash", caption: "path back\\slash here", stamp: "2026-02-05T00:00:00Z" });
+    await thread({ title: "Quoted", caption: 'they say "hi" often', stamp: "2026-02-06T00:00:00Z" });
+    await thread({ title: "Unquoted", caption: "they say hi often", stamp: "2026-02-07T00:00:00Z" });
+
+    expect(results(await search("0%"))).toEqual(["Percent"]);
+    expect(results(await search("%%"))).toEqual([]);
+    expect(results(await search("a_b"))).toEqual(["Underscore"]);
+    expect(results(await search("__"))).toEqual([]);
+    expect(results(await search("back\\slash"))).toEqual(["Backslash"]);
+    expect(results(await search("\\\\"))).toEqual([]);
+    expect(results(await search('"hi"'))).toEqual(["Quoted"]);
+    expect(results(await search("'hi'"))).toEqual([]);
+    expect(results(await search("say hi"))).toEqual(["Unquoted", "Quoted"]);
+    // A sixth term is ignored.
+    expect(results(await search("say hi often they the zzyzx"))).toEqual(["Unquoted", "Quoted"]);
+    for (const input of ['""', "%_", "\\%", "' OR 1=1 --", "NEAR(", "*okapi*", "[a-z]"]) {
       const response = await call(`/search?q=${encodeURIComponent(input)}`);
       expect(response.status, input).toBe(200);
-      expect(response.headers.get("content-security-policy"), input).toContain("script-src 'none'");
-      await response.text();
+      expect(results(await response.text()), input).toEqual([]);
     }
-    expect(results(await search('okapi"'))).toEqual(["Okapi near the river"]);
-    expect(results(await search("okapi*"))).toEqual(["Okapi near the river"]);
-    expect(results(await search("NEAR(okapi river)"))).toEqual(["Okapi near the river"]);
-    // OR is a word, not an operator: every term is still required.
-    expect(results(await search("okapi OR zebra"))).toEqual([]);
   });
 
   it("takes 2 to 100 characters after trimming", async () => {
@@ -263,7 +269,7 @@ describe("AT-86 the query is bounded and is never FTS5 syntax", () => {
 });
 
 describe("AT-87 the search page and the header form", () => {
-  it("pages 25 at a time, best match first and newest first on a tie", async () => {
+  it("pages 25 at a time, title matches first and newest first", async () => {
     const statements: D1PreparedStatement[] = [];
     for (let index = 1; index <= 30; index += 1) {
       const threadId = uuidv7();
@@ -276,20 +282,21 @@ describe("AT-87 the search page and the header form", () => {
       );
     }
     await env.DB.batch(statements);
-    // A stronger match: the word in the title and twice in the caption.
-    await thread({ title: "Gecko", caption: "gecko gecko", stamp: "2026-01-01T00:00:00Z" });
+    // The newest Post of all matches only in its caption, so it ranks after every title match.
+    await thread({ title: "Lizard", caption: "a gecko again", stamp: "2026-04-01T00:00:00Z" });
 
     const first = await search("gecko");
     const firstTitles = results(first);
     expect(firstTitles).toHaveLength(25);
-    expect(firstTitles[0]).toBe("Gecko");
-    expect(firstTitles.slice(1, 4)).toEqual(["Gecko 30", "Gecko 29", "Gecko 28"]);
+    expect(firstTitles.slice(0, 3)).toEqual(["Gecko 30", "Gecko 29", "Gecko 28"]);
+    expect(firstTitles[24]).toBe("Gecko 6");
     expect(first).toContain("31 Posts match.");
     expect(first).toContain('<a href="/search?q=gecko&amp;page=2" rel="next">Next</a>');
     expect(first).toContain('<a href="/search?q=gecko" aria-current="page"><span class="visually-hidden">Page </span>1</a>');
 
     const second = await search("gecko", 2);
-    expect(results(second)).toEqual(["Gecko 6", "Gecko 5", "Gecko 4", "Gecko 3", "Gecko 2", "Gecko 1"]);
+    expect(results(second)).toEqual(["Gecko 5", "Gecko 4", "Gecko 3", "Gecko 2", "Gecko 1", "Lizard"]);
+    expect(second).toContain("a <mark>gecko</mark> again");
     expect(second).toContain('<a href="/search?q=gecko" rel="prev">Previous</a>');
     expect(second).toContain("<title>Search: gecko, page 2 — j-chain.net</title>");
     expect((await call("/search?q=gecko&page=3")).status).toBe(404);
@@ -302,23 +309,31 @@ describe("AT-87 the search page and the header form", () => {
       caption: "<script>alert(1)</script> iguana & <img src=x onerror=alert(2)>",
       stamp: "2026-02-01T00:00:00Z",
     });
-    const response = await call(`/search?q=${encodeURIComponent("iguana <img>")}`);
+    const response = await call(`/search?q=${encodeURIComponent("IGUANA <img")}`);
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).not.toContain("<script");
     expect(html).not.toContain("<img src=x");
     expect(html).not.toContain("<b>Bold");
     expect(html).toContain("&lt;b&gt;Bold&lt;/b&gt; &amp; &quot;quoted&quot;");
-    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt; <mark>iguana</mark> &amp; &lt;<mark>img</mark> src=x onerror=alert(2)&gt;");
-    expect(html).toContain("<title>Search: iguana &lt;img&gt; — j-chain.net</title>");
-    expect(html).toContain('<meta property="og:title" content="Search: iguana &lt;img&gt; — j-chain.net">');
-    expect(html).toContain('value="iguana &lt;img&gt;"');
+    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt; <mark>iguana</mark> &amp; <mark>&lt;img</mark> src=x onerror=alert(2)&gt;");
+    expect(html).toContain("<title>Search: IGUANA &lt;img — j-chain.net</title>");
+    expect(html).toContain('<meta property="og:title" content="Search: IGUANA &lt;img — j-chain.net">');
+    expect(html).toContain('value="IGUANA &lt;img"');
     expect(html).toContain('<meta name="robots" content="noindex">');
     expect(response.headers.get("x-robots-tag")).toBe("noindex");
 
-    // The snippet builder always balances its marks and escapes everything else.
-    expect(markedSnippet("a \u0002b\u0003 <c>")).toBe("a <mark>b</mark> &lt;c&gt;");
-    expect(markedSnippet("\u0003x\u0002y")).toBe("x<mark>y</mark>");
+    // The highlighter escapes everything, marks case-insensitively, merges overlaps, and
+    // windows long text around the first match.
+    expect(highlight("a B <c>", ["b"])).toBe("a <mark>B</mark> &lt;c&gt;");
+    expect(highlight("abcd", ["abc", "bcd"])).toBe("<mark>abcd</mark>");
+    expect(highlight("x.y", ["."])).toBe("x<mark>.</mark>y");
+    expect(highlight("<a&b>", ["&"])).toBe("&lt;a<mark>&amp;</mark>b&gt;");
+    const long = `${"word ".repeat(60)}target ${"tail ".repeat(60)}`;
+    const windowed = highlight(long, ["target"]);
+    expect(windowed.startsWith("…")).toBe(true);
+    expect(windowed.endsWith("…")).toBe(true);
+    expect(windowed).toContain("<mark>target</mark>");
   });
 
   it("shows the empty and no-match states", async () => {
@@ -433,10 +448,12 @@ function results(html: string): string[] {
   return [...html.matchAll(/<li class="search-result">.*?<h2><a href="[^"]+">(.*?)<\/a><\/h2>/g)].map((match) => match[1] ?? "");
 }
 
-// Index rows that match the word, whatever the Post's state: the index itself, not the page.
-async function indexed(word: string): Promise<number> {
-  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM post_search WHERE post_search MATCH ?")
-    .bind(`"${word}"`).first<{ n: number }>();
+// Post rows whose text holds the word, whatever their state: the stored text itself, not the page.
+async function stored(word: string): Promise<number> {
+  const pattern = `%${word}%`;
+  const row = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM posts WHERE title LIKE ? OR caption LIKE ? OR alt_text LIKE ?",
+  ).bind(pattern, pattern, pattern).first<{ n: number }>();
   return Number(row?.n ?? 0);
 }
 
