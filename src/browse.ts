@@ -4,7 +4,7 @@ import {
   decodeBoardCursor,
   encodeBoardCursor,
   parseSort,
-  snapshotId,
+  postsSnapshot,
   visiblePinnedThread,
   type BoardSort,
 } from "./board-order";
@@ -119,10 +119,10 @@ async function boardThreads(c: Ctx): Promise<Response> {
 
   const pinned = cursor === null ? await visiblePinnedThread(c.env.DB, boardId) : null;
   const excluded = cursor === null ? pinned : cursor.pinned;
-  const snapshot = sort === "active" ? cursor?.snapshot ?? snapshotId() : null;
+  const snapshot = sort === "active" ? cursor?.snapshot ?? await postsSnapshot(c.env.DB) : null;
   const keyExpression = sort === "active" ? bumpSql("posts", snapshot) : "posts.created_at";
-  // The snapshot is a validated UUIDv7 (hex and hyphens only), checked again by bumpSql.
-  const snapshotSql = snapshot === null ? "" : ` AND posts.id <= '${snapshot}'`;
+  // The snapshot is a validated whole number, checked again by bumpSql.
+  const snapshotSql = snapshot === null ? "" : ` AND posts.rowid <= ${snapshot}`;
   const keyset = cursor === null || cursor.key === null || cursor.id === null
     ? null
     : { key: cursor.key, id: cursor.id };

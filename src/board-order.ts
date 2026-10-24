@@ -25,10 +25,13 @@ export function parseSort(raw: string | undefined): BoardSort | null | "malforme
 // Replies it is the newest visible Post. From BUMP_LIMIT on it is the BUMP_LIMIT-th visible
 // Reply, oldest first, so later Replies add nothing. A snapshot id leaves out Posts written
 // after the first page of an API listing, so later pages keep the order the first page saw.
-// The snapshot is a validated UUIDv7 (lowercase hex and hyphens only), so it is inlined.
-export function bumpSql(opening: string, snapshot: string | null): string {
-  if (snapshot !== null && !isUuidV7(snapshot)) throw new Error("bad snapshot");
-  const capped = (alias: string): string => snapshot === null ? "" : ` AND ${alias}.id <= '${snapshot}'`;
+// The snapshot is the highest posts rowid committed when page 1 was read (codex review on #168):
+// a rowid is assigned when the row is inserted, so a Reply that commits later, even one whose id
+// was allocated earlier, is above it. Posts rows are never deleted, so rowids only grow.
+// The snapshot is a validated whole number, so it is inlined.
+export function bumpSql(opening: string, snapshot: number | null): string {
+  if (snapshot !== null && !Number.isSafeInteger(snapshot)) throw new Error("bad snapshot");
+  const capped = (alias: string): string => snapshot === null ? "" : ` AND ${alias}.rowid <= ${snapshot}`;
   return `MAX(${opening}.created_at, COALESCE(
     (SELECT bump_reply.created_at FROM posts AS bump_reply
       WHERE bump_reply.thread_id = ${opening}.thread_id AND bump_reply.title IS NULL
@@ -41,11 +44,10 @@ export function bumpSql(opening: string, snapshot: string | null): string {
     ${opening}.created_at))`;
 }
 
-// The highest UUIDv7 of the millisecond before now. Every id written after this read, even in
-// the same millisecond, compares above it, so it never joins a later page of this listing.
-export function snapshotId(now = Date.now()): string {
-  const hex = (now - 1).toString(16).padStart(12, "0").slice(-12);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-7fff-bfff-ffffffffffff`;
+// The commit-order boundary for an Active listing: every Post inserted after this read is above it.
+export async function postsSnapshot(db: D1Database): Promise<number> {
+  const row = await db.prepare("SELECT COALESCE(MAX(rowid), 0) AS n FROM posts").first<{ n: number }>();
+  return Number(row?.n ?? 0);
 }
 
 // The board's pinned Thread, only while its Opening Post is visible (Visibility Projection).
@@ -66,7 +68,7 @@ export async function visiblePinnedThread(db: D1Database, boardId: string): Prom
 export type BoardCursor = {
   sort: BoardSort;
   pinned: string | null;
-  snapshot: string | null;
+  snapshot: number | null;
   key: string | null;
   id: string | null;
 };
@@ -76,7 +78,7 @@ export function encodeBoardCursor(cursor: BoardCursor): string {
     VERSION,
     cursor.sort,
     cursor.pinned ?? NONE,
-    cursor.snapshot ?? NONE,
+    cursor.snapshot === null ? NONE : String(cursor.snapshot),
     cursor.key ?? NONE,
     cursor.id ?? NONE,
   ].join("|");
@@ -107,7 +109,9 @@ export function decodeBoardCursor(value: string): BoardCursor | null {
   if (sort !== "new" && sort !== "active") return null;
   const optionalId = (part: string): string | null | false => part === NONE ? null : isUuidV7(part) ? part : false;
   const pinnedId = optionalId(pinned);
-  const snapshotValue = optionalId(snapshot);
+  const snapshotValue = snapshot === NONE
+    ? null
+    : /^(0|[1-9][0-9]{0,14})$/.test(snapshot) ? Number(snapshot) : false;
   const lastId = optionalId(id);
   if (pinnedId === false || snapshotValue === false || lastId === false) return null;
   const keyValue = key === NONE ? null : STAMP.test(key) ? key : false;

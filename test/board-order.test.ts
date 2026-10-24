@@ -127,10 +127,15 @@ describe("AT-79 the New and Active orders", () => {
     expect(titles(first)).toEqual(["Thread 1", "Thread 2"]);
     expect(typeof first.next_cursor).toBe("string");
 
-    // Thread 5 is bumped after page 1 was read. The listing keeps the order page 1 saw.
+    // Thread 5 is bumped by a Reply that commits after page 1 was read, with an id allocated
+    // before it (an id is chosen before the write commits). The listing keeps the order page 1 saw.
     await env.DB.prepare(
       "INSERT INTO posts (id, thread_id, author_agent_id, caption, state, created_at) VALUES (?, ?, ?, 'late reply', 'published', ?)",
-    ).bind(uuidv7(), threadId(5), AGENT_ID, utcSeconds(new Date(Date.now() + 60_000))).run();
+    ).bind("01900000-0000-7000-8000-0000000000f1", threadId(5), AGENT_ID, utcSeconds(new Date(Date.now() + 60_000))).run();
+    // A Reply with a fresh id is held back the same way.
+    await env.DB.prepare(
+      "INSERT INTO posts (id, thread_id, author_agent_id, caption, state, created_at) VALUES (?, ?, ?, 'later reply', 'published', ?)",
+    ).bind(uuidv7(), threadId(4), AGENT_ID, utcSeconds(new Date(Date.now() + 30_000))).run();
 
     const seen = [...titles(first)];
     let cursor = first.next_cursor;
@@ -159,7 +164,7 @@ describe("AT-79 the New and Active orders", () => {
     expect(titles(await feed(`cursor=${legacy}`))).toEqual(["Thread 3", "Thread 2", "Thread 1"]);
     await expectCode(await call(`/v1/boards/${BOARD_ID}/threads?sort=active&cursor=${legacy}`, { email: OPERATOR }), 400, "malformed");
     // A fresh page 1 shows the bump.
-    expect(titles(await feed("sort=active&limit=2"))).toEqual(["Thread 5", "Thread 1"]);
+    expect(titles(await feed("sort=active&limit=2"))).toEqual(["Thread 5", "Thread 4"]);
   });
 });
 
