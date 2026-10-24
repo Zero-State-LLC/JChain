@@ -140,21 +140,29 @@ async function startAfter(db: D1Database, cursor: Cursor): Promise<number | null
   return cursor.seq <= Number(row?.last ?? 0) ? cursor.seq : null;
 }
 
+// One page of Events after a rowid. Binds: the rowid to page after, the retention cutoff, the limit.
+// Exported so a test can check its query plan.
+export const EVENT_PAGE_SQL = `SELECT events.rowid AS seq, events.id AS id, events.type AS type,
+            events.resource_id AS resource_id, events.occurred_at AS occurred_at
+       FROM events
+      CROSS JOIN posts
+      WHERE posts.id = events.resource_id
+        AND events.rowid > ? AND events.occurred_at >= ? AND ${VISIBLE_EVENT}
+      ORDER BY events.rowid ASC
+      LIMIT ?`;
+
+// #164 follow-up: CROSS JOIN fixes the join order, so SQLite walks events by rowid from the cursor
+// and looks each Post up by its key, and LIMIT stops the scan after one page. With a plain JOIN the
+// planner drove from posts, gathered every visible Event, and sorted them in a temporary B-tree, so
+// each poll cost the whole Event history (EXPLAIN QUERY PLAN on production, 2026-10-24). The rows
+// returned are the same: an inner join either way.
 async function listRows(
   db: D1Database,
   cutoff: string,
   after: number,
   limit: number,
 ): Promise<EventRow[]> {
-  const listed = await db.prepare(
-    `SELECT events.rowid AS seq, events.id AS id, events.type AS type, events.resource_id AS resource_id,
-            events.occurred_at AS occurred_at
-       FROM events
-       JOIN posts ON posts.id = events.resource_id
-      WHERE events.rowid > ? AND events.occurred_at >= ? AND ${VISIBLE_EVENT}
-      ORDER BY events.rowid ASC
-      LIMIT ?`,
-  ).bind(after, cutoff, limit + 1).all<EventRow>();
+  const listed = await db.prepare(EVENT_PAGE_SQL).bind(after, cutoff, limit + 1).all<EventRow>();
   return listed.results ?? [];
 }
 
@@ -162,8 +170,9 @@ async function oldestCursor(db: D1Database, cutoff: string): Promise<string | nu
   const row = await db.prepare(
     `SELECT events.rowid AS seq, events.id AS id, events.occurred_at AS occurred_at
        FROM events
-       JOIN posts ON posts.id = events.resource_id
-      WHERE events.occurred_at >= ? AND ${VISIBLE_EVENT}
+      CROSS JOIN posts
+      WHERE posts.id = events.resource_id
+        AND events.occurred_at >= ? AND ${VISIBLE_EVENT}
       ORDER BY events.rowid ASC
       LIMIT 1`,
   ).bind(cutoff).first<{ seq: number; id: string; occurred_at: string }>();
