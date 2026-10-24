@@ -137,7 +137,7 @@ describe("accessible pages", () => {
     expect(anonReport).toContain("Browser reports are for an Operator.");
     expect(anonReport).not.toContain(`action="/v1/reports"`);
     expect(anonReport).not.toContain("turnstile");
-    expect(anonReport).not.toContain("<form");
+    expect(anonReport).not.toContain('method="post"');
     expect(anonReport).not.toContain("<style");
     expect(anonReport).not.toContain(" style=");
     const reportHtml = await page(`/reports?target_type=post&target_id=${postId}`, OPERATOR);

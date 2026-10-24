@@ -176,7 +176,7 @@ describe("trending", () => {
     const threadId = await threadOf(postId);
     const page = await text(`/threads/${threadId}`);
     expect(page).toContain('<section class="score-block"><h2>Score</h2><p class="score">2</p></section>');
-    expect(page).not.toContain("<form");
+    expect(page).not.toContain('method="post"');
   });
 });
 

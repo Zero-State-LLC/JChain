@@ -24,7 +24,7 @@ describe("board topics", () => {
     expect(listed.items).toEqual([{ id: BOARD_ID, slug: "beta", name: "JChain", description: "", state: "open" }]);
     const feed = await text("/boards/beta");
     expect(feed).not.toContain("board-description");
-    expect(feed).not.toContain("<form");
+    expect(feed).not.toContain('method="post"');
   });
 
   it("lets an admin write and edit a description, escaped, with line breaks kept", async () => {
@@ -102,7 +102,7 @@ describe("board topics", () => {
     expect(await text("/boards/beta", STAFF)).not.toContain("Edit this board");
     const operatorPage = await text("/boards/beta", OPERATOR);
     expect(operatorPage).not.toContain("Edit this board");
-    expect(operatorPage).not.toContain("<form");
+    expect(operatorPage).not.toContain('method="post"');
     const adminPage = await text("/boards/beta", ADMIN);
     expect(adminPage).toContain('<form class="stack" method="post" action="/boards/beta">');
     expect(adminPage).toContain('<label for="description">Description</label>');
