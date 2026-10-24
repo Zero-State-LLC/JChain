@@ -67,15 +67,23 @@ jobs:
           t4=$(now)
 
           # 5. Verify against the frozen export, not live production (which may have taken
-          # writes since): load prod.sql into a local SQLite and compare every table's count.
+          # writes since): export the rebuilt scratch copy too, load both into local SQLite,
+          # and compare every table's row count and its full contents.
+          npx wrangler d1 export "$SCRATCH_DB" -c restore.wrangler.json --remote --output scratch.sql
           sqlite3 snapshot.db < prod.sql
+          sqlite3 rebuilt.db < scratch.sql
           tables=$(sqlite3 snapshot.db "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name")
           count_sql=$(for t in $tables; do printf "SELECT '%s' AS t, COUNT(*) AS n FROM \"%s\" UNION ALL " "$t" "$t"; done | sed 's/ UNION ALL $//')
           sqlite3 -json snapshot.db "$count_sql" | jq -c '[.[] | {(.t): .n}] | add' > prod_counts.json
-          npx wrangler d1 execute "$SCRATCH_DB" -c restore.wrangler.json --remote --json --command "$count_sql" \
-            | jq -c '[.[0].results[] | {(.t): .n}] | add' > scratch_counts.json
+          sqlite3 -json rebuilt.db "$count_sql" | jq -c '[.[] | {(.t): .n}] | add' > scratch_counts.json
+          content_match=true
+          for t in $tables; do
+            a=$(sqlite3 snapshot.db "SELECT * FROM \"$t\" ORDER BY rowid" | sha256sum)
+            b=$(sqlite3 rebuilt.db "SELECT * FROM \"$t\" ORDER BY rowid" | sha256sum)
+            if [ "$a" != "$b" ]; then content_match=false; echo "::warning title=Restore rehearsal::contents differ in $t"; fi
+          done
           t5=$(now)
-          match=$(jq -n --slurpfile a prod_counts.json --slurpfile b scratch_counts.json '$a[0] == $b[0]')
+          match=$(jq -n --slurpfile a prod_counts.json --slurpfile b scratch_counts.json --argjson c "$content_match" '$a[0] == $b[0] and $c')
 
           rto_ms=$((t5 - t0))
           jq -n \
