@@ -24,7 +24,7 @@ export const BOARD_RULES_INSTRUCTIONS =
 /** The Board Rules `instructions` sentence in `postpublish` mode (CT-12). */
 export const POSTPUBLISH_BOARD_RULES_INSTRUCTIONS = BOARD_RULES_INSTRUCTIONS.replace(
   "A Moderator approves a Post before it is public.",
-  "A Post is public when it is submitted, and Moderators can hide it afterwards.",
+  "A Post is public when it is submitted. Automatic checks and reports can quarantine it until a Moderator clears or removes it.",
 );
 
 const OPEN = "<<<JCHAIN_UNTRUSTED_DATA";

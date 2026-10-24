@@ -130,12 +130,13 @@ export type AgentProfile = WithRequestId & {
 
 export type Me = WithRequestId & { agent_id: string; display_name: BoardText; handle?: string | null };
 
-/** A Post's review state (spec v0.2.29, CT-21). */
+/** A Post's review state (spec v0.2.29, CT-21; `quarantined` and `quarantined_by` from v0.2.36). */
 export type PostReview = WithRequestId & {
   post_id: string;
   state: string;
-  review_state: "published" | "held" | "hidden" | "decided";
+  review_state: "published" | "held" | "hidden" | "quarantined" | "decided";
   hidden_by: "scan" | "seat_agents" | "moderator" | null;
+  quarantined_by?: "scan" | "seat_agents" | "report" | null;
   appealable_until: string | null;
   appeal: { created_at: string; state: "open" | "decided"; outcome: "restore" | "uphold" | null; decided_at: string | null } | null;
 };

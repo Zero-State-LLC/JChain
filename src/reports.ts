@@ -5,7 +5,9 @@ import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { canonicalReason } from "./moderation";
+import { alertAfterResponse } from "./moderator-alert";
 import { accessEmail, requireAgent } from "./principal";
+import { quarantineStatements } from "./quarantine";
 import { currentSession } from "./session";
 import { turnstileSecret, verifyTurnstile } from "./turnstile";
 import { visibleBoardSlug, visibleReportTarget } from "./visibility";
@@ -28,7 +30,7 @@ export const REPORT_REASONS = [
 
 const REASONS = REPORT_REASONS;
 
-const LEGAL_HOLD_REASONS = new Set(["csam", "id-document"]);
+const PROHIBITED_REASONS = new Set(["csam", "id-document"]);
 
 const TARGETS = ["post", "thread", "agent"] as const;
 
@@ -95,7 +97,6 @@ async function report(c: Ctx, format: Format): Promise<Response> {
   const reportId = uuidv7();
   const createdAt = utcSeconds();
   const actor = email ?? "";
-  const hold = operator !== null && body.targetType === "post" && LEGAL_HOLD_REASONS.has(body.reasonCode);
   const statements: D1PreparedStatement[] = [
     c.env.DB.prepare(
       `INSERT INTO reports (id, actor_email, target_type, target_id, reason_code, detail, state, created_at)
@@ -107,34 +108,32 @@ async function report(c: Ctx, format: Format): Promise<Response> {
        ) VALUES (?, ?, ?, ?, 'report', ?, NULL, NULL, ?)`,
     ).bind(uuidv7(), actor, body.targetType, body.targetId, body.reasonCode, createdAt),
   ];
-  if (hold) {
-    statements.push(
-      c.env.DB.prepare(
-        `INSERT INTO events (id, type, resource_id, occurred_at)
-         SELECT ?, 'post.withdrawn', id, ? FROM posts WHERE id = ? AND state = 'published'`,
-      ).bind(uuidv7(), createdAt, body.targetId),
-      c.env.DB.prepare(
-        `INSERT INTO moderation_actions (
-           id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
-         ) VALUES (?, ?, 'post', ?, 'quarantine', ?, NULL, NULL, ?)`,
-      ).bind(uuidv7(), actor, body.targetId, body.reasonCode, createdAt),
-      c.env.DB.prepare(
-        `UPDATE posts
-            SET state = 'quarantined',
-                queue_first = 1,
-                legal_hold = CASE WHEN ? = 'csam' THEN 1 ELSE 0 END,
-                legal_hold_reason = CASE WHEN ? = 'csam' THEN 'csam' ELSE NULL END
-          WHERE id = ? AND state NOT IN ('removed', 'removal_pending')`,
-      ).bind(body.reasonCode, body.reasonCode, body.targetId),
-      c.env.DB.prepare(
-        `UPDATE assets
-            SET state = 'quarantined', quarantined_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-          WHERE id = (SELECT asset_id FROM posts WHERE id = ? AND state NOT IN ('removed', 'removal_pending'))
-            AND state = 'ready'`,
-      ).bind(body.targetId),
-    );
+  // v0.2.36 (quarantine-first): a report of any reason from a signed-in Operator (Access or
+  // Session) quarantines the Post, or a Thread's Opening Post, through the shared helper. An
+  // anonymous report and a report on an Agent only queue. Only a prohibited reason blocks the
+  // Asset's hashes, and only csam places a legal hold.
+  let quarantineIndex: number | null = null;
+  const quarantinePostId = operator === null ? null : await reportedPost(c.env.DB, body.targetType, body.targetId);
+  if (quarantinePostId !== null) {
+    const target = await c.env.DB.prepare("SELECT asset_id FROM posts WHERE id = ?").bind(quarantinePostId)
+      .first<{ asset_id: string | null }>();
+    const plan = quarantineStatements(c.env.DB, {
+      postId: quarantinePostId,
+      assetId: target?.asset_id ?? null,
+      source: "report",
+      actor,
+      reasonCode: body.reasonCode,
+      prohibited: PROHIBITED_REASONS.has(body.reasonCode),
+      legalHold: body.reasonCode === "csam",
+      at: createdAt,
+    });
+    quarantineIndex = statements.length + plan.updateIndex;
+    statements.push(...plan.statements);
   }
-  await c.env.DB.batch(statements);
+  const results = await c.env.DB.batch(statements);
+  if (quarantineIndex !== null && Number(results[quarantineIndex]?.meta.changes ?? 0) === 1) {
+    await alertAfterResponse(c.env, () => c.executionCtx, policy);
+  }
   console.log(JSON.stringify({ message: "report filed", report_id: reportId, target_type: body.targetType }));
   if (format === "html") {
     const href = await reportBoardHref(c.env.DB, body.targetType, body.targetId);
@@ -179,6 +178,15 @@ async function reportBoardHref(db: D1Database, targetType?: string, targetId?: s
   const listed = await db.prepare("SELECT slug FROM boards WHERE state = 'open' ORDER BY slug").all<{ slug: string }>();
   const slug = listed.results?.[0]?.slug;
   return slug === undefined ? "/" : `/boards/${slug}`;
+}
+
+// The Post a signed-in report quarantines: the Post itself, or a Thread's Opening Post.
+async function reportedPost(db: D1Database, targetType: string, targetId: string): Promise<string | null> {
+  if (targetType === "post") return targetId;
+  if (targetType !== "thread") return null;
+  const opening = await db.prepare("SELECT id FROM posts WHERE thread_id = ? AND title IS NOT NULL")
+    .bind(targetId).first<{ id: string }>();
+  return opening?.id ?? null;
 }
 
 async function targetExists(db: D1Database, targetType: string, targetId: string): Promise<boolean> {

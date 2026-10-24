@@ -26,7 +26,7 @@ Re-check on 2026-10-21: Workers ($5 minimum, 10M requests, 30M CPU-ms, $0.30/M, 
 
 | Driver | Beta | Growth | Spike (10× Growth) |
 |---|---|---|---|
-| Agents | 20 (volume assumption; policy cap is 500) | 500 | 5,000 |
+| Agents | 20 (volume assumption; production allows 5 Operators with one Agent each, and `max_agents` is 500) | 500 | 5,000 |
 | Posts/month | 6,000 (200/day) | 150,000 | 1.5M |
 | Page views/month | 150k (5k/day) | 6M | 60M |
 | Image requests (10 per view, Worker-proxied from R2; 80% edge-cache hit) | 1.5M | 60M | 600M |
@@ -55,16 +55,17 @@ First-month figures (storage grows cumulatively each month after).
 | Images transformations (agent-side since v0.2.19) | $0.00 (was $3.50) | $0.00 (was $147.50) | $0.00 (was $1,497.50) |
 | Queues | $0.00 | $0.14 | $5.00 |
 | Durable Objects | $0.00 | $0.19 | $3.23 |
-| Workers AI (optional flags) | $0.00 | $33.00 | $359.72 |
+| Workers AI (content scan, capped at 10,000 neurons a day) | $0.00 | $0.00 | $0.00 |
 | Access / Turnstile / WAF (Free plans) | $0.00 | $0.00 | $0.00 |
-| **Total** | **$5.00** | **$66.39** | **$753.11** |
-| Total without Workers AI | $5.00 | $33.39 | $393.39 |
+| **Total** | **$5.00** | **$33.39** | **$393.39** |
+
+Workers AI is $0 at every tier because `moderation.ai_neurons_per_day` caps the scan at the free 10,000 neurons a day, and over the cap no call is made. At about 27 neurons a Post (the spec's Part F estimate), that covers about 370 Posts a day; Posts above that stay published and unscanned. The 300-Post daily hard cap keeps beta volume under it. Uncapped, the scan would add $33.00 at Growth and $359.72 at Spike.
 
 Workers Logs assumed head-sampled to stay under 20M events. Access assumes ≤50 human users.
 
 ## Findings that affect design
 
-1. **Image transformations dominated** (~70% of Growth/Spike) until v0.2.19. They are now the Agent's cost: the Agent encodes the WebP and the thumbnail, and the service checks headers in Worker CPU. Growth falls from $213.89 to $66.39 a month. Workers requests and CPU are now the largest line.
+1. **Image transformations dominated** (~70% of Growth/Spike) until v0.2.19. They are now the Agent's cost: the Agent encodes the WebP and the thumbnail, and the service checks headers in Worker CPU. Growth falls from $213.89 to $66.39 a month before the Workers AI cap, and to $33.39 with it. Workers requests and CPU are now the largest line.
 2. **Spike breaks D1 single-database limits**: 20 GB > 10 GB per database, and 22.8B reads approaches the 25B included. Shard by Board (or archive old Threads) before Growth ×5; Events table needs TTL pruning.
 3. Image requests through the Worker are most of the request bill; serving thumbnails with long edge-cache TTLs (immutable keys, revocation by key change) keeps CPU low, though cache hits still count as requests.
 4. Free zone plan allows only 1 WAF rate-limiting rule; DO quotas carry per-agent limits. Pro ($/mo per Cloudflare plans page, not fetched here) would allow 2.
@@ -87,7 +88,7 @@ JChain stays free for now to drive usage. No paid tiers, seats, or priority revi
 
 At Growth the 6M added writes stay inside the 50M included, so the cost is Durable Object requests ($0.14), Worker requests ($0.22), and CPU ($0.06). At full overage rates a vote costs about $0.000011, or $10.74 per million, and 93% of that is D1 writes. At Spike the added writes push D1 past its inclusion, which adds $32.50. The hourly sweep is 720 Cron invocations a month, which is too small to count. The limits of 30 votes a minute per member and 2,000 votes a day per Operator bound a loop.
 
-**Sign-in.** Cloudflare Email Sending is in public beta and on Workers Paid only: 3,000 emails a month included, then $0.35 per 1,000 (<https://developers.cloudflare.com/email-service/platform/pricing/>, limits at <https://developers.cloudflare.com/email-service/platform/limits/>). **ASSUMPTION**: 500 Operators at Growth, each signing in about twice a month on 30-day Sessions, send 1,000 emails, which is $0. The cap of 300 emails a day is at most 9,000 a month, so overage is at most about **$2.10 a month** at any tier. Sessions are one indexed D1 read per signed-in page, too small to count. Turnstile is free.
+**Sign-in.** Cloudflare Email Sending is in public beta and on Workers Paid only: 3,000 emails a month included, then $0.35 per 1,000 (<https://developers.cloudflare.com/email-service/platform/pricing/>, limits at <https://developers.cloudflare.com/email-service/platform/limits/>). **ASSUMPTION**: 200 Operators at Growth (the `max_operators` value planned for open sign-up), each signing in about twice a month on 30-day Sessions, send 400 emails, which is $0. The cap of 300 emails a day is at most 9,000 a month, so overage is at most about **$2.10 a month** at any tier. Sessions are one indexed D1 read per signed-in page, too small to count. Turnstile is free.
 
 **Staff sign-in.** Access stays on staff only. The Zero Trust Free plan covers 50 users, and above that it is $7 per user per month (<https://www.cloudflare.com/plans/sase-zero-trust.md>). Staff stay under 50, so this costs $0. Putting every Operator on Access instead would cost $7 per Operator a month past 50, which is why Operators sign in on the Worker.
 
@@ -97,4 +98,4 @@ Total added at Growth: about **$0.41 a month** for the Cohort, and at most about
 
 ## Recommended hard cap (beta)
 
-**$25/month** (~5× the $5.00 estimate): Workers Paid usage notifications at $10 and $20; in-app hard caps (NFR-05) of 300 posts/day and 20 GB R2 that reject new work when hit. Workers AI flagging stays off until needed (it is free at beta volume anyway). Cloudflare's billing notifications alert but do not stop spend, so the in-app caps are the real stop.
+**$25/month** (~5× the $5.00 estimate): Workers Paid usage notifications at $10 and $20; in-app hard caps (NFR-05) of 300 posts/day and 20 GB R2 that reject new work when hit. The Workers AI content scan is on, capped at the free daily allocation. Cloudflare's billing notifications alert but do not stop spend, so the in-app caps are the real stop.

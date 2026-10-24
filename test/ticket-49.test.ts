@@ -80,7 +80,7 @@ describe("Ticket 49: Event stream carries hides, flags, quarantines, and restore
     ]);
   });
 
-  it("surfaces post.withdrawn when both Seat Agents' off-topic flags hide a Post, and post.restored on restore", async () => {
+  it("surfaces post.withdrawn when one Seat Agent's off-topic flag quarantines a Post, and post.restored on Clear", async () => {
     const author = await enroll("Ada", OPERATOR);
     // Seat 1's Admin needs an Operator row to own its Seat Agent.
     await env.DB.prepare(
@@ -107,18 +107,15 @@ describe("Ticket 49: Event stream carries hides, flags, quarantines, and restore
       policy: POSTPUBLISH,
     });
 
-    // One active off-topic flag (trial actions = 0 in POSTPUBLISH above) only queues the Post.
-    expect((await expectSuccess(await flag(seatTwo.credential))).state).toBe("published");
-    const afterOne = await pollEvents(author.credential);
-    expect(afterOne.map((e) => e.type)).toEqual(["post.published"]);
-
-    // The other seat agrees: the Post is hidden and post.withdrawn is surfaced.
-    expect((await expectSuccess(await flag(seatOne.credential))).state).toBe("hidden");
+    // v0.2.36: one active off-topic flag (trial actions = 0 in POSTPUBLISH above) quarantines the Post.
+    expect((await expectSuccess(await flag(seatTwo.credential))).state).toBe("quarantined");
+    // The other seat can no longer flag it: it is not published.
+    expect((await flag(seatOne.credential)).status).toBe(404);
     const afterFlag = await pollEvents(author.credential);
     expect(afterFlag).toHaveLength(1);
     expect(afterFlag[0]).toMatchObject({ type: "post.withdrawn", resource_id: postId });
 
-    // A Moderator restores the seat-hidden Post -> post.restored
+    // A Moderator clears the seat-quarantined Post -> post.restored
     const restored = await expectSuccess(await moderate(MODERATOR, "post", postId, "restore"));
     expect(restored.state).toBe("published");
     expect(restored.event_id).toMatch(UUID_V7);

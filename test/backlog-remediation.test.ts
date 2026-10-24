@@ -417,7 +417,7 @@ describe("legal surface (AT-36, CT-12)", () => {
     type Operation = { requestBody: { content: { "application/json": { schema: Schema } } } };
     const paths = spec.paths as Record<string, Record<string, Operation>>;
     const moderation = paths["/v1/moderation/actions"]?.post?.requestBody.content["application/json"].schema.properties ?? {};
-    expect(moderation.target_type?.enum).toEqual(["post", "thread", "agent", "asset", "operator"]);
+    expect(moderation.target_type?.enum).toEqual(["post", "thread", "agent", "asset", "operator", "report"]);
     for (const action of [
       "approve_operator", "suspend_operator", "resume_operator", "remove_operator", "set_agent_cap", "change_email",
       "uphold", "dismiss_flags", "restore_asset", "revoke_handle", "quarantine",
@@ -471,10 +471,10 @@ describe("seat flags (AT-42, AT-43)", () => {
     ).first<{ seat_state: string; seat_trial_count: number }>();
     expect(promoted).toEqual({ seat_state: "active", seat_trial_count: 10 });
 
-    // AT-42: one active off-topic flag only queues the Post; it stays published.
+    // AT-42 (v0.2.36): one active off-topic flag quarantines the Post.
     const live = await seedPost(author.agentId);
     const active = await expectJson(await flag(live.postId, seat.credential), 200);
-    expect(active).toMatchObject({ state: "published", trial: 0, event_type: "post.flagged" });
+    expect(active).toMatchObject({ state: "quarantined", trial: 0, event_type: "post.flagged" });
 
     await env.DB.prepare(
       "UPDATE admin_seats SET seat_state = 'active', seat_trial_count = 10 WHERE seat = 1",
@@ -494,7 +494,7 @@ describe("seat flags (AT-42, AT-43)", () => {
           body: {
             target_type: "post",
             target_id: unscored.postId,
-            action: "dismiss_flags",
+            action: "restore",
             reason_code: "rules",
           },
         }), 200);
@@ -516,7 +516,7 @@ describe("seat flags (AT-42, AT-43)", () => {
         body: {
           target_type: "post",
           target_id: seeded.postId,
-          action: "dismiss_flags",
+          action: "restore",
           reason_code: "rules",
         },
       }), 200);
@@ -542,7 +542,7 @@ describe("seat flags (AT-42, AT-43)", () => {
     expect(again.trial).toBe(0);
   });
 
-  it("hides a Post and quarantines its image at once on one prohibited flag, in one batch (AT-42, C-12b)", async () => {
+  it("quarantines a Post and its image at once on one prohibited flag, in one batch (AT-42, v0.2.36)", async () => {
     await seatOperator(ADMIN);
     const seat = await enroll("Seat", ADMIN);
     const author = await enroll("Author", OPERATOR);
@@ -551,12 +551,12 @@ describe("seat flags (AT-42, AT-43)", () => {
     for (const reason of ["id-document", "csam"] as const) {
       const seeded = await seedPost(author.agentId);
       const body = await expectJson(await flag(seeded.postId, seat.credential, reason), 200);
-      expect(body).toMatchObject({ post_id: seeded.postId, state: "hidden", trial: 0 });
+      expect(body).toMatchObject({ post_id: seeded.postId, state: "quarantined", trial: 0 });
       const post = await env.DB.prepare(
-        "SELECT state, hidden_by, queue_first, legal_hold FROM posts WHERE id = ?",
-      ).bind(seeded.postId).first<{ state: string; hidden_by: string; queue_first: number; legal_hold: number }>();
+        "SELECT state, quarantined_by, queue_first, legal_hold FROM posts WHERE id = ?",
+      ).bind(seeded.postId).first<{ state: string; quarantined_by: string; queue_first: number; legal_hold: number }>();
       // A Seat Flag places no legal hold; a Moderator decides that (Part D item 5).
-      expect(post).toEqual({ state: "hidden", hidden_by: "seat_agents", queue_first: 1, legal_hold: 0 });
+      expect(post).toEqual({ state: "quarantined", quarantined_by: "seat_agents", queue_first: 1, legal_hold: 0 });
       const asset = await env.DB.prepare("SELECT state, quarantined_at FROM assets WHERE id = ?")
         .bind(seeded.assetId).first<{ state: string; quarantined_at: string | null }>();
       expect(asset?.state).toBe("quarantined");
@@ -572,44 +572,40 @@ describe("seat flags (AT-42, AT-43)", () => {
         "SELECT actor_email, action, reason_code, event_id FROM moderation_actions WHERE target_id = ?",
       ).bind(seeded.postId).all<{ actor_email: string; action: string; reason_code: string; event_id: string }>();
       expect(audit.results).toEqual([
-        { actor_email: "seat_agent", action: "hide", reason_code: reason, event_id: withdrawn.results?.[0]?.id },
+        { actor_email: "seat_agent", action: "quarantine", reason_code: reason, event_id: withdrawn.results?.[0]?.id },
       ]);
       const queue = await (await call("/moderation", { email: STAFF })).text();
       const firstLine = queue.slice(queue.indexOf('id="queue-first"'), queue.indexOf('id="reports"'));
       expect(firstLine).toContain(seeded.postId);
-      expect(firstLine).toContain("seat hide");
+      expect(firstLine).toContain("seat quarantine");
       expect(firstLine).toContain("image quarantined");
-      expect(firstLine).toContain(`name="target_id" value="${seeded.assetId}"`);
-      // The Flagged section offers the Admin-only image restore, since a Post restore needs a ready image.
-      const flaggedSection = queue.slice(queue.indexOf('id="queue-flagged"'), queue.indexOf('id="queue-quarantined"'));
-      expect(flaggedSection).toContain(seeded.postId);
-      expect(flaggedSection).toContain(`name="target_id" value="${seeded.assetId}"`);
-      expect(flaggedSection).toContain('name="action" value="restore_asset"');
-      expect(flaggedSection).toContain("Restore image (Admin)");
+      // The Quarantined section offers Clear and Archive (remove).
+      const quarantinedSection = queue.slice(queue.indexOf('id="queue-quarantined"'), queue.indexOf('id="queue-published"'));
+      expect(quarantinedSection).toContain(seeded.postId);
+      expect(quarantinedSection).toContain("Quarantined by a Seat Agent flag.");
+      expect(quarantinedSection).toContain(">Clear</button>");
+      expect(quarantinedSection).toContain(">Archive (remove)</button>");
     }
 
-    // A false positive is reversible from /moderation without an appeal: image first, then the Post.
+    // A false positive is reversible from /moderation without an appeal: one Clear releases both.
     const falsePositive = await seedPost(author.agentId);
     await expectJson(await flag(falsePositive.postId, seat.credential, "id-document"), 200);
-    await expectError(await call("/v1/moderation/actions", {
-      email: ADMIN2,
-      body: { target_type: "post", target_id: falsePositive.postId, action: "restore", reason_code: "other" },
-    }), 409, "state_conflict");
-    await expectJson(await call("/v1/moderation/actions", {
-      email: ADMIN2,
-      body: { target_type: "asset", target_id: falsePositive.assetId, action: "restore_asset", reason_code: "other" },
-    }), 200);
     const restored = await expectJson(await call("/v1/moderation/actions", {
       email: ADMIN2,
       body: { target_type: "post", target_id: falsePositive.postId, action: "restore", reason_code: "other" },
     }), 200);
     expect(restored.state).toBe("published");
+    const released = await env.DB.prepare("SELECT state FROM assets WHERE id = ?").bind(falsePositive.assetId).first<{ state: string }>();
+    expect(released?.state).toBe("ready");
+    const blocked = await env.DB.prepare("SELECT COUNT(*) AS n FROM blocked_hashes WHERE asset_id = ?")
+      .bind(falsePositive.assetId).first<{ n: number }>();
+    expect(Number(blocked?.n)).toBe(0);
     const settled = await env.DB.prepare("SELECT outcome FROM seat_flags WHERE post_id = ?")
       .bind(falsePositive.postId).first<{ outcome: string }>();
     expect(settled?.outcome).toBe("overturned");
   });
 
-  it("only queues a Post on one off-topic flag, and hides it when the other seat agrees (AT-42)", async () => {
+  it("quarantines a Post on one off-topic flag, without Blocked Hashes, and the author can appeal (AT-42, v0.2.36)", async () => {
     await seatOperator(ADMIN);
     const one = await enroll("SeatOne", ADMIN);
     const two = await enroll("SeatTwo", ADMIN2);
@@ -619,52 +615,37 @@ describe("seat flags (AT-42, AT-43)", () => {
     const seeded = await seedPost(author.agentId);
 
     const first = await expectJson(await flag(seeded.postId, two.credential), 200);
-    expect(first).toMatchObject({ state: "published", trial: 0, event_type: "post.flagged" });
-    const queued = await env.DB.prepare("SELECT state, hidden_by, queue_first FROM posts WHERE id = ?")
-      .bind(seeded.postId).first<{ state: string; hidden_by: string | null; queue_first: number }>();
-    expect(queued).toEqual({ state: "published", hidden_by: null, queue_first: 1 });
-    const queue = await (await call("/moderation", { email: STAFF })).text();
-    const firstLine = queue.slice(queue.indexOf('id="queue-first"'), queue.indexOf('id="reports"'));
-    expect(firstLine).toContain(seeded.postId);
-    expect(firstLine).toContain("seat flag");
-    // The Flags section lists the same queued Post for Hide, Remove, or Dismiss flags.
-    const flagsSection = queue.slice(queue.indexOf('id="queue-flags"'), queue.indexOf('id="queue-flagged"'));
-    expect(flagsSection).toContain(seeded.postId);
-    expect(flagsSection).toContain("1 seat flag");
-    const quiet = await env.DB.prepare(
-      `SELECT (SELECT COUNT(*) FROM events WHERE resource_id = ? AND type = 'post.withdrawn') AS withdrawn,
-              (SELECT COUNT(*) FROM moderation_actions WHERE target_id = ?) AS audits`,
-    ).bind(seeded.postId, seeded.postId).first<{ withdrawn: number; audits: number }>();
-    expect({ withdrawn: Number(quiet?.withdrawn), audits: Number(quiet?.audits) }).toEqual({ withdrawn: 0, audits: 0 });
-
-    const second = await expectJson(await flag(seeded.postId, one.credential), 200);
-    expect(second).toMatchObject({ state: "hidden", trial: 0 });
-    const hidden = await env.DB.prepare(
-      "SELECT posts.state AS state, posts.hidden_by AS hidden_by, posts.queue_first AS queue_first, assets.state AS asset_state FROM posts JOIN assets ON assets.id = posts.asset_id WHERE posts.id = ?",
-    ).bind(seeded.postId).first<{ state: string; hidden_by: string; queue_first: number; asset_state: string }>();
-    // An off-topic hide quarantines nothing and blocks no hash.
-    expect(hidden).toEqual({ state: "hidden", hidden_by: "seat_agents", queue_first: 1, asset_state: "ready" });
+    expect(first).toMatchObject({ state: "quarantined", trial: 0, event_type: "post.flagged" });
+    const quarantined = await env.DB.prepare(
+      "SELECT posts.state AS state, posts.quarantined_by AS quarantined_by, posts.queue_first AS queue_first, assets.state AS asset_state, assets.quarantined_at AS quarantined_at FROM posts JOIN assets ON assets.id = posts.asset_id WHERE posts.id = ?",
+    ).bind(seeded.postId).first<{ state: string; quarantined_by: string; queue_first: number; asset_state: string; quarantined_at: string | null }>();
+    expect(quarantined).toMatchObject({ state: "quarantined", quarantined_by: "seat_agents", queue_first: 1, asset_state: "quarantined" });
+    expect(quarantined?.quarantined_at).not.toBeNull();
+    // An off-topic quarantine blocks no hash.
     const blocked = await env.DB.prepare("SELECT COUNT(*) AS n FROM blocked_hashes").first<{ n: number }>();
     expect(Number(blocked?.n)).toBe(0);
     const audit = await env.DB.prepare("SELECT actor_email, action FROM moderation_actions WHERE target_id = ?")
       .bind(seeded.postId).all<{ actor_email: string; action: string }>();
-    expect(audit.results).toEqual([{ actor_email: "seat_agent", action: "hide" }]);
+    expect(audit.results).toEqual([{ actor_email: "seat_agent", action: "quarantine" }]);
     const withdrawn = await env.DB.prepare(
       "SELECT COUNT(*) AS n FROM events WHERE resource_id = ? AND type = 'post.withdrawn'",
     ).bind(seeded.postId).first<{ n: number }>();
     expect(Number(withdrawn?.n)).toBe(1);
-    const afterHide = await (await call("/moderation", { email: STAFF })).text();
-    const flaggedSection = afterHide.slice(afterHide.indexOf('id="queue-flagged"'), afterHide.indexOf('id="queue-quarantined"'));
-    expect(flaggedSection).toContain(seeded.postId);
-    expect(afterHide.slice(afterHide.indexOf('id="queue-flags"'), afterHide.indexOf('id="queue-flagged"'))).not.toContain(seeded.postId);
+    const queue = await (await call("/moderation", { email: STAFF })).text();
+    const firstLine = queue.slice(queue.indexOf('id="queue-first"'), queue.indexOf('id="reports"'));
+    expect(firstLine).toContain(seeded.postId);
+    expect(firstLine).toContain("seat quarantine");
+    // The other seat's flag is not_found now, and the same seat's second flag stays state_conflict.
+    await expectError(await flag(seeded.postId, one.credential), 404, "not_found");
+    await expectError(await flag(seeded.postId, two.credential), 409, "state_conflict");
 
-    // The author appeals the seat hide (v0.2.29); a restore answers it and overturns both flags.
+    // The author appeals the seat quarantine; a Clear answers it and overturns the flag.
     const review = await expectJson(await call(`/v1/posts/${seeded.postId}/review`, { bearer: author.credential, policy: POSTPUBLISH }), 200);
-    expect(review).toMatchObject({ state: "hidden", review_state: "hidden", hidden_by: "seat_agents" });
+    expect(review).toMatchObject({ state: "quarantined", review_state: "quarantined", quarantined_by: "seat_agents" });
     expect(typeof review.appealable_until).toBe("string");
     const appealed = await call(`/v1/posts/${seeded.postId}/appeal`, {
       bearer: author.credential,
-      headers: { "idempotency-key": "seat-hide-appeal" },
+      headers: { "idempotency-key": "seat-quarantine-appeal" },
       body: {},
       policy: POSTPUBLISH,
     });
@@ -678,15 +659,19 @@ describe("seat flags (AT-42, AT-43)", () => {
       body: { target_type: "post", target_id: seeded.postId, action: "restore", reason_code: "rules" },
     }), 200);
     vi.restoreAllMocks();
-    // NFR-10: the decision on a seat hide logs its hide-to-decision time.
+    // NFR-10: the decision on a seat quarantine logs its time from the quarantine.
     const decided = logged.filter((line) => line.includes('"hide decided"')).map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(decided).toEqual([expect.objectContaining({ post_id: seeded.postId, action: "restore", hidden_by: "seat_agents" })]);
-    const flags = await env.DB.prepare("SELECT outcome FROM seat_flags WHERE post_id = ? ORDER BY seat")
+    const flags = await env.DB.prepare("SELECT outcome FROM seat_flags WHERE post_id = ?")
       .bind(seeded.postId).all<{ outcome: string }>();
-    expect(flags.results).toEqual([{ outcome: "overturned" }, { outcome: "overturned" }]);
+    expect(flags.results).toEqual([{ outcome: "overturned" }]);
     const answered = await env.DB.prepare("SELECT outcome FROM post_appeals WHERE post_id = ?")
       .bind(seeded.postId).first<{ outcome: string }>();
     expect(answered?.outcome).toBe("restore");
+    const cleared = await env.DB.prepare(
+      "SELECT posts.state AS state, posts.quarantined_by AS quarantined_by, assets.state AS asset_state FROM posts JOIN assets ON assets.id = posts.asset_id WHERE posts.id = ?",
+    ).bind(seeded.postId).first<{ state: string; quarantined_by: string | null; asset_state: string }>();
+    expect(cleared).toEqual({ state: "published", quarantined_by: null, asset_state: "ready" });
   });
 
   it("binds only the seat Admin's own Agent and restarts the trial on bind and readmit", async () => {

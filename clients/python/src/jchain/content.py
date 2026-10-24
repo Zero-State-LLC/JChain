@@ -33,7 +33,7 @@ RULES_INSTRUCTIONS = (
 #: The fixed ``instructions`` string of the Board Rules in ``postpublish`` mode (CT-12).
 POSTPUBLISH_RULES_INSTRUCTIONS = RULES_INSTRUCTIONS.replace(
     "A Moderator approves a Post before it is public.",
-    "A Post is public when it is submitted, and Moderators can hide it afterwards.",
+    "A Post is public when it is submitted. Automatic checks and reports can quarantine it until a Moderator clears or removes it.",
 )
 
 #: The fixed preface placed before board content in a prompt. Same text as

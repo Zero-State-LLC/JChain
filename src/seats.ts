@@ -1,10 +1,11 @@
 import { Hono, type Context } from "hono";
-import { blockAssetHashes } from "./blocked-hashes";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
+import { alertAfterResponse } from "./moderator-alert";
 import { sameOrigin } from "./origin";
 import type { Policy } from "./policy";
 import { requireAdminSeat, requireAgent } from "./principal";
+import { quarantineStatements } from "./quarantine";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -89,14 +90,16 @@ async function flagPost(c: Ctx): Promise<Response> {
     author_operator: string | null;
     seat_operator: string | null;
   }>();
-  if (!post || post.state !== "published") return errorResponse(requestId, "not_found");
-  if (post.author_operator !== null && post.author_operator === post.seat_operator) {
-    return errorResponse(requestId, "forbidden");
-  }
+  if (!post) return errorResponse(requestId, "not_found");
+  // A second flag by the same seat is state_conflict even after its first flag quarantined the Post.
   const existingFlag = await c.env.DB.prepare(
     "SELECT id FROM seat_flags WHERE seat = ? AND post_id = ? LIMIT 1",
   ).bind(seat.seat, postId).first<{ id: string }>();
   if (existingFlag) return errorResponse(requestId, "state_conflict");
+  if (post.state !== "published") return errorResponse(requestId, "not_found");
+  if (post.author_operator !== null && post.author_operator === post.seat_operator) {
+    return errorResponse(requestId, "forbidden");
+  }
 
   const threshold = trialThreshold(c.get("policy"));
   const trial = seat.seat_state === "trial" || seat.seat_trial_count < threshold;
@@ -121,72 +124,37 @@ async function flagPost(c: Ctx): Promise<Response> {
     return jsonResponse(requestId, { post_id: postId, state: "published", trial: 1, event_type: "post.flagged_trial" });
   }
 
-  // C-12b, Part F item 5, AT-42: either Seat Agent hides and quarantines prohibited content at once.
-  // An off-topic hide needs a pending non-trial off-topic flag from the other seat; one alone only
-  // queues the Post first. Neither removes. Every write sits in one batch, keyed on this flag's row.
+  // v0.2.36 (quarantine-first): any flag from an active seat quarantines the Post through the
+  // shared helper, whatever its reason. Only a prohibited reason blocks the Asset's hashes, and a
+  // Seat Flag never sets a legal hold. Nothing removes. Every write sits in one batch, keyed on
+  // this flag's row, so a raced flag writes nothing.
   const prohibited = reason === "id-document" || reason === "csam";
-  const hideWhere = prohibited
-    ? "posts.id = ? AND posts.state = 'published' AND EXISTS (SELECT 1 FROM seat_flags AS mine WHERE mine.id = ?)"
-    : `posts.id = ? AND posts.state = 'published' AND EXISTS (SELECT 1 FROM seat_flags AS mine WHERE mine.id = ?)
-       AND EXISTS (
-         SELECT 1 FROM seat_flags AS other
-          WHERE other.post_id = posts.id AND other.seat != ? AND other.reason = 'off-topic'
-            AND other.trial = 0 AND other.outcome = 'pending'
-       )`;
-  const hideBinds: unknown[] = prohibited ? [postId, flagId] : [postId, flagId, seat.seat];
-  const withdrawnId = uuidv7();
-  const actionId = uuidv7();
+  const plan = quarantineStatements(c.env.DB, {
+    postId,
+    assetId: post.asset_id,
+    source: "seat_agents",
+    actor: "seat_agent",
+    reasonCode: reason,
+    prohibited,
+    legalHold: false,
+    at: now,
+    guard: { sql: "EXISTS (SELECT 1 FROM seat_flags AS mine WHERE mine.id = ?)", binds: [flagId] },
+  });
   const statements: D1PreparedStatement[] = [
     insertFlag(c.env.DB, flagId, seat.seat, principal.agentId, postId, reason, false, now),
     flagEvent(c.env.DB, "post.flagged", postId, flagId, now),
-    c.env.DB.prepare(
-      `INSERT INTO events (id, type, resource_id, occurred_at)
-       SELECT ?, 'post.withdrawn', posts.id, ? FROM posts WHERE ${hideWhere}`,
-    ).bind(withdrawnId, now, ...hideBinds),
-    // Audit actor seat_agent, as the scan's hide records actor system.
-    c.env.DB.prepare(
-      `INSERT INTO moderation_actions (
-         id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
-       )
-       SELECT ?, 'seat_agent', 'post', posts.id, 'hide', ?, NULL, ?, ? FROM posts WHERE ${hideWhere}`,
-    ).bind(actionId, reason, withdrawnId, now, ...hideBinds),
+    ...plan.statements,
   ];
-  if (prohibited) {
-    // Runs before the Post update, which the guard reads.
-    statements.push(c.env.DB.prepare(
-      `UPDATE assets SET state = 'quarantined', quarantined_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-        WHERE state = 'ready' AND id = (SELECT posts.asset_id FROM posts WHERE ${hideWhere})`,
-    ).bind(...hideBinds));
-  }
-  const hideIndex = statements.length;
-  statements.push(
-    c.env.DB.prepare(
-      `UPDATE posts SET state = 'hidden', hidden_by = 'seat_agents', queue_first = 1 WHERE ${hideWhere}`,
-    ).bind(...hideBinds),
-    // One off-topic flag: the Post stays published and goes first in line.
-    c.env.DB.prepare(
-      `UPDATE posts SET queue_first = 1
-        WHERE id = ? AND state = 'published' AND EXISTS (SELECT 1 FROM seat_flags WHERE id = ?)`,
-    ).bind(postId, flagId),
-  );
-  if (prohibited && post.asset_id !== null) {
-    // CT-21: a prohibited hide's quarantine adds the Asset's hashes, marked prohibited.
-    statements.push(blockAssetHashes(c.env.DB, post.asset_id, true, now, actionId));
-  }
+  const quarantineIndex = 2 + plan.updateIndex;
   const results = await uniqueBatch(c.env.DB, statements);
   if (results === null) return errorResponse(requestId, "state_conflict");
   if (Number(results[0]?.meta.changes ?? 0) !== 1) return errorResponse(requestId, "state_conflict");
-  const hidden = Number(results[hideIndex]?.meta.changes ?? 0) === 1;
-  if (prohibited && !hidden) return errorResponse(requestId, "state_conflict");
-  console.log(JSON.stringify({
-    message: hidden ? "seat hide" : "seat flag queued",
-    post_id: postId,
-    seat: seat.seat,
-    trial: 0,
-  }));
+  if (Number(results[quarantineIndex]?.meta.changes ?? 0) !== 1) return errorResponse(requestId, "state_conflict");
+  console.log(JSON.stringify({ message: "seat quarantine", post_id: postId, seat: seat.seat, trial: 0 }));
+  await alertAfterResponse(c.env, () => c.executionCtx, c.get("policy"));
   return jsonResponse(requestId, {
     post_id: postId,
-    state: hidden ? "hidden" : "published",
+    state: "quarantined",
     trial: 0,
     event_type: "post.flagged",
   });
@@ -345,9 +313,9 @@ export async function applySeatAction(
   return { ok: true, seatState: nextState, seatAgentId: nextAgent, trialCount };
 }
 
-// Called after a Moderator decides a Post with pending Seat Flags: a seat-hidden Post, a published
-// Post one off-topic flag queued, or a legacy 'flagged' Post. Hide, quarantine, remove, and uphold
-// confirm. Approve, restore (including a restore that answers an appeal), and dismiss_flags overturn.
+// Called after a Moderator decides a Post with pending Seat Flags: a seat-quarantined Post (v0.2.36),
+// an older seat-hidden or 'flagged' Post, or a published Post with a trial flag. Hide, quarantine,
+// remove, and uphold confirm. Approve, restore (including a restore that answers an appeal), and dismiss_flags overturn.
 // Accuracy uses the last review.seat_accuracy_window flags the other Admin Seat decided.
 export async function settleSeatFlags(
   db: D1Database,

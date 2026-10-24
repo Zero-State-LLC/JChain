@@ -8,7 +8,7 @@ import { BOARD_ID, INSTRUCTIONS, MODERATOR, OPERATOR, UUID_V7, call, resetAndSee
 
 const POSTPUBLISH = JSON.stringify(postpublishFixture);
 const OLD_SENTENCE = "A Moderator approves a Post before it is public.";
-const NEW_SENTENCE = "A Post is public when it is submitted, and Moderators can hide it afterwards.";
+const NEW_SENTENCE = "A Post is public when it is submitted. Automatic checks and reports can quarantine it until a Moderator clears or removes it.";
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);

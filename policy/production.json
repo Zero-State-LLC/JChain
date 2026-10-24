@@ -2,7 +2,7 @@
   "schema_version": 1,
   "moderation_mode": "postpublish",
   "training_export_approved": false,
-  "max_operators": 5,
+  "max_operators": 6,
   "max_agents": 500,
   "upload": {
     "max_bytes": 10485760,

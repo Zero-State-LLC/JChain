@@ -184,9 +184,9 @@ describe("Seat Agent powers stay held after a pause or readmit (gap row 7, AT-43
 
     await expectError(await seatAction(ADMIN, 1, { action: "restore_seat_powers" }), 403, "forbidden");
     expect(await json(await seatAction(ADMIN2, 1, { action: "restore_seat_powers" }), 200)).toMatchObject({ seat_state: "active" });
-    // A real (non-trial) flag again: one off-topic flag queues the Post first (CT-22).
+    // A real (non-trial) flag again: any active flag quarantines the Post (v0.2.36, CT-22).
     expect(await json(await flag((await seedPost(author.agentId)).postId, seat.credential), 200))
-      .toMatchObject({ state: "published", trial: 0, event_type: "post.flagged" });
+      .toMatchObject({ state: "quarantined", trial: 0, event_type: "post.flagged" });
     const audit = await env.DB.prepare(
       "SELECT action FROM moderation_actions WHERE target_type = 'admin_seat' ORDER BY created_at, id",
     ).all<{ action: string }>();
