@@ -12,7 +12,7 @@ import { derivativeKey } from "./asset-pipeline";
 import { utcSeconds } from "./ids";
 import { alertAfterResponse } from "./moderator-alert";
 import type { Policy } from "./policy";
-import { quarantineStatements } from "./quarantine";
+import { MEDIA_MATCH_ACTOR, quarantineStatements } from "./quarantine";
 
 export const ORIGIN_KEY_HEADER = "x-jchain-origin";
 export const MEDIA_SOURCE_HEADER = "x-jchain-media";
@@ -28,7 +28,7 @@ export type OriginRead =
   | { kind: "bytes"; bytes: Uint8Array; cacheStatus: string }
   | { kind: "missing" }
   | { kind: "blocked" }
-  | { kind: "fallback" };
+  | { kind: "fallback"; status: number | null };
 
 type AlertCtx = () => { waitUntil(promise: Promise<unknown>): void };
 
@@ -92,7 +92,7 @@ export async function quarantineMediaMatch(
       postId: post.id,
       assetId,
       source: "report",
-      actor: "system",
+      actor: MEDIA_MATCH_ACTOR,
       reasonCode: "csam",
       prohibited: true,
       legalHold: true,
@@ -113,7 +113,15 @@ export async function quarantineMediaMatch(
 
 function fallback(status: number | null, assetId: string): OriginRead {
   console.warn(JSON.stringify({ event: "media_origin_fallback", status, asset_id: assetId }));
-  return { kind: "fallback" };
+  return { kind: "fallback", status };
+}
+
+// The x-jchain-media value for a published image served from R2: "r2" when the origin is not
+// configured, "r2-fallback-<status>" (or "-error" when the fetch threw) when it was tried and
+// failed, so a misconfigured origin is visible from outside without logs.
+export function fallbackSource(read: OriginRead | null): string {
+  if (read === null || read.kind !== "fallback") return "r2";
+  return `r2-fallback-${read.status === null ? "error" : String(read.status)}`;
 }
 
 function cacheStatusOf(response: Response): string {

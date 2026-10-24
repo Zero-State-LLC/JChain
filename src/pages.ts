@@ -10,6 +10,7 @@ import { isUuidV7, uuidv7 } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
 import { accessEmail, isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
+import { MEDIA_MATCH_ACTOR } from "./quarantine";
 import { visibleAncestry, type RemixAncestor } from "./remix";
 import { currentSession } from "./session";
 import { ownerDeleted } from "./tombstone";
@@ -622,7 +623,15 @@ async function queueRows(
     SELECT posts.id AS id, posts.created_at AS created_at, posts.id AS post_id,
            posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
            posts.asset_id AS asset_id, assets.state AS asset_state, posts.legal_hold AS legal_hold,
-           posts.quarantined_by AS quarantined_by, ${ownerDeleted("posts")} AS owner_deleted
+           -- Named from the latest quarantine action only, so an earlier tool match that an Admin
+           -- cleared never labels a later quarantine.
+           CASE WHEN posts.state = 'quarantined' AND posts.quarantined_by = 'report' AND (
+             SELECT moderation_actions.actor_email FROM moderation_actions
+              WHERE moderation_actions.target_type = 'post' AND moderation_actions.target_id = posts.id
+                AND moderation_actions.action = 'quarantine'
+              ORDER BY moderation_actions.created_at DESC, moderation_actions.id DESC LIMIT 1
+           ) = '${MEDIA_MATCH_ACTOR}' THEN 'csam_tool' ELSE posts.quarantined_by END AS quarantined_by,
+           ${ownerDeleted("posts")} AS owner_deleted
       FROM posts
       LEFT JOIN assets ON assets.id = posts.asset_id
      WHERE posts.state = ?`, "ASC", [state], { cursor, limit });
@@ -1023,6 +1032,7 @@ const QUARANTINE_SOURCES: Readonly<Record<string, string>> = {
   scan: "the content scan",
   seat_agents: "a Seat Agent flag",
   report: "a signed-in report",
+  csam_tool: "a CSAM Scanning Tool match",
 };
 
 function quarantineSection(items: QueueRow[]): string {
