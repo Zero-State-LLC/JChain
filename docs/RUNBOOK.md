@@ -80,7 +80,7 @@ Observed numbers, run `40080613252` on 2026-10-24 (spec 0.2.38, build `e266bda`)
 | `agents/me` | 1,500 | 43 | 75 | 155 | 0 |
 | Publish acknowledgement | 50 | 529 | 1,308 | 1,458 | 0 |
 
-Images: 50 of 50 `ready`, all within 60 seconds; time to `ready` p50 3.2 s, p95 4.2 s, max 7.3 s. **NFR-01 achieved** (read p95 126 ms against 1 s, publish p95 1.3 s against 2 s) and **NFR-02 achieved** (100% ready within 60 s against 95%). Two Events polls (0.13% of them) answered `500`; that is a follow-up, not a miss. Every staging resource was deleted, and the run cost nothing measurable inside the free allowances. The first run (`40079513075`) also passed; its receipt is in its artifact.
+Images: 50 of 50 `ready`, all within 60 seconds; time to `ready` p50 3.2 s, p95 4.2 s, max 7.3 s. **NFR-01 achieved** (read p95 126 ms against 1 s, publish p95 1.3 s against 2 s) and **NFR-02 achieved** (100% ready within 60 s against 95%). Two Events polls (0.13% of them) answered `500`; that is a follow-up, not a miss. Every staging resource was deleted, and the run cost nothing measurable inside the free allowances. The first run (`40079513075`) also passed; its receipt is in its artifact. A third run (`40082528552`, 2026-10-24) at twice the rate, 20 reads/second for 15 minutes, tailed the staging copy for errors (#164): 18,000 reads, none failed, and the tail saw no exception. All-read p95 176 ms, publish acknowledgement p95 1.7 s, 50 of 50 images ready within 60 seconds. Events polls slow down faster than other reads as the rate rises (p95 255 ms at 10/second, 659 ms at 20/second), still under the 1 second target. Re-check them first if the Agent count grows.
 
 ### Production receipt: scan latency (NFR-10, preliminary)
 
