@@ -1,7 +1,7 @@
 import { blockedMatch, sha256Bytes } from "./blocked-hashes";
 import { isUuidV7, utcSeconds } from "./ids";
 import type { Policy } from "./policy";
-import { chargeDerivativeBytes, logRejected, refundAssetBytes } from "./quota";
+import { chargeDerivativeBytes, claimAsset, logRejected, refundAssetBytes, releaseAsset } from "./quota";
 import { type WebpCheck, readWebp } from "./webp";
 
 export const ASSET_QUEUE = "asset-upload";
@@ -82,7 +82,21 @@ export function isAnimated(bytes: Uint8Array, type: SniffedType): boolean {
   return false;
 }
 
-export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetId: string): Promise<void> {
+// Round-2 audit finding 6: a queue may deliver the same message twice at once. Only the delivery
+// that holds the Asset's claim processes it; another gets "busy" and is retried later, when the
+// Asset is already ready (or the claim has lapsed because the holder died).
+export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetId: string): Promise<"done" | "busy"> {
+  const claimed = await claimAsset(env, assetId);
+  if (claimed === null) return "busy";
+  try {
+    await processClaimed(env, policy, assetId);
+  } finally {
+    await releaseAsset(env, assetId, claimed);
+  }
+  return "done";
+}
+
+async function processClaimed(env: AssetEnv, policy: Policy, assetId: string): Promise<void> {
   const asset = await loadAsset(env.DB, assetId);
   if (!asset) return;
   if (asset.state === "ready") {
@@ -165,7 +179,9 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
     await rejectAsset(env.DB, assetId, "processing_failed");
     return;
   }
-  const bytesCharged = await chargeDerivativeBytes(env, policy, display.bytes.byteLength + thumb.byteLength);
+  // Charged once per Asset (finding 7): a retry after a failed D1 write below charges nothing more,
+  // and the bytes stay counted until retention or a deletion refunds them once.
+  const bytesCharged = await chargeDerivativeBytes(env, policy, assetId, display.bytes.byteLength + thumb.byteLength);
   if (!bytesCharged.ok) {
     logRejected(asset.agent_id, "global", "r2_bytes");
     await env.MEDIA.delete([displayKey, thumbKey]);
@@ -177,11 +193,9 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
             display_sha256 = ?, derived_thumb_sha256 = ?
       WHERE id = ? AND state = 'validating'`,
   ).bind(displayHash, thumbHash, assetId).run();
-  if (Number(updated.meta.changes ?? 0) !== 1) {
-    await bytesCharged.refund();
-    await env.MEDIA.delete([displayKey, thumbKey]);
-    return;
-  }
+  // Another delivery finished this Asset first (its claim lapsed). The derivative keys and the one
+  // r2_bytes charge are shared with it, so this delivery deletes neither and refunds nothing.
+  if (Number(updated.meta.changes ?? 0) !== 1) return;
   await env.MEDIA.delete([originalKey(assetId), originalThumbKey(assetId)]);
   console.log(JSON.stringify({ message: "asset ready", asset_id: assetId }));
 }

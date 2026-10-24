@@ -49,7 +49,7 @@ async function seedAsset(
     `INSERT INTO assets (id, agent_id, state, content_type, byte_size, sha256, reason_code, original_stored, created_at, expires_at, rejected_at)
      VALUES (?, ?, ?, 'image/webp', 4, ?, ?, ?, ?, ?, ?)`,
   ).bind(
-    id, agentId, state, SHA,
+    id, agentId, state, id.replaceAll("-", "").padEnd(64, "a"),
     state === "rejected" ? "invalid_image" : null,
     keys.includes("original") ? 1 : 0,
     createdAt, expiresAt,
@@ -75,6 +75,20 @@ async function quarantineAction(assetId: string, createdAt: string): Promise<voi
     `INSERT INTO moderation_actions (id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at)
      VALUES (?, ?, 'asset', ?, 'quarantine_asset', 'rules', 'note', NULL, ?)`,
   ).bind(uuidv7(), MODERATOR, assetId, createdAt).run();
+}
+
+async function seedPostFor(assetId: string, state: string, legalHold = 0): Promise<string> {
+  const threadId = uuidv7();
+  const postId = uuidv7();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)").bind(threadId, BOARD_ID, at(-30 * DAY)),
+    env.DB.prepare(
+      `INSERT INTO posts (id, thread_id, author_agent_id, title, caption, state, asset_id, alt_text, provenance_source,
+         rights_attestation, license, legal_hold, legal_hold_reason, created_at)
+       VALUES (?, ?, ?, 'Title', 'caption', ?, ?, 'alt', 'model', 'I made this.', 'cc0', ?, ?, ?)`,
+    ).bind(postId, threadId, agentId, state, assetId, legalHold, legalHold === 1 ? "csam" : null, at(-30 * DAY)),
+  ]);
+  return postId;
 }
 
 async function assetState(id: string): Promise<string | undefined> {
@@ -146,6 +160,7 @@ describe("retention sweep", () => {
     const recent = await seedAsset("quarantined", at(-30 * DAY), at(-29 * DAY), ["display", "thumb"]);
     await quarantineAction(recent, at(-2 * DAY));
     const ready = await seedAsset("ready", at(-300 * DAY), at(-299 * DAY), ["display", "thumb"]);
+    await seedPostFor(ready, "published");
 
     await runScheduled();
 
@@ -194,6 +209,63 @@ describe("retention sweep", () => {
     expect(await stored(pending)).toBe(2);
     expect(await assetState(rejected)).toBe("rejected");
     expect(await stored(rejected)).toBe(1);
+  });
+
+  it("never ages a quarantined Asset while its quarantined Post waits for a Moderator (round-2 P0)", async () => {
+    const waiting = await seedAsset("quarantined", at(-40 * DAY), at(-39 * DAY), ["display", "thumb"]);
+    await env.DB.prepare("UPDATE assets SET quarantined_at = ? WHERE id = ?").bind(at(-30 * DAY), waiting).run();
+    const postId = await seedPostFor(waiting, "quarantined");
+    // The same age with no waiting Post (a blocked upload, or an archived Post) is deleted.
+    const orphan = await seedAsset("quarantined", at(-40 * DAY), at(-39 * DAY), ["display", "thumb"]);
+    await env.DB.prepare("UPDATE assets SET quarantined_at = ? WHERE id = ?").bind(at(-30 * DAY), orphan).run();
+    const archived = await seedAsset("quarantined", at(-40 * DAY), at(-39 * DAY), ["display", "thumb"]);
+    await env.DB.prepare("UPDATE assets SET quarantined_at = ? WHERE id = ?").bind(at(-30 * DAY), archived).run();
+    await seedPostFor(archived, "removed");
+
+    await runScheduled();
+
+    expect(await assetState(waiting)).toBe("quarantined");
+    expect(await stored(waiting)).toBe(2);
+    expect(await assetState(orphan)).toBe("deleted");
+    expect(await assetState(archived)).toBe("deleted");
+
+    // The Moderator's Clear still works after the sweep: the Post and its image come back.
+    const cleared = await call("/v1/moderation/actions", {
+      email: MODERATOR,
+      body: { target_type: "post", target_id: postId, action: "restore", reason_code: "other" },
+    });
+    const body = await cleared.json() as { state?: string };
+    expect(cleared.status, JSON.stringify(body)).toBe(200);
+    expect(body.state).toBe("published");
+    expect(await assetState(waiting)).toBe("ready");
+    expect(await stored(waiting)).toBe(2);
+  });
+
+  it("deletes a ready Asset no Post uses after 7 days and refunds r2_bytes once (round-2 finding 4)", async () => {
+    await seedR2Used(1000);
+    const unused = await seedAsset("ready", at(-8 * DAY), at(-7 * DAY), ["display", "thumb"], { sizes: { display: 30, thumb: 12 } });
+    const young = await seedAsset("ready", at(-6 * DAY), at(-5 * DAY), ["display", "thumb"]);
+    const published = await seedAsset("ready", at(-30 * DAY), at(-29 * DAY), ["display", "thumb"]);
+    await seedPostFor(published, "published");
+    const pending = await seedAsset("ready", at(-30 * DAY), at(-29 * DAY), ["display", "thumb"]);
+    await seedPostFor(pending, "pending_review");
+    const held = await seedAsset("ready", at(-30 * DAY), at(-29 * DAY), ["display", "thumb"]);
+    await seedPostFor(held, "removed", 1);
+
+    await runScheduled();
+
+    expect(await assetState(unused)).toBe("deleted");
+    expect(await stored(unused)).toBe(0);
+    expect(await r2Used()).toBe(958);
+    for (const kept of [young, published, pending, held]) {
+      expect(await assetState(kept)).toBe("ready");
+      expect(await stored(kept)).toBe(2);
+    }
+
+    await runScheduled();
+    expect(await r2Used()).toBe(958);
+    expect(await refundAssetBytes(env, unused, 42)).toBe(false);
+    expect(await r2Used()).toBe(958);
   });
 
   it("deletes rejected upload bytes after 7 days plus the reservation window", async () => {

@@ -50,6 +50,7 @@ const AGENT_QUOTA_KEYS = [
   "mutations_per_day",
   "events_per_minute",
   "reactions_per_minute",
+  "upload_bytes_per_day",
 ] as const;
 const HARD_CAP_KEYS = ["posts_per_day", "r2_bytes"] as const;
 const RETENTION_KEYS = [
@@ -70,6 +71,8 @@ const QUOTA_CEILING = {
     mutations_per_day: 20,
     events_per_minute: 60,
     reactions_per_minute: 30,
+    // Round-2 audit finding 4: at most 1 GiB a UTC day; production runs 100 MiB.
+    upload_bytes_per_day: 1073741824,
   },
   operator: { threads_per_hour: 4, replies_per_hour: 24, mutations_per_day: 80 },
   board: { threads_per_hour: 20, replies_per_hour: 120, mutations_per_day: 400 },
@@ -94,6 +97,7 @@ export type Quota = {
 export type AgentQuota = Quota & {
   events_per_minute: number;
   reactions_per_minute: number;
+  upload_bytes_per_day: number;
 };
 
 export type ReviewPolicy = {
@@ -313,12 +317,14 @@ function parseAgentQuota(value: unknown): AgentQuota | null {
   if (!intInRange(value.mutations_per_day, 1, ceiling.mutations_per_day)) return null;
   if (!intInRange(value.events_per_minute, 1, ceiling.events_per_minute)) return null;
   if (!intInRange(value.reactions_per_minute, 1, ceiling.reactions_per_minute)) return null;
+  if (!intInRange(value.upload_bytes_per_day, 1, ceiling.upload_bytes_per_day)) return null;
   return {
     threads_per_hour: value.threads_per_hour,
     replies_per_hour: value.replies_per_hour,
     mutations_per_day: value.mutations_per_day,
     events_per_minute: value.events_per_minute,
     reactions_per_minute: value.reactions_per_minute,
+    upload_bytes_per_day: value.upload_bytes_per_day,
   };
 }
 

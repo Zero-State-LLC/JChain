@@ -100,6 +100,45 @@ export class Quota extends DurableObject<Env> {
     });
   }
 
+  // Round-2 audit finding 7: applies the charges at most once per marker key. A repeat with the
+  // marker already set charges nothing and succeeds, so a queue retry after a failed D1 write does
+  // not charge the same Asset's bytes twice. Markers use a prefix that apply() never sweeps.
+  async chargeOnce(marker: string, charges: Charge[]): Promise<ApplyResult> {
+    const now = Date.now();
+    return this.ctx.storage.transaction(async (txn) => {
+      if (await txn.get(marker) !== undefined) return { ok: true as const, remaining: {} };
+      const used = new Map<string, number>();
+      for (const charge of charges) used.set(charge.key, Number(await txn.get<number>(charge.key) ?? 0));
+      for (const charge of charges) {
+        const current = used.get(charge.key) ?? 0;
+        if (charge.amount > 0 && current + charge.amount > charge.limit) {
+          return {
+            ok: false as const,
+            counter: charge.counter,
+            retry_after: secondsUntil(charge.reset_at, now),
+            remaining: remainingMap(charges, used),
+          };
+        }
+      }
+      const remaining: Record<string, number> = {};
+      for (const charge of charges) {
+        const next = (used.get(charge.key) ?? 0) + charge.amount;
+        if (charge.amount > 0) await txn.put(charge.key, next);
+        remaining[charge.counter] = charge.limit - next;
+      }
+      await txn.put(marker, 1);
+      return { ok: true as const, remaining };
+    });
+  }
+
+  // Round-2 audit finding 6: ends a claim taken with claimAlert at `at`, unless it lapsed and
+  // another caller has claimed it since.
+  async releaseClaim(key: string, at: number): Promise<void> {
+    await this.ctx.storage.transaction(async (txn) => {
+      if (Number(await txn.get<number>(key) ?? 0) === at) await txn.delete(key);
+    });
+  }
+
   // v0.2.36: claims an alert slot when none was claimed in the last gapMs. The key uses a prefix
   // that apply() never sweeps.
   async claimAlert(key: string, gapMs: number, now: number): Promise<boolean> {
@@ -240,25 +279,67 @@ export async function processingHeadroom(
     zero("r2_bytes", policy.hard_caps.r2_bytes, null, "r2_bytes"),
   ]);
   if (!result.ok) return { ok: false, counter: "r2_bytes", retryAfter: result.retry_after };
-  if ((result.remaining.r2_bytes ?? 0) <= 0) return { ok: false, counter: "r2_bytes", retryAfter: 1 };
+  if ((result.remaining.r2_bytes ?? 0) <= 0) return { ok: false, counter: "r2_bytes", retryAfter: NO_RESET_RETRY_SECONDS };
   return { ok: true };
 }
 
+// Round-2 audit finding 7: the derivative bytes of one Asset are charged to r2_bytes once, under
+// the marker `r2_charged:<asset id>`, mirroring refundAssetBytes. A queue retry after the charge
+// (for example when the D1 write that marks the Asset ready fails) charges nothing more.
 export async function chargeDerivativeBytes(
   env: QuotaBinding,
   policy: Policy,
+  assetId: string,
   bytes: number,
-): Promise<{ ok: true; refund: () => Promise<void> } | { ok: false; retryAfter: number }> {
-  const charges = [{
+): Promise<{ ok: true } | { ok: false; retryAfter: number }> {
+  const result = await env.QUOTA.getByName("global").chargeOnce(`r2_charged:${assetId}`, [{
     key: "r2_bytes",
     amount: bytes,
     limit: policy.hard_caps.r2_bytes,
     reset_at: null,
     counter: "r2_bytes",
-  }];
-  const result = await env.QUOTA.getByName("global").apply(charges);
+  }]);
   if (!result.ok) return { ok: false, retryAfter: result.retry_after };
-  return { ok: true, refund: () => env.QUOTA.getByName("global").refund(charges) };
+  return { ok: true };
+}
+
+// Round-2 audit finding 6: one queue delivery at a time processes an Asset. The claim lives in the
+// global QUOTA object under `asset_claim:<asset id>`, lasts at most ASSET_CLAIM_MS when a worker
+// dies holding it, and is released when the delivery ends.
+export const ASSET_CLAIM_MS = 120_000;
+
+// Returns the claim time to pass to releaseAsset, or null when another delivery holds the claim.
+export async function claimAsset(env: QuotaBinding, assetId: string): Promise<number | null> {
+  const at = Date.now();
+  return await env.QUOTA.getByName("global").claimAlert(`asset_claim:${assetId}`, ASSET_CLAIM_MS, at) ? at : null;
+}
+
+export async function releaseAsset(env: QuotaBinding, assetId: string, at: number): Promise<void> {
+  await env.QUOTA.getByName("global").releaseClaim(`asset_claim:${assetId}`, at);
+}
+
+// Round-2 audit findings 4 and 5: the bytes an Agent may reserve for upload in one UTC day
+// (`quotas.agent.upload_bytes_per_day`), charged in the Agent's own object when a reservation is
+// made, for the display image and the declared thumbnail. Staged bytes are counted here, whether
+// or not they are later stored.
+export async function chargeUploadBytes(
+  env: QuotaBinding,
+  policy: Policy,
+  agentId: string,
+  bytes: number,
+): Promise<{ ok: true; refund: () => Promise<void> } | { ok: false; retryAfter: number }> {
+  const day = dayWindow();
+  const charges = [{
+    key: `upload_bytes:${day.key}`,
+    amount: bytes,
+    limit: policy.quotas.agent.upload_bytes_per_day,
+    reset_at: day.resetAt,
+    counter: "upload_bytes",
+  }];
+  const stub = env.QUOTA.getByName(`agent:${agentId}`);
+  const result = await stub.apply(charges);
+  if (!result.ok) return { ok: false, retryAfter: result.retry_after };
+  return { ok: true, refund: () => stub.refund(charges) };
 }
 
 // CT-23: neurons for one scan call, in the `ai` object on a UTC day window.
@@ -480,8 +561,12 @@ function dayWindow(now = new Date()): Window {
   return { key: utcSeconds(start).slice(0, 10), resetAt: utcSeconds(end) };
 }
 
+// Round-2 audit finding 14: a cap with no reset (r2_bytes) frees space only when bytes are
+// deleted, so Retry-After is a fixed, documented back-off rather than 1 second.
+export const NO_RESET_RETRY_SECONDS = 3600;
+
 function secondsUntil(resetAt: string | null, now = Date.now()): number {
-  if (resetAt === null) return 1;
+  if (resetAt === null) return NO_RESET_RETRY_SECONDS;
   const seconds = Math.ceil((Date.parse(resetAt) - now) / 1000);
   if (!Number.isFinite(seconds) || seconds < 1) return 1;
   return seconds;
