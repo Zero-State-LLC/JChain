@@ -8,7 +8,7 @@ export function millisBetween(from: string | null | undefined, to: string | null
   return Math.max(0, end - start);
 }
 
-type HideState = { state: string; hidden_by: string | null };
+type HideState = { state: string; hidden_by: string | null; quarantined_by?: string | null };
 
 // When a Moderator decides on a Post that the Seat Agents hid (hidden_by 'seat_agents', or the legacy
 // state 'flagged') or a scan hid (hidden_by 'scan'), log how long it waited since the original hide: the latest
@@ -23,12 +23,15 @@ export async function logHideToDecision(
   decidedAt: string,
 ): Promise<void> {
   try {
-    const post = prior ?? await db.prepare("SELECT state, hidden_by FROM posts WHERE id = ?").bind(postId).first<HideState>();
+    const post = prior ?? await db.prepare("SELECT state, hidden_by, quarantined_by FROM posts WHERE id = ?").bind(postId).first<HideState>();
     if (!post) return;
     // A Seat Flag hide is hidden_by seat_agents since the C-12b realignment; 'flagged' is legacy.
+    // v0.2.36: an automatic quarantine is logged by its source.
     const hiddenBy = post.state === "flagged"
       ? "seat_agents"
-      : post.state === "hidden" && (post.hidden_by === "scan" || post.hidden_by === "seat_agents") ? post.hidden_by : null;
+      : post.state === "quarantined" && typeof post.quarantined_by === "string"
+        ? post.quarantined_by
+        : post.state === "hidden" && (post.hidden_by === "scan" || post.hidden_by === "seat_agents") ? post.hidden_by : null;
     if (hiddenBy === null) return;
     const row = await db.prepare(
       `SELECT MAX(occurred_at) AS at FROM events

@@ -1,6 +1,7 @@
 // v0.2.29 (ticket 41, CT-21): the review read and one appeal of an automatic hide.
-// A scan hide (hidden_by 'scan') or a Seat Flag hide (hidden_by 'seat_agents', or the legacy
-// 'flagged' state) is appealable once, within review.appeal_days. A Moderator hide is final.
+// v0.2.36: a scan or Seat Flag quarantine (quarantined_by 'scan' or 'seat_agents') is appealable
+// once, within review.appeal_days, as an older scan or Seat Flag hide still is. A report
+// quarantine is not: a Moderator decides it. A Moderator hide is final.
 import { Hono, type Context } from "hono";
 import { sha256Hex } from "./credential";
 import { errorResponse, characterLength, isValidRunId, jsonResponse, ERRORS, type ErrorCode } from "./http";
@@ -22,6 +23,7 @@ type PostRow = {
   id: string;
   state: string;
   hidden_by: string | null;
+  quarantined_by: string | null;
   author_agent_id: string;
   operator_id: string | null;
 };
@@ -38,8 +40,13 @@ export function mountAppeals(app: Hono<AppEnv>): void {
   app.post("/v1/posts/:id/appeal", appeal);
 }
 
-// Which automatic hide, if any, this Post carries.
-export function appealableHide(post: { state: string; hidden_by: string | null }): "scan" | "seat_agents" | null {
+// Which automatic quarantine or hide, if any, this Post carries.
+export function appealableHide(
+  post: { state: string; hidden_by: string | null; quarantined_by?: string | null },
+): "scan" | "seat_agents" | null {
+  if (post.state === "quarantined" && post.quarantined_by === "scan") return "scan";
+  if (post.state === "quarantined" && post.quarantined_by === "seat_agents") return "seat_agents";
+  // Hides written before v0.2.36.
   if (post.state === "hidden" && post.hidden_by === "scan") return "scan";
   if (post.state === "hidden" && post.hidden_by === "seat_agents") return "seat_agents";
   // No path writes 'flagged' since the C-12b realignment; kept so an older row stays appealable.
@@ -51,6 +58,7 @@ function reviewState(state: string): string {
   if (state === "pending_review") return "held";
   if (state === "published") return "published";
   if (state === "hidden" || state === "flagged") return "hidden";
+  if (state === "quarantined") return "quarantined";
   return "decided";
 }
 
@@ -74,7 +82,7 @@ async function caller(c: Ctx): Promise<{ ok: true; caller: Caller } | { ok: fals
 async function loadPost(db: D1Database, postId: string): Promise<PostRow | null> {
   return db.prepare(
     `SELECT posts.id AS id, posts.state AS state, posts.hidden_by AS hidden_by,
-            posts.author_agent_id AS author_agent_id, agents.operator_id AS operator_id
+            posts.quarantined_by AS quarantined_by, posts.author_agent_id AS author_agent_id, agents.operator_id AS operator_id
        FROM posts JOIN agents ON agents.id = posts.author_agent_id
       WHERE posts.id = ?`,
   ).bind(postId).first<PostRow>();
@@ -119,6 +127,7 @@ async function reviewBody(db: D1Database, policy: Policy, post: PostRow): Promis
     state: post.state,
     review_state: reviewState(post.state),
     hidden_by: hiddenBy,
+    quarantined_by: post.state === "quarantined" ? post.quarantined_by : null,
     appealable_until: kind !== null && appealRow === null ? await appealableUntil(db, policy, post) : null,
     appeal: appealRow === null
       ? null
@@ -187,9 +196,9 @@ async function appeal(c: Ctx): Promise<Response> {
     if (prior.action === "conflict") return errorResponse(requestId, "idempotency_conflict");
   }
 
-  if (policy.moderation_mode !== "postpublish") return errorResponse(requestId, "state_conflict", "Appeals of hides apply in postpublish mode.");
+  if (policy.moderation_mode !== "postpublish") return errorResponse(requestId, "state_conflict", "Appeals apply in postpublish mode.");
   const kind = appealableHide(post);
-  if (kind === null) return errorResponse(requestId, "state_conflict", "Only a scan or Seat Flag hide can be appealed. A Moderator hide is final.");
+  if (kind === null) return errorResponse(requestId, "state_conflict", "Only a scan or Seat Flag quarantine can be appealed. A Moderator decides a report quarantine, and a Moderator hide is final.");
   const existing = await c.env.DB.prepare("SELECT 1 AS one FROM post_appeals WHERE post_id = ?").bind(postId).first();
   if (existing) return errorResponse(requestId, "state_conflict", "This Post was already appealed.");
   const until = await appealableUntil(c.env.DB, policy, post);

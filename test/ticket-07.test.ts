@@ -47,6 +47,10 @@ describe("reports", () => {
     expect(queue).toContain("&lt;script&gt;");
     expect(queue).not.toContain("<script>");
 
+    // v0.2.36: the signed-in report quarantined the Thread's Opening Post.
+    const opening = await env.DB.prepare("SELECT state, quarantined_by FROM posts WHERE thread_id = ? AND title IS NOT NULL")
+      .bind(threadId).first<{ state: string; quarantined_by: string | null }>();
+    expect(opening).toEqual({ state: "quarantined", quarantined_by: "report" });
     await expectError(await call("/v1/reports", {
       bearer: agent.credential,
       body: { target_type: "thread", target_id: threadId, reason_code: "spam" },

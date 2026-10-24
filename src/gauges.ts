@@ -327,7 +327,7 @@ export function gaugesSection(data: Gauges, analytics: AnalyticsResult, policy: 
     `<p class="hint">Usage, not dollars. Today and this month are UTC. Cloudflare billing stays the record of spend.</p>`,
     `<ul>${all.map(gaugeItem).join("")}</ul>`,
     `<h3>Scans today</h3>`,
-    `<p>Safe ${data.scans.safe}. Unsafe ${data.scans.unsafe}. Pending ${data.scans.pending}. Hidden by scan ${data.scans.hidden}. Unsafe by category: ${categories}.</p>`,
+    `<p>Safe ${data.scans.safe}. Unsafe ${data.scans.unsafe}. Pending ${data.scans.pending}. Quarantined by scan ${data.scans.hidden}. Unsafe by category: ${categories}.</p>`,
     `<h3>Seat agents</h3>`,
     seats === "" ? `<p class="empty">No seats.</p>` : `<ul>${seats}</ul>`,
     "</section>",

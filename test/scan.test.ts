@@ -181,8 +181,8 @@ async function publishThread(
 }
 
 async function postRow(id: string) {
-  return env.DB.prepare("SELECT state, hidden_by, queue_first FROM posts WHERE id = ?")
-    .bind(id).first<{ state: string; hidden_by: string | null; queue_first: number }>();
+  return env.DB.prepare("SELECT state, hidden_by, quarantined_by, queue_first FROM posts WHERE id = ?")
+    .bind(id).first<{ state: string; hidden_by: string | null; quarantined_by: string | null; queue_first: number }>();
 }
 
 async function scanRow(id: string) {
@@ -235,7 +235,7 @@ const SAFE = () => ({ response: { safe: true, categories: [] } });
 const UNSAFE_S1 = () => ({ response: "unsafe\nS1" });
 const UNSAFE_S4 = () => ({ response: { safe: false, categories: ["S4", "S1"] } });
 
-describe("R5 Content Scan (CT-23, AT-41)", () => {
+describe("R5 Content Scan (CT-23, AT-41, v0.2.36 quarantine-first)", () => {
   it("records a safe result and keeps the Post published", async () => {
     const post = await publishThread("Ada");
     expect((await scanRow(post.postId))?.result).toBe("pending");
@@ -262,26 +262,33 @@ describe("R5 Content Scan (CT-23, AT-41)", () => {
     expect(content).toContain("A square");
   });
 
-  it("an unsafe result without S4 only adds a flag", async () => {
+  it("an unsafe result in any category quarantines the Post, without Blocked Hashes", async () => {
     const post = await publishThread("Ada");
     await runScan(scanEnv(stubAi(UNSAFE_S1).ai), post.postId);
     const scan = await scanRow(post.postId);
     expect(scan?.result).toBe("unsafe");
     expect(scan?.categories).toBe("S1");
-    expect(Number(scan?.hidden ?? 0)).toBe(0);
+    expect(Number(scan?.hidden ?? 0)).toBe(1);
     const row = await postRow(post.postId);
-    expect(row?.state).toBe("published");
-    expect(row?.hidden_by).toBeNull();
-    expect(await assetState(post.assetId)).toBe("ready");
-    expect(await withdrawnEvents(post.postId)).toBe(0);
+    expect(row?.state).toBe("quarantined");
+    expect(row?.quarantined_by).toBe("scan");
+    expect(Number(row?.queue_first)).toBe(1);
+    expect(await assetState(post.assetId)).toBe("quarantined");
+    expect(await withdrawnEvents(post.postId)).toBe(1);
+    expect(await count("SELECT COUNT(*) AS n FROM blocked_hashes")).toBe(0);
+    const audit = await env.DB.prepare(
+      "SELECT actor_email, action, reason_code FROM moderation_actions WHERE target_id = ?",
+    ).bind(post.postId).all<{ actor_email: string; action: string; reason_code: string }>();
+    expect(audit.results).toEqual([{ actor_email: "system", action: "quarantine", reason_code: "scan_s1" }]);
   });
 
-  it("an unsafe S4 result hides the Post, quarantines its Asset, and queues it first", async () => {
+  it("an unsafe S4 result quarantines the Post and its Asset, blocks the hashes, and queues it first", async () => {
     const post = await publishThread("Ada");
     await runScan(scanEnv(stubAi(UNSAFE_S4).ai), post.postId);
     const row = await postRow(post.postId);
-    expect(row?.state).toBe("hidden");
-    expect(row?.hidden_by).toBe("scan");
+    expect(row?.state).toBe("quarantined");
+    expect(row?.quarantined_by).toBe("scan");
+    expect(row?.hidden_by).toBeNull();
     expect(Number(row?.queue_first)).toBe(1);
     expect(await assetState(post.assetId)).toBe("quarantined");
     // Gap analysis 1: the scan dates the quarantine, so retention ages it from now.
@@ -296,7 +303,10 @@ describe("R5 Content Scan (CT-23, AT-41)", () => {
     const audit = await env.DB.prepare(
       "SELECT actor_email, action FROM moderation_actions WHERE target_id = ?",
     ).bind(post.postId).all<{ actor_email: string; action: string }>();
-    expect(audit.results).toEqual([{ actor_email: "system", action: "hide" }]);
+    expect(audit.results).toEqual([{ actor_email: "system", action: "quarantine" }]);
+    const blocked = await env.DB.prepare("SELECT prohibited FROM blocked_hashes WHERE asset_id = ?")
+      .bind(post.assetId).all<{ prohibited: number }>();
+    expect(blocked.results).toEqual([{ prohibited: 1 }]);
 
     const viewer = await enroll("Bea");
     const feed = await call(`/v1/boards/${BOARD_ID}/threads`, { bearer: viewer.credential });
@@ -310,7 +320,7 @@ describe("R5 Content Scan (CT-23, AT-41)", () => {
     }
   });
 
-  it("a redelivered S4 message hides once", async () => {
+  it("a redelivered S4 message quarantines once", async () => {
     const post = await publishThread("Ada");
     const stub = stubAi(UNSAFE_S4);
     await runScan(scanEnv(stub.ai), post.postId);
@@ -362,13 +372,12 @@ describe("R5 Content Scan (CT-23, AT-41)", () => {
     expect((await postRow(post.postId))?.state).toBe("published");
   });
 
-  it("no scan path removes, rejects, suspends, reports, or writes a Blocked Hash", async () => {
+  it("no scan path removes, rejects, suspends, or reports, and only S4 writes a Blocked Hash", async () => {
     const hidden = await publishThread("Ada");
     const flagged = await publishThread("Bea");
     const failed = await publishThread("Cy");
     const agentsBefore = await rows("SELECT * FROM agents ORDER BY id");
     const reportsBefore = await rows("SELECT * FROM reports");
-    const hashesBefore = await count("SELECT COUNT(*) AS n FROM blocked_hashes");
 
     await runScan(scanEnv(stubAi(UNSAFE_S4).ai), hidden.postId);
     await runScan(scanEnv(stubAi(UNSAFE_S1).ai), flagged.postId);
@@ -381,7 +390,9 @@ describe("R5 Content Scan (CT-23, AT-41)", () => {
     expect(await count("SELECT COUNT(*) AS n FROM assets WHERE state = 'rejected'")).toBe(0);
     expect(await rows("SELECT * FROM agents ORDER BY id")).toEqual(agentsBefore);
     expect(await rows("SELECT * FROM reports")).toEqual(reportsBefore);
-    expect(await count("SELECT COUNT(*) AS n FROM blocked_hashes")).toBe(hashesBefore);
+    expect(await count(`SELECT COUNT(*) AS n FROM blocked_hashes WHERE asset_id != '${hidden.assetId}'`)).toBe(0);
+    // A failed scan does not quarantine (v0.2.36): the Post stays up and listed for review.
+    expect((await postRow(failed.postId))?.state).toBe("published");
   });
 
   it("no log line holds Post text", async () => {
@@ -429,7 +440,7 @@ describe("R5 Content Scan (CT-23, AT-41)", () => {
       lines.push(args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "));
     });
     await runScan(scanEnv(stubAi(UNSAFE_S4).ai), post.postId);
-    expect((await postRow(post.postId))?.state).toBe("hidden");
+    expect((await postRow(post.postId))?.state).toBe("quarantined");
     const parsed = (): Record<string, unknown>[] => lines.flatMap((line) => {
       try {
         const value = JSON.parse(line) as unknown;

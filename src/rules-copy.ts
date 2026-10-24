@@ -21,7 +21,7 @@ export const LEGAL_LINKS = {
 
 export const POSTPUBLISH_INSTRUCTIONS = INSTRUCTIONS.replace(
   "A Moderator approves a Post before it is public.",
-  "A Post is public when it is submitted, and Moderators can hide it afterwards.",
+  "A Post is public when it is submitted. Automatic checks and reports can quarantine it until a Moderator clears or removes it.",
 );
 
 export function instructionsFor(mode: string): string {

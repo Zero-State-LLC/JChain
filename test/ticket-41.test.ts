@@ -15,7 +15,7 @@ beforeAll(async () => {
 
 beforeEach(resetAndSeed);
 
-describe("AT-44 appeals of automatic hides", () => {
+describe("AT-44 appeals of automatic hides (before v0.2.36)", () => {
   it("lets the author appeal a scan hide once, with a replayable key", async () => {
     const ada = await enroll("Ada", OPERATOR);
     const post = await seedHidden(ada.agentId, "scan");

@@ -124,6 +124,9 @@ async function moderate(c: Ctx, format: Format): Promise<Response> {
   if (action.targetType === "asset" && action.action === "quarantine_asset") {
     return quarantine(c, requestId, principal.email, action, format);
   }
+  if (action.targetType === "report" && action.action === "dismiss_report") {
+    return dismissReport(c, requestId, principal.email, action, format);
+  }
   return moderationError(requestId, format, "state_conflict");
 }
 
@@ -138,7 +141,12 @@ async function movePost(
 
   const post = await c.env.DB.prepare(
     `SELECT posts.state AS state, posts.legal_hold AS legal_hold, threads.state AS thread_state,
-            posts.asset_id AS asset_id, assets.state AS asset_state, posts.hidden_by AS hidden_by
+            posts.asset_id AS asset_id, assets.state AS asset_state, posts.hidden_by AS hidden_by,
+            posts.quarantined_by AS quarantined_by,
+            EXISTS (
+              SELECT 1 FROM posts AS other
+               WHERE other.asset_id = posts.asset_id AND other.id != posts.id AND other.legal_hold = 1
+            ) AS shared_hold
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
        LEFT JOIN assets ON assets.id = posts.asset_id
@@ -146,19 +154,28 @@ async function movePost(
   ).bind(action.targetId).first<{
     state: string;
     hidden_by: string | null;
+    quarantined_by: string | null;
+    shared_hold: number;
     legal_hold: number;
     thread_state: string;
     asset_id: string | null;
     asset_state: string | null;
   }>();
   if (!post) return moderationError(requestId, format, "not_found");
-  // #116: any Moderator may remove or quarantine (the safe direction). Releasing a quarantined
-  // Post, or any Post under a legal hold, is Admin only, and it releases the quarantined Asset in
-  // the same batch, so a false report or false CSAM match can be cleared without editing D1.
+  // v0.2.36 (quarantine-first): any Moderator may Clear (restore) a quarantined Post, which
+  // releases its quarantined Asset and its Blocked Hashes in the same batch, or Archive (remove) it.
+  // Releasing a Post under a legal hold stays Admin only (#116).
+  // Review 4365291514: a Post whose Asset another held Post shares counts as held, and a Clear
+  // never releases an Asset another Post still holds; the batch guard below re-checks both.
   const fromQuarantine = name === "restore" && post.state === "quarantined";
-  if (name === "restore" && (fromQuarantine || post.legal_hold === 1)) {
-    if (!(await isAdminEmail(c.env, actorEmail))) return moderationError(requestId, format, "forbidden");
+  const sharedHold = Number(post.shared_hold) === 1;
+  const actorIsAdmin = name === "restore" && (post.legal_hold === 1 || sharedHold)
+    ? await isAdminEmail(c.env, actorEmail)
+    : false;
+  if (name === "restore" && (post.legal_hold === 1 || sharedHold) && !actorIsAdmin) {
+    return moderationError(requestId, format, "forbidden");
   }
+  if (fromQuarantine && sharedHold) return moderationError(requestId, format, "state_conflict");
   const assetReady = post.asset_id === null || post.asset_state === "ready"
     || (fromQuarantine && post.asset_state === "quarantined");
   if (!legal(name, post.state, post.thread_state, assetReady)) {
@@ -213,7 +230,11 @@ async function movePost(
     ? `posts.id = ? AND posts.state = 'quarantined'
     AND (posts.asset_id IS NULL OR EXISTS (
       SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state IN ('ready', 'quarantined')
-    ))`
+    ))
+    AND NOT EXISTS (
+      SELECT 1 FROM posts AS other
+       WHERE other.asset_id = posts.asset_id AND other.id != posts.id AND other.legal_hold = 1
+    )${actorIsAdmin ? "" : " AND posts.legal_hold = 0"}`
     : guard(name);
   const statements: D1PreparedStatement[] = [];
   let writtenIndex: number | null = null;
@@ -257,7 +278,14 @@ async function movePost(
   const updateIndex = statements.length;
   // v0.2.29: a Moderator hide is final and never appealable. Restore and approve clear who hid it.
   // A Moderator hide decides the Post, so it leaves First in line (a single Seat Flag had queued it).
-  const hiddenBy = name === "hide" ? "'moderator', queue_first = 0" : name === "restore" || name === "approve" ? "NULL" : "hidden_by";
+  // v0.2.36: a Clear (restore) also clears who quarantined it and takes it out of First in line.
+  const hiddenBy = name === "hide"
+    ? "'moderator', queue_first = 0"
+    : name === "restore"
+      ? "NULL, quarantined_by = NULL, queue_first = 0"
+      : name === "approve"
+        ? "NULL"
+        : name === "quarantine" ? "hidden_by, quarantined_by = NULL" : "hidden_by";
   const holdSql = name === "restore"
     ? ", legal_hold = 0, legal_hold_reason = NULL"
     : action.reasonCode === "csam" && (name === "remove" || name === "quarantine")
@@ -273,6 +301,17 @@ async function movePost(
         WHERE post_id = ? AND outcome IS NULL
           AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
     ).bind(occurredAt, actorEmail, action.targetId, actionId));
+  }
+  if (name === "restore" || name === "remove" || name === "hide") {
+    // v0.2.36: a report is resolved when its item is cleared, archived, or hidden. The open reports
+    // on this Post, and on its Thread when it is the Opening Post, are triaged in the same batch.
+    statements.push(c.env.DB.prepare(
+      `UPDATE reports SET state = 'triaged'
+        WHERE state = 'open'
+          AND ((target_type = 'post' AND target_id = ?)
+            OR (target_type = 'thread' AND target_id = (SELECT thread_id FROM posts WHERE id = ? AND title IS NOT NULL)))
+          AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+    ).bind(action.targetId, action.targetId, actionId));
   }
   if (fromQuarantine && post.asset_id !== null) {
     // Runs after the Post update, so it keys on the audit row this batch wrote.
@@ -579,6 +618,40 @@ async function dismissFlags(
   );
 }
 
+// v0.2.36: dismiss one open report on its own. Audited; marks it triaged and changes nothing else.
+async function dismissReport(
+  c: Ctx,
+  requestId: string,
+  actorEmail: string,
+  action: ActionInput,
+  format: Format,
+): Promise<Response> {
+  const report = await c.env.DB.prepare("SELECT state FROM reports WHERE id = ?").bind(action.targetId)
+    .first<{ state: string }>();
+  if (!report) return moderationError(requestId, format, "not_found");
+  if (report.state !== "open") return moderationError(requestId, format, "state_conflict");
+  const guard = "id = ? AND state = 'open'";
+  const ok = await auditedUpdate(c.env.DB, {
+    actorEmail,
+    targetType: "report",
+    targetId: action.targetId,
+    action: "dismiss_report",
+    reasonCode: action.reasonCode,
+    privateNote: action.privateNote,
+    guard,
+    update: `UPDATE reports SET state = 'triaged' WHERE ${guard}`,
+    updateValue: null,
+  });
+  if (!ok) return moderationError(requestId, format, "state_conflict");
+  console.log(JSON.stringify({ message: "report dismissed", report_id: action.targetId }));
+  return moderationDone(
+    requestId,
+    format,
+    { report_id: action.targetId, state: "triaged" },
+    `Report ${action.targetId} is dismissed.`,
+  );
+}
+
 // v0.2.29 (CT-21): Admin only. A falsely quarantined Asset returns to ready and leaves the Blocked Hash list.
 async function restoreAsset(
   c: Ctx,
@@ -703,6 +776,7 @@ async function auditedUpdate(db: D1Database, move: Audited): Promise<boolean> {
 function tableFor(targetType: string): string {
   if (targetType === "thread") return "threads";
   if (targetType === "agent") return "agents";
+  if (targetType === "report") return "reports";
   return "assets";
 }
 
@@ -714,6 +788,7 @@ export const OTHER_PAIRS = {
   post: ["uphold", "dismiss_flags"],
   agent: ["revoke_handle"],
   asset: ["quarantine_asset", "restore_asset"],
+  report: ["dismiss_report"],
 } as const;
 
 type MoveName = (typeof POST_MOVES)[number];
