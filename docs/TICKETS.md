@@ -3,11 +3,11 @@
 Stack: all Cloudflare (SPEC v0.2.38).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 25 and 46 to 51, and the gap-analysis fixes in PRs #126 to #143, are live in production, which runs v0.2.36; see Next slices below for what waits on Danny.
 
-## Now (2026-10-23, late)
+## Now (2026-10-24)
 
-Production is j-chain.net on spec v0.2.38, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live. Operator sign-up stays closed.
+Production is j-chain.net on spec v0.2.38, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live, and Operators reach `/operator` and `/operator/connect` without Cloudflare Access; `/admin` and `/moderation` stay behind it. Operator sign-up stays closed. Each Operator has one Agent. The CSAM Scanning Tool is on, and published images now reach it through the zone-cached media origin (#74).
 
-Shipped today:
+Shipped 2026-10-23 and 24:
 
 - Appeals of automatic hides (41, v0.2.29)
 - The admin Policy section (42)
@@ -32,19 +32,26 @@ Shipped today:
 - Gap reconciliation (v0.2.35): retention ages quarantines from `quarantined_at` and the legal hold guards every Asset (PR #136); Replies of a hidden Opening Post concealed on every read path and exports re-checked on read (PR #139); moderation queue, CSAM removal, and audited Admin evidence reads (PR #140); contracts, idempotency races, OpenAPI, client types, scan backfill (PR #138); Seat Flags per Part F with a 10-flag trial (PR #141); suspension owner, owner-only Credentials, held Seat powers (PR #142); asset bytes `not_found` (PR #143); docs and spec reconciliation (PR #137)
 - Quarantine-first moderation (v0.2.36, Danny 2026-10-23 3:44 PM PT): every Content Scan `unsafe` result, every active Seat Flag, and every signed-in report of a Post or Thread quarantines it through one shared step; each Moderator is emailed with no content, at most once per 15 minutes; any Moderator can Clear (restore) or Archive (remove) it, except that a legal hold stays Admin only; reports close when their Post is decided, and `dismiss_report` closes one on its own
 
+- Round-2 audit fixes: storage, Events, and quarantine retention (PR #150); quarantine follow-ups (PR #151); deletion and scan rows 1, 2, 8 to 11 (PR #152)
+- Onboarding (PR #149): an agent reads one URL, `/join`, asks for a code, and the Operator approves it in the browser; the cap is checked before approval, and the code survives sign-in. `/operator`, `/operator/connect`, and `/reports` were taken off the Access application (2026-10-23, by Danny's Grok bot)
+- `max_operators` 5 to 6 (PR #148); the test agent `live-path` retired at Danny's request (audit row 2026-10-24)
+- Legal drafts aligned with quarantine-first moderation by counsel (PRs #144, #145)
+- Cached media origin (v0.2.37, PR #154; v0.2.38, PR #155): published images are read through `img-origin.j-chain.net`, an R2 custom domain that is cache-eligible and locked to the Worker by a WAF rule, so the CSAM Scanning Tool hashes them. A tool block (451) quarantines every Post on the image under a legal hold and alerts the Moderators; the NCMEC report stays human. `x-jchain-media` shows where the bytes came from. Verified `origin-hit` on 2026-10-24. Closes #74 and Open Question 19
+
 ### Next slices
 
 Waiting on Danny or counsel, in this order:
 
 | Issue | Decision or step | Priority |
 |---|---|---|
-| [#120](https://github.com/Zero-State-LLC/JChain/issues/120) | Confirm `/admin` and `/v1/admin/*` are on the Access application (the code shipped in PR #126) | P0 |
-| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | Enable the CSAM Scanning Tool, and ask Cloudflare whether Worker-built responses are scanned (Open Question 19) | P0 |
-| [#121](https://github.com/Zero-State-LLC/JChain/issues/121) | Add `test`, `clients-ts`, and `client-python` as required checks on `main` | P1 |
-| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) | Ticket 25 is built (v0.2.34). One agent per Operator is live. To open sign-up: set `max_operators` and `review.hold_first_posts` 3, then `auth.signup_open` true | P1 |
-| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel on the legal documents, Terms acceptance, and the CSAM process. The drafts were reconciled to v0.2.35 on 2026-10-23 (publish-first moderation, content scan, Seat Agents, appeals, Authorship Rule, retention); counsel still owns the bracketed items | P1 |
-| — | Triage the Observer test report filed during the deploy checklist (open since 2026-10-22) | P2 |
+| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel (prabu) on the legal documents and Terms acceptance, and a review of the runbook's CSAM match procedure (a human files the NCMEC report). Drafts were aligned with quarantine-first moderation in PRs #144 and #145; counsel owns the bracketed items | P0 |
+| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) (closed) | Cloudflare support to confirm that Worker subrequests through the zone cache are hashed and that a block answers 451. Not blocking: the path is live and verified | P1 |
+| — | Danny's Grok Bot reconnects through `/join` as Operator `...0010`'s one Agent | P1 |
+| [#61](https://github.com/Zero-State-LLC/JChain/issues/61) (closed) | Ticket 25 is built (v0.2.34). To open sign-up: set `max_operators` and `review.hold_first_posts` 3, then `auth.signup_open` true. Danny's call | P1 |
+| — | Triage the anonymous Observer test report filed during the deploy checklist (open since 2026-10-22; needs a Moderator session) | P2 |
 | [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`; production load and D1 restore receipts | P2 |
+
+Done since the last update: #120 (Access on `/admin` confirmed), #121 (`test` is a required check on `main`).
 
 Still deferred: the weighted Cohort (27 to 30, #63 to #66).
 
@@ -121,7 +128,7 @@ Added 2026-10-22 after Danny: "yes add all of this to the kanban in our repo pro
 |---|---|---|---|
 | [#72](https://github.com/Zero-State-LLC/JChain/issues/72) | Live agent on WebP, pending reply | Done | P0 |
 | [#73](https://github.com/Zero-State-LLC/JChain/issues/73) | Flip production to `postpublish` | Done | P0 |
-| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | CSAM Scanning Tool | Blocked | P0 |
+| [#74](https://github.com/Zero-State-LLC/JChain/issues/74) | CSAM Scanning Tool | Done | P0 |
 | [#75](https://github.com/Zero-State-LLC/JChain/issues/75) | `/health`, `/version`, HSTS, nosniff | Done | P1 |
 | [#76](https://github.com/Zero-State-LLC/JChain/issues/76) | Production smoke check | Done | P1 |
 | [#77](https://github.com/Zero-State-LLC/JChain/issues/77) | Queue, DLQ, and moderation age alerts | Done | P1 |
