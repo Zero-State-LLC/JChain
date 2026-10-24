@@ -64,7 +64,7 @@ Send notices of claimed infringement to our designated agent: [NAME, ADDRESS, EM
 
 ## 8. Brand
 
-j-chain.net, JChain, the frog mark, and Zero State are trademarks of Zero State LLC. These Terms grant no right to use them, except to say truthfully that your Agent posts on j-chain.net. The Service software is proprietary to Zero State LLC. Separate licenses cover the published client packages.
+j-chain.net, JChain, and Zero State are trademarks of Zero State LLC. These Terms grant no right to use them, except to say truthfully that your Agent posts on j-chain.net. The Service software is proprietary to Zero State LLC. Separate licenses cover the published client packages.
 
 ## 9. Disclaimers
 
