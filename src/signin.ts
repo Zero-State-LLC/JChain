@@ -2,10 +2,12 @@ import { Hono, type Context } from "hono";
 import {
   badLinkPage,
   confirmLinkPage,
+  connectSignInPage,
   linkSentPage,
   signInPage,
   signedOutPage,
 } from "./account-pages";
+import { displayUserCode, normalizeUserCode } from "./connect";
 import { sha256Hex } from "./credential";
 import { readForm } from "./forms";
 import { htmlError } from "./html";
@@ -82,7 +84,18 @@ async function requestLink(c: Ctx): Promise<Response> {
   const form = await readForm(c.req.raw);
   const raw = form.ok ? form.value.email : undefined;
   const email = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  // CT-28: a connect code to come back to after sign-in. Only a well-formed code is kept.
+  const connect = form.ok ? normalizeUserCode(form.value.connect ?? "") : null;
   if (!form.ok || !mailbox(email)) {
+    if (connect !== null) {
+      return htmlResponse(requestId, connectSignInPage({
+        code: connect,
+        emailOn: true,
+        linkMinutes: enabled.auth.link_minutes,
+        error: "Enter a whole email address, like name@example.com.",
+        email: typeof raw === "string" ? raw.slice(0, 254) : undefined,
+      }), 422);
+    }
     return htmlResponse(requestId, signInPage({
       emailOn: true,
       linkMinutes: enabled.auth.link_minutes,
@@ -115,7 +128,7 @@ async function requestLink(c: Ctx): Promise<Response> {
           const token = operatorId !== null
             ? await issueLink(c.env.DB, operatorId, auth)
             : await issueSignupLink(c.env.DB, email, auth);
-          await mailer.send(signInEmail(auth, email, `${policy.site_origin}/signin/${token}`, operatorId === null));
+          await mailer.send(signInEmail(auth, email, `${policy.site_origin}/signin/${token}${connectQuery(connect)}`, operatorId === null));
         } catch {
           console.error(JSON.stringify({ message: "sign-in email failed", request_id: requestId }));
         }
@@ -138,7 +151,7 @@ function confirmLink(c: Ctx): Response {
   }
   const token = c.req.param("token") ?? "";
   const response = isLinkToken(token)
-    ? htmlResponse(requestId, confirmLinkPage(token))
+    ? htmlResponse(requestId, confirmLinkPage(token, normalizeUserCode(c.req.query("connect") ?? "")))
     : htmlResponse(requestId, badLinkPage(), 400);
   response.headers.set("referrer-policy", "no-referrer");
   return response;
@@ -158,7 +171,19 @@ async function useLink(c: Ctx): Promise<Response> {
     response.headers.set("referrer-policy", "no-referrer");
     return response;
   }
-  return redirect(requestId, "/operator", sessionCookie(started.secret, started.maxAge));
+  return redirect(requestId, afterSignIn(c.req.query("connect")), sessionCookie(started.secret, started.maxAge));
+}
+
+// The one place a sign-in may send the Operator other than /operator: back to its agent's
+// connect code. The target is rebuilt from the normalized eight letters, never taken from
+// the request, so no other path, host, or scheme can come through (no open redirect).
+export function afterSignIn(rawCode: string | undefined): string {
+  const code = normalizeUserCode((rawCode ?? "").slice(0, 20));
+  return code === null ? "/operator" : `/operator/connect?code=${displayUserCode(code)}`;
+}
+
+function connectQuery(code: string | null): string {
+  return code === null ? "" : `?connect=${code}`;
 }
 
 async function signOut(c: Ctx): Promise<Response> {

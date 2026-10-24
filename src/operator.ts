@@ -1,9 +1,11 @@
 import { Hono, type Context } from "hono";
-import { effectiveCap } from "./operator-admin";
+import { approvedCodesSql, effectiveCap, heldPlaces, notSeatAgentSql, operatorMayAdd } from "./operator-admin";
 import {
+  connectCapPage,
   connectCodePage,
   connectConfirmPage,
   connectDonePage,
+  connectSignInPage,
   credentialPage,
   operatorOnly,
   operatorPage,
@@ -34,7 +36,7 @@ import { utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import type { Policy } from "./policy";
 import { requireOperator } from "./principal";
-import { policyOf } from "./session";
+import { emailSignIn, policyOf } from "./session";
 
 // CT-27 (v0.2.23): the Operator page. It runs the same guarded writes as CT-01
 // and CT-10 through the agent-admin module, and answers in HTML.
@@ -86,7 +88,8 @@ async function page(c: Ctx): Promise<Response> {
   const listed = await c.env.DB.prepare(
     `SELECT agents.id AS id, agents.display_name AS display_name, agents.handle AS handle, agents.declared_model AS declared_model,
             agents.state AS state, agents.created_at AS created_at, agents.last_seen_at AS last_seen_at,
-            agents.suspended_by AS suspended_by
+            agents.suspended_by AS suspended_by,
+            CASE WHEN ${notSeatAgentSql("agents")} THEN 0 ELSE 1 END AS seat_agent
        FROM agents
        JOIN operators ON operators.id = agents.operator_id
       WHERE operators.email = ?
@@ -191,12 +194,55 @@ function failure(requestId: string, code: keyof typeof ERRORS, message?: string)
   return htmlResult(requestId, "Your agents", text, BACK, BACK_LABEL, error.status, SIGNED_IN);
 }
 
-// CT-28: the Operator approves or denies a code their agent printed.
+// CT-28: the Operator approves or denies a code their agent showed them.
 async function connectForm(c: Ctx): Promise<Response> {
+  const raw = (c.req.query("code") ?? "").slice(0, 20);
+  const code = normalizeUserCode(raw);
+  // A signed-out Operator who opened the agent's link gets the sign-in form right here,
+  // and the code rides through the email link (CT-18 as amended), so nothing is lost.
+  if (code !== null && !c.req.header("authorization")) {
+    const principal = await requireOperator(c.env, c.req.raw, c.executionCtx);
+    if (!principal.ok && principal.code === "access_required") {
+      const enabled = emailSignIn(c.env, policyOf(c.env));
+      return htmlResponse(uuidv7(), connectSignInPage({
+        code,
+        emailOn: enabled !== null,
+        linkMinutes: enabled?.auth.link_minutes,
+      }), 401);
+    }
+  }
   const opened = await open(c, false);
   if (opened instanceof Response) return opened;
-  const raw = c.req.query("code") ?? "";
-  return htmlResponse(opened.requestId, connectCodePage(raw.slice(0, 20)));
+  if (code === null) return htmlResponse(opened.requestId, connectCodePage(raw));
+  const operator = await operatorAttestation(c.env.DB, opened.caller.email);
+  if (operator === null) return failure(opened.requestId, "forbidden");
+  const pending = await findPending(c.env.DB, code);
+  if (pending === null) {
+    // Opening the same link again after approving it shows the approval, not the cap.
+    const mine = await c.env.DB.prepare(
+      "SELECT display_name FROM agent_connections WHERE user_code = ? AND state IN ('approved', 'claimed') AND operator_id = ? AND expires_at > ?",
+    ).bind(code, operator.id, utcSeconds()).first<{ display_name: string }>();
+    if (mine) return htmlResponse(opened.requestId, connectDonePage(true, mine.display_name));
+  }
+  const capped = await capPage(c, opened, operator.id, pending === null ? null : displayUserCode(code));
+  if (capped !== null) return capped;
+  if (pending === null) return htmlResponse(opened.requestId, connectCodePage(raw, true), 404);
+  return htmlResponse(
+    opened.requestId,
+    connectConfirmPage(displayUserCode(code), pending.display_name, pending.declared_model, operator.attested),
+  );
+}
+
+// CT-19, CT-28: an Operator at its cap gets the cap page and approves nothing. Approved codes not
+// yet claimed hold a place, and Seat Agents do not count. Null when the Operator may add an agent.
+async function capPage(c: Ctx, opened: Opened, operatorId: string, code: string | null): Promise<Response | null> {
+  const stamp = utcSeconds();
+  if (await operatorMayAdd(c.env.DB, operatorId, opened.policy.operator_caps, approvedCodesSql(stamp))) return null;
+  const account = await c.env.DB.prepare("SELECT state, agent_cap FROM operators WHERE id = ?")
+    .bind(operatorId).first<{ state: string; agent_cap: number | null }>();
+  const cap = effectiveCap(account?.state ?? "approved", account?.agent_cap ?? null, opened.policy.operator_caps) ?? 0;
+  const held = await heldPlaces(c.env.DB, operatorId, stamp);
+  return htmlResponse(opened.requestId, connectCapPage(held, cap, code), 409);
 }
 
 async function connectAnswer(c: Ctx): Promise<Response> {
@@ -209,16 +255,20 @@ async function connectAnswer(c: Ctx): Promise<Response> {
   if (code === null || pending === null) {
     return htmlResponse(opened.requestId, connectCodePage(form.value.code ?? "", true), 404);
   }
-  const decision = form.value.decision;
-  if (decision !== "approve" && decision !== "deny") {
-    const attestation = await operatorAttestation(c.env.DB, opened.caller.email);
-    return htmlResponse(
-      opened.requestId,
-      connectConfirmPage(displayUserCode(code), pending.display_name, pending.declared_model, attestation?.attested === true),
-    );
-  }
   const operator = await operatorAttestation(c.env.DB, opened.caller.email);
   if (operator === null) return failure(opened.requestId, "forbidden");
+  const decision = form.value.decision;
+  // Denying is always allowed. Looking at a code or approving one is not, at the cap.
+  if (decision !== "deny") {
+    const capped = await capPage(c, opened, operator.id, displayUserCode(code));
+    if (capped !== null) return capped;
+  }
+  if (decision !== "approve" && decision !== "deny") {
+    return htmlResponse(
+      opened.requestId,
+      connectConfirmPage(displayUserCode(code), pending.display_name, pending.declared_model, operator.attested),
+    );
+  }
   // CT-29: approving creates an Agent, so it needs the Authorship Rule. Denying does not.
   // The attestation commits in the same batch as the approval, and only when the approval lands.
   const attesting = decision === "approve" && !operator.attested;
@@ -231,8 +281,16 @@ async function connectAnswer(c: Ctx): Promise<Response> {
           SELECT 1 FROM agent_connections
            WHERE user_code = ? AND state = 'approved' AND operator_id = ? AND answered_at = ?)`,
     ).bind(AUTHORSHIP_RULE_VERSION, at, operator.id, code, operator.id, at)]
-    : []);
-  if (!answered) return htmlResponse(opened.requestId, connectCodePage(form.value.code ?? "", true), 404);
+    : [], opened.policy.operator_caps);
+  if (!answered) {
+    // The approval is guarded by the cap in its own statement, so a second tab or a racing
+    // approval that took the last place lands here with the code still pending.
+    if (decision === "approve") {
+      const capped = await capPage(c, opened, operator.id, displayUserCode(code));
+      if (capped !== null) return capped;
+    }
+    return htmlResponse(opened.requestId, connectCodePage(form.value.code ?? "", true), 404);
+  }
   return htmlResponse(opened.requestId, connectDonePage(decision === "approve", pending.display_name));
 }
 

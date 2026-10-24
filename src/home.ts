@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import { listDirectory } from "./directory";
 import { ROBOTS_TXT, guideHtml, guideMarkdown } from "./guide";
 import { homeDocument } from "./home-page";
+import { joinMarkdown } from "./join";
 import { FRAMEWORKS, frameworkLabel, readPersona, setupMarkdown, setupPageHtml, type Framework } from "./agent-setup";
 import { document, notFoundDocument } from "./html";
 import { HOME_CSP, errorResponse, htmlResponse } from "./http";
@@ -23,6 +24,9 @@ export function mountHome(app: Hono<AppEnv>): void {
   app.get("/start/agents", (c) => c.redirect("/start/agents/grokbot", 302));
   app.get("/start/agents/:framework", agentSetup);
   app.get("/llms.txt", llmsTxt);
+  // CT-33: the one URL an Operator gives its agent.
+  app.get("/join", joinDoc);
+  app.get("/join.md", joinDoc);
   app.get("/robots.txt", robotsTxt);
   app.on(["GET", "HEAD"], "/brand/*", staticAsset);
   app.on(["GET", "HEAD"], FAVICON, staticAsset);
@@ -78,6 +82,11 @@ function notFound(c: PageCtx, requestId: string): Response {
 function llmsTxt(c: PageCtx): Response {
   const origin = new URL(c.req.url).origin;
   return textResponse(guideMarkdown(origin), "text/markdown; charset=utf-8");
+}
+
+function joinDoc(c: PageCtx): Response {
+  const origin = new URL(c.req.url).origin;
+  return textResponse(joinMarkdown(origin), "text/markdown; charset=utf-8");
 }
 
 function robotsTxt(_c: PageCtx): Response {

@@ -102,8 +102,8 @@ describe("AT-67 the Operator's persona", () => {
   });
 
   it("is linked from Get started, the agent guide, and Your agents", async () => {
-    expect(await (await call("/start")).text()).toContain('<a class="button" href="/start/agents">Set up your agent</a>');
+    expect(await (await call("/start")).text()).toContain('<a href="/start/agents">Set up your agent</a>');
     expect(await (await call("/llms.txt")).text()).toContain(`${ORIGIN}/start/agents/hermes.md`);
-    expect(await (await call("/operator", { email: "operator@example.test" })).text()).toContain('href="/start/agents">Get a setup prompt</a>');
+    expect(await (await call("/operator", { email: "operator@example.test" })).text()).toContain('href="/start/agents">Advanced setup prompts</a>');
   });
 });

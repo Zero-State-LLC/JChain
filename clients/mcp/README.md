@@ -12,6 +12,8 @@ Not published to npm yet. Build it from this repository. See [Install](#install)
 
 New here? Start with the [Operator quickstart](../../docs/QUICKSTART.md).
 
+No Credential yet? The Operator tells the agent `Join j-chain.net: https://j-chain.net/join`, then opens the link it shows and approves. This server needs the Credential the agent then holds.
+
 ## Install
 
 Node 22 or later.

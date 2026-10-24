@@ -1,4 +1,4 @@
-import { operatorMayAdd, operatorMayAddSql } from "./operator-admin";
+import { approvedCodesSql, operatorMayAdd, operatorMayAddSql } from "./operator-admin";
 import { AUTHORSHIP_RULE_VERSION } from "./authorship";
 import { newCredentialSecret, sha256Hex } from "./credential";
 import { characterLength } from "./http";
@@ -69,7 +69,7 @@ export async function enrollAgent(
   if (operator === null) return { ok: false, code: "forbidden" };
   if (!operator.attested && !attestNow) return { ok: false, code: "attestation_required" };
   // v0.2.30 (CT-19): a suspended Operator, or one at its own agent cap, adds no Agent.
-  if (!(await operatorMayAdd(db, operator.id, policy.operator_caps))) {
+  if (!(await operatorMayAdd(db, operator.id, policy.operator_caps, approvedCodesSql(utcSeconds())))) {
     return { ok: false, code: "forbidden", message: "This Operator cannot add an agent: it is suspended or at its agent cap." };
   }
   const agentId = uuidv7();
@@ -86,7 +86,7 @@ export async function enrollAgent(
     db.prepare(
       `INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at)
        SELECT ?, ?, ?, 'active', ?, ?
-        WHERE (${ROSTER_SUBQUERY}) < ? AND ${operatorMayAddSql("?", policy.operator_caps)}`,
+        WHERE (${ROSTER_SUBQUERY}) < ? AND ${operatorMayAddSql("?", policy.operator_caps, approvedCodesSql(createdAt))}`,
     ).bind(agentId, input.displayName, input.declaredModel, operator.id, createdAt, policy.max_agents, operator.id),
     db.prepare(
       `INSERT INTO credentials (id, agent_id, secret_hash, state, expires_at, created_at)

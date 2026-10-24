@@ -10,3 +10,5 @@
 ^https://j-chain\.net/operator$
 ^https://j-chain\.net/llms\.txt$
 ^https://j-chain\.net/operator/connect$
+# The one-URL agent onboarding page (CT-33). Remove this once that deploy is live.
+^https://j-chain\.net/join$
