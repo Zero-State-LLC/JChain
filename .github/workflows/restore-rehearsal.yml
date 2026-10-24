@@ -34,6 +34,8 @@ jobs:
       - name: Rehearse
         run: |
           set -euo pipefail
+          # Job logs are not always reachable for the reader; failures also land as annotations.
+          trap 'echo "::error title=Restore rehearsal::line $LINENO: $BASH_COMMAND"' ERR
           command -v sqlite3 > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3; }
           now() { date +%s%3N; }
           api() { curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "$@"; }
@@ -41,7 +43,8 @@ jobs:
           t0=$(now)
 
           # 1. RPO: the Time Travel bookmark for now (read-only).
-          npx wrangler d1 time-travel info "$PROD_DB" --env production --json > bookmark.json
+          npx wrangler d1 time-travel info "$PROD_DB" --env production --json > bookmark.raw
+          jq -c . bookmark.raw > bookmark.json 2> /dev/null || jq -Rsc '{raw: .}' bookmark.raw > bookmark.json
           t1=$(now)
 
           # 2. Snapshot production with one export.
@@ -52,7 +55,7 @@ jobs:
           # 3. A scratch database, and a config that names only it.
           api -X POST "$base" -d "{\"name\":\"$SCRATCH_DB\"}" > created.json
           scratch_id=$(jq -r '.result.uuid // empty' created.json)
-          test -n "$scratch_id" || { cat created.json; echo "could not create the scratch database"; exit 1; }
+          test -n "$scratch_id" || { echo "::error title=Restore rehearsal::could not create the scratch database: $(jq -c '.errors' created.json 2> /dev/null || head -c 300 created.json)"; exit 1; }
           test "$scratch_id" != "$PROD_DB_ID" || { echo "scratch id equals production"; exit 1; }
           echo "$scratch_id" > scratch_id
           jq -n --arg n "$SCRATCH_DB" --arg id "$scratch_id" \
@@ -86,6 +89,7 @@ jobs:
               counts_match:$match, ms:{bookmark:$lookup, export:$export, create:$create, import:$import, verify:$verify},
               rto_ms:$rto, rto_target_ms:14400000, nfr_04_achieved:($match and $rto < 14400000)}' > receipt.json
           cat receipt.json
+          echo "::notice title=Restore receipt::$(jq -c '{rto_ms, ms, tables, rows, counts_match, nfr_04_achieved}' receipt.json)"
           {
             echo "## Restore rehearsal (NFR-04)"
             echo
@@ -96,7 +100,7 @@ jobs:
             echo
             jq -r '"Tables \(.tables), rows \(.rows), export \(.export_bytes) bytes, counts match: \(.counts_match), NFR-04 achieved: \(.nfr_04_achieved)"' receipt.json
           } >> "$GITHUB_STEP_SUMMARY"
-          test "$match" = "true" || { echo "row counts differ"; diff <(jq -S . prod_counts.json) <(jq -S . scratch_counts.json) || true; exit 1; }
+          test "$match" = "true" || { echo "::error title=Restore rehearsal::row counts differ: prod $(cat prod_counts.json) scratch $(cat scratch_counts.json)"; diff <(jq -S . prod_counts.json) <(jq -S . scratch_counts.json) || true; exit 1; }
       - name: Delete the scratch database
         if: always()
         run: |
