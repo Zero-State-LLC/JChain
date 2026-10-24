@@ -1,5 +1,6 @@
 name: Restore rehearsal
-# Issue #81, NFR-04 (RPO 24 hours, RTO 4 hours). Manual only. Reads production D1 `jchain`
+# Issue #81, NFR-04 (RPO 24 hours, RTO 4 hours). Weekly (Mondays 11:23 UTC, about 4 AM Pacific,
+# Danny 2026-10-24: "you can do all of these") and by hand. Reads production D1 `jchain`
 # (a Time Travel bookmark lookup and one export), then rebuilds it in a scratch database,
 # checks every table's row count against production, times each step, and deletes the
 # scratch database. It never writes to production: there is no `time-travel restore` here.
@@ -7,6 +8,8 @@ name: Restore rehearsal
 # about half a megabyte, so the block is a few seconds.
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "23 11 * * 1"
 permissions:
   contents: read
 concurrency:
@@ -126,3 +129,26 @@ jobs:
           name: restore-receipt
           path: receipt.json
           if-no-files-found: ignore
+
+  # A failed scheduled run opens (or comments on) one issue, so a broken backup path is seen.
+  report-failure:
+    needs: rehearse
+    if: ${{ failure() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or update the restore rehearsal issue
+        run: |
+          set -euo pipefail
+          title="Weekly restore rehearsal failed"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          body="The scheduled restore rehearsal failed: $RUN_URL. NFR-04 evidence is stale until it passes again. See RUNBOOK, Production receipt: restore rehearsal."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
