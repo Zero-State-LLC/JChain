@@ -116,7 +116,7 @@ async function quarantineForScan(
   const post = await db.prepare("SELECT asset_id FROM posts WHERE id = ?").bind(postId).first<{ asset_id: string | null }>();
   const categories = codes.join(",");
   const prohibited = codes.includes("S4");
-  const plan = quarantineStatements(db, {
+  const plan = await quarantineStatements(db, {
     postId,
     assetId: post?.asset_id ?? null,
     source: "scan",

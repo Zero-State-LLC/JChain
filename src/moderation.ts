@@ -7,6 +7,7 @@ import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
+import { siblingQuarantineStatements } from "./quarantine";
 import { logHideToDecision } from "./latency";
 import { settleSeatFlags } from "./seats";
 import { applyOperatorAction, isOperatorAction, parseOperatorExtras } from "./operator-admin";
@@ -146,7 +147,13 @@ async function movePost(
             EXISTS (
               SELECT 1 FROM posts AS other
                WHERE other.asset_id = posts.asset_id AND other.id != posts.id AND other.legal_hold = 1
-            ) AS shared_hold
+                 AND (posts.state != 'quarantined' OR other.state != 'quarantined')
+            ) AS shared_hold,
+            EXISTS (
+              SELECT 1 FROM posts AS other
+               WHERE other.asset_id = posts.asset_id AND other.id != posts.id
+                 AND other.state IN ('removal_pending', 'removed')
+            ) AS archived_sibling
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
        LEFT JOIN assets ON assets.id = posts.asset_id
@@ -156,6 +163,7 @@ async function movePost(
     hidden_by: string | null;
     quarantined_by: string | null;
     shared_hold: number;
+    archived_sibling: number;
     legal_hold: number;
     thread_state: string;
     asset_id: string | null;
@@ -167,15 +175,32 @@ async function movePost(
   // Releasing a Post under a legal hold stays Admin only (#116).
   // Review 4365291514: a Post whose Asset another held Post shares counts as held, and a Clear
   // never releases an Asset another Post still holds; the batch guard below re-checks both.
+  // Round-2 P0-2 and P1-3: the item is the image. A Clear clears every quarantined Post on the
+  // same Asset together, each with its own audit row and post.restored, and only then releases
+  // the Asset and its Blocked Hashes. It needs an Admin when any of them is under a legal hold.
   const fromQuarantine = name === "restore" && post.state === "quarantined";
+  const group = fromQuarantine && post.asset_id !== null
+    ? ((await c.env.DB.prepare(
+      `SELECT id, legal_hold FROM posts
+        WHERE asset_id = ? AND id != ? AND state = 'quarantined'
+        ORDER BY created_at, id`,
+    ).bind(post.asset_id, action.targetId).all<{ id: string; legal_hold: number }>()).results ?? [])
+    : [];
+  const groupHold = group.some((member) => Number(member.legal_hold) === 1);
   const sharedHold = Number(post.shared_hold) === 1;
-  const actorIsAdmin = name === "restore" && (post.legal_hold === 1 || sharedHold)
+  const needsAdmin = post.legal_hold === 1 || sharedHold || groupHold;
+  const actorIsAdmin = name === "restore" && needsAdmin
     ? await isAdminEmail(c.env, actorEmail)
     : false;
-  if (name === "restore" && (post.legal_hold === 1 || sharedHold) && !actorIsAdmin) {
+  if (name === "restore" && needsAdmin && !actorIsAdmin) {
     return moderationError(requestId, format, "forbidden");
   }
   if (fromQuarantine && sharedHold) return moderationError(requestId, format, "state_conflict");
+  // Another Post on this image was removed (archived): that removal's Blocked Hashes stand, so a
+  // Clear never releases the image. Archive this Post too. The guard reads only the Post states,
+  // which survive audit redaction; dedup gives an Asset to one Agent only, so an owner deletion
+  // removes every sibling, and refusing then is the safe side.
+  if (fromQuarantine && Number(post.archived_sibling) === 1) return moderationError(requestId, format, "state_conflict");
   const assetReady = post.asset_id === null || post.asset_state === "ready"
     || (fromQuarantine && post.asset_state === "quarantined");
   if (!legal(name, post.state, post.thread_state, assetReady)) {
@@ -234,8 +259,21 @@ async function movePost(
     AND NOT EXISTS (
       SELECT 1 FROM posts AS other
        WHERE other.asset_id = posts.asset_id AND other.id != posts.id AND other.legal_hold = 1
+         ${actorIsAdmin ? "AND other.state != 'quarantined'" : ""}
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM posts AS other
+       WHERE other.asset_id = posts.asset_id AND other.id != posts.id AND other.state = 'quarantined'
+         ${group.length === 0 ? "" : `AND other.id NOT IN (${group.map(() => "?").join(", ")})`}
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM posts AS other
+       WHERE other.asset_id = posts.asset_id AND other.id != posts.id
+         AND other.state IN ('removal_pending', 'removed')
     )${actorIsAdmin ? "" : " AND posts.legal_hold = 0"}`
     : guard(name);
+  // The where binds: the target id, then (for a Clear) the group ids read above.
+  const whereBinds: unknown[] = [action.targetId, ...(fromQuarantine ? group.map((member) => member.id) : [])];
   const statements: D1PreparedStatement[] = [];
   let writtenIndex: number | null = null;
   if (name === "approve" && publishedEventId !== null) {
@@ -243,21 +281,21 @@ async function movePost(
     statements.push(c.env.DB.prepare(
       `INSERT INTO events (id, type, resource_id, occurred_at)
        SELECT ?, 'post.published', posts.id, ? FROM posts WHERE ${where}`,
-    ).bind(publishedEventId, occurredAt, action.targetId));
+    ).bind(publishedEventId, occurredAt, ...whereBinds));
   }
   if (isRestore && restoredEventId !== null) {
     writtenIndex = statements.length;
     statements.push(c.env.DB.prepare(
       `INSERT INTO events (id, type, resource_id, occurred_at)
        SELECT ?, 'post.restored', posts.id, ? FROM posts WHERE ${where}`,
-    ).bind(restoredEventId, occurredAt, action.targetId));
+    ).bind(restoredEventId, occurredAt, ...whereBinds));
   }
   if (insertWithdrawn && withdrawnEventId !== null) {
     writtenIndex = statements.length;
     statements.push(c.env.DB.prepare(
       `INSERT INTO events (id, type, resource_id, occurred_at)
        SELECT ?, 'post.withdrawn', posts.id, ? FROM posts WHERE ${where}`,
-    ).bind(withdrawnEventId, occurredAt, action.targetId));
+    ).bind(withdrawnEventId, occurredAt, ...whereBinds));
   }
   const auditIndex = statements.length;
   statements.push(c.env.DB.prepare(
@@ -273,7 +311,7 @@ async function movePost(
     action.privateNote,
     auditEventId,
     occurredAt,
-    action.targetId,
+    ...whereBinds,
   ));
   const updateIndex = statements.length;
   // v0.2.29: a Moderator hide is final and never appealable. Restore and approve clear who hid it.
@@ -293,11 +331,19 @@ async function movePost(
       : "";
   statements.push(c.env.DB.prepare(
     `UPDATE posts SET state = ?, hidden_by = ${hiddenBy}${holdSql} WHERE ${where}`,
-  ).bind(destination(name), action.targetId));
+  ).bind(destination(name), ...whereBinds));
   if (name === "restore") {
     // An open appeal is answered by the restore, in the same batch, only when the restore applied.
     statements.push(c.env.DB.prepare(
       `UPDATE post_appeals SET outcome = 'restore', decided_at = ?, decided_by = ?
+        WHERE post_id = ? AND outcome IS NULL
+          AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+    ).bind(occurredAt, actorEmail, action.targetId, actionId));
+  }
+  if (name === "remove") {
+    // Round-2 P3-2: an Archive (remove) decides an open appeal against the author, as uphold does.
+    statements.push(c.env.DB.prepare(
+      `UPDATE post_appeals SET outcome = 'uphold', decided_at = ?, decided_by = ?
         WHERE post_id = ? AND outcome IS NULL
           AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
     ).bind(occurredAt, actorEmail, action.targetId, actionId));
@@ -313,8 +359,46 @@ async function movePost(
           AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
     ).bind(action.targetId, action.targetId, actionId));
   }
+  // Round-2 P0-2 and P1-3: the rest of the group on this Asset is cleared with the target, each
+  // member keyed on this batch's audit row and on still being quarantined: one audit row, one
+  // post.restored, its open appeal answered, and its open reports triaged.
+  for (const member of group) {
+    const memberEvent = uuidv7();
+    const memberGuard = `posts.id = ? AND posts.state = 'quarantined'
+      AND EXISTS (SELECT 1 FROM moderation_actions WHERE moderation_actions.id = ?)`;
+    statements.push(
+      c.env.DB.prepare(
+        `INSERT INTO events (id, type, resource_id, occurred_at)
+         SELECT ?, 'post.restored', posts.id, ? FROM posts WHERE ${memberGuard}`,
+      ).bind(memberEvent, occurredAt, member.id, actionId),
+      c.env.DB.prepare(
+        `INSERT INTO moderation_actions (
+           id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+         )
+         SELECT ?, ?, 'post', posts.id, 'restore', ?, ?, ?, ? FROM posts WHERE ${memberGuard}`,
+      ).bind(uuidv7(), actorEmail, action.reasonCode, action.privateNote, memberEvent, occurredAt, member.id, actionId),
+      c.env.DB.prepare(
+        `UPDATE posts SET state = 'published', hidden_by = NULL, quarantined_by = NULL, queue_first = 0,
+                legal_hold = 0, legal_hold_reason = NULL
+          WHERE ${memberGuard}`,
+      ).bind(member.id, actionId),
+      c.env.DB.prepare(
+        `UPDATE post_appeals SET outcome = 'restore', decided_at = ?, decided_by = ?
+          WHERE post_id = ? AND outcome IS NULL
+            AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+      ).bind(occurredAt, actorEmail, member.id, actionId),
+      c.env.DB.prepare(
+        `UPDATE reports SET state = 'triaged'
+          WHERE state = 'open'
+            AND ((target_type = 'post' AND target_id = ?)
+              OR (target_type = 'thread' AND target_id = (SELECT thread_id FROM posts WHERE id = ? AND title IS NOT NULL)))
+            AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
+      ).bind(member.id, member.id, actionId),
+    );
+  }
   if (fromQuarantine && post.asset_id !== null) {
-    // Runs after the Post update, so it keys on the audit row this batch wrote.
+    // Runs after the Post update, so it keys on the audit row this batch wrote. Every quarantined
+    // Post on the Asset was cleared above, so no quarantined Post is left on a released Asset.
     statements.push(c.env.DB.prepare(
       `UPDATE assets SET state = 'ready', quarantined_at = NULL
         WHERE id = ? AND state = 'quarantined'
@@ -335,6 +419,19 @@ async function movePost(
         WHERE id = ? AND state = 'ready'
           AND EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?)`,
     ).bind(post.asset_id, actionId));
+    // Round-2 P0-2: no published Post may keep a quarantined image, so the other published Posts
+    // on the Asset are quarantined in the same batch.
+    const siblings = await siblingQuarantineStatements(c.env.DB, {
+      assetId: post.asset_id,
+      postId: action.targetId,
+      actionId,
+      actor: actorEmail,
+      reasonCode: action.reasonCode,
+      source: null,
+      legalHold: action.reasonCode === "csam",
+      at: occurredAt,
+    });
+    statements.push(...siblings.statements);
   }
   if (name === "quarantine" && prohibited && post.asset_id !== null) {
     statements.push(blockAssetHashes(c.env.DB, post.asset_id, true, occurredAt, actionId));
@@ -387,6 +484,7 @@ async function movePost(
     }
   }
   await settleSeatFlags(c.env.DB, action.targetId, name, occurredAt, actorEmail, policy);
+  for (const member of group) await settleSeatFlags(c.env.DB, member.id, name, occurredAt, actorEmail, policy);
   await logHideToDecision(c.env.DB, action.targetId, post, name, occurredAt);
   const entry: Record<string, string> = { message: logMessage(name), post_id: action.targetId };
   if (primaryEventId !== null) entry.event_id = primaryEventId;

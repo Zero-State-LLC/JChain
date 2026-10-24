@@ -16,8 +16,8 @@ const DEFAULT_ACCURACY_PERCENT = 70;
 const DEFAULT_ACCURACY_MIN_REVIEWED = 5;
 const DEFAULT_ACCURACY_WINDOW = 100;
 
-const FLAG_REASONS = ["off-topic", "id-document", "csam"] as const;
-const SEAT_ACTIONS = ["bind_seat_agent", "pause_seat_agent", "readmit_seat_agent", "restore_seat_powers"] as const;
+export const FLAG_REASONS = ["off-topic", "id-document", "csam"] as const;
+export const SEAT_ACTIONS = ["bind_seat_agent", "pause_seat_agent", "readmit_seat_agent", "restore_seat_powers"] as const;
 
 type SeatRow = {
   seat: number;
@@ -129,7 +129,7 @@ async function flagPost(c: Ctx): Promise<Response> {
   // Seat Flag never sets a legal hold. Nothing removes. Every write sits in one batch, keyed on
   // this flag's row, so a raced flag writes nothing.
   const prohibited = reason === "id-document" || reason === "csam";
-  const plan = quarantineStatements(c.env.DB, {
+  const plan = await quarantineStatements(c.env.DB, {
     postId,
     assetId: post.asset_id,
     source: "seat_agents",

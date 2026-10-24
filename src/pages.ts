@@ -11,6 +11,7 @@ import { parsePolicy, type Policy } from "./policy";
 import { accessEmail, isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { visibleAncestry, type RemixAncestor } from "./remix";
+import { currentSession } from "./session";
 import { PROHIBITED, instructionsFor } from "./rules-copy";
 import { VISIBLE_POST, visibleBoardSlug, visiblePost } from "./visibility";
 import { parsePage, scoreSql, trendingPage, type TrendingItem } from "./votes";
@@ -503,6 +504,7 @@ async function queuePage(c: PageCtx): Promise<Response> {
   if (opened instanceof Response) return opened;
   const names = [
     "pending_cursor", "published_cursor", "hidden_cursor", "rejected_cursor", "prohibited_reports_cursor", "reports_cursor",
+    "quarantined_cursor",
   ] as const;
   const cursors: Record<(typeof names)[number], Stamp | null> = {
     pending_cursor: null,
@@ -511,6 +513,7 @@ async function queuePage(c: PageCtx): Promise<Response> {
     rejected_cursor: null,
     prohibited_reports_cursor: null,
     reports_cursor: null,
+    quarantined_cursor: null,
   };
   for (const name of names) {
     const cursor = readCursor(requestId, c.req.query(name));
@@ -524,7 +527,7 @@ async function queuePage(c: PageCtx): Promise<Response> {
   // v0.2.29: Seat Flag hides, and open appeals of automatic hides (CT-21).
   const flagged = await seatHideRows(c.env.DB, opened.limit);
   const appeals = await appealRows(c.env.DB);
-  const quarantined = await queueRows(c.env.DB, "quarantined", null, opened.limit);
+  const quarantined = await queueRows(c.env.DB, "quarantined", cursors.quarantined_cursor, opened.limit);
   const first = await firstRows(c.env.DB);
   const uploads = await quarantinedUploadRows(c.env.DB);
   const flags = await flagRows(c.env.DB);
@@ -553,6 +556,7 @@ async function queuePage(c: PageCtx): Promise<Response> {
     flagsSection(flags),
     queueSection("Flagged", flagged.kept, ["restore", "quarantine", "remove"], "No posts are hidden by the Seat Agents.", true),
     quarantineSection(quarantined.kept),
+    nextLink("/moderation", opened.limit, kept, "quarantined_cursor", quarantined.next, "Quarantined", "Next quarantined"),
     queueSection("Published", published.kept, ["hide", "remove"], "No published posts."),
     nextLink("/moderation", opened.limit, kept, "published_cursor", published.next, "Published", "Next published"),
     queueSection("Hidden", hidden.kept, ["restore", "remove"], "No hidden posts.", true),
@@ -570,7 +574,11 @@ async function reportPage(c: PageCtx): Promise<Response> {
   const selected = targetType === "thread" || targetType === "agent" || targetType === "post" ? targetType : "post";
   const targetId = c.req.query("target_id") ?? "";
   const links = boardLinks(await targetBoardSlugs(c.env.DB, selected, targetId));
-  const email = await accessEmail(c.executionCtx, c.req.raw);
+  // Round-2 P1-2: the same Access-or-Session lookup as the report route, so a signed-in Session
+  // Operator gets the form.
+  const email = await accessEmail(c.executionCtx, c.req.raw)
+    ?? (await currentSession(c.env, c.req.raw))?.email
+    ?? null;
   const operator = email === null
     ? null
     : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ? AND state IN ('provisional', 'approved')").bind(email).first<{ email: string }>();

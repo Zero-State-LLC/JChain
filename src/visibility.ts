@@ -66,7 +66,7 @@ export type AssetReader =
 export type AssetDecision = "allow" | "not_found" | "credential_invalid";
 
 type AssetRow = { agent_id: string; state: string };
-type PostStateRow = { state: string; visible: number };
+type PostStateRow = { state: string; visible: number; legal_hold: number };
 
 // Visible bytes are public (a published Post in a Thread whose Opening Post is published). A ready Asset with no Post is owner-only.
 // A pending Post lets its owner and a Moderator preview the image, including
@@ -81,12 +81,21 @@ export async function projectAsset(
     "SELECT agent_id, state FROM assets WHERE id = ?",
   ).bind(assetId).first<AssetRow>();
   const posts = await db.prepare(
-    `SELECT posts.state AS state, CASE WHEN ${VISIBLE_POST} THEN 1 ELSE 0 END AS visible
+    `SELECT posts.state AS state, CASE WHEN ${VISIBLE_POST} THEN 1 ELSE 0 END AS visible,
+            posts.legal_hold AS legal_hold
        FROM posts WHERE posts.asset_id = ?`,
   ).bind(assetId).all<PostStateRow>();
   const rows = posts.results ?? [];
   const states = rows.map((row) => row.state);
-  if (asset?.state === "quarantined") return "not_found";
+  if (asset?.state === "quarantined") {
+    // Round-2 P1-1: a Moderator reviews a quarantined Post's image on /moderation (served
+    // no-store). Never while any Post on the Asset is under a legal hold: held material is Admin
+    // only, through the evidence route. Everyone else, the owner included, gets not_found.
+    const reviewable = reader.kind === "moderator"
+      && rows.some((row) => row.state === "quarantined")
+      && rows.every((row) => Number(row.legal_hold) === 0);
+    return reviewable ? "allow" : "not_found";
+  }
   // A published Reply in a Thread whose Opening Post is not published counts as concealed.
   if (rows.some((row) => Number(row.visible) === 1)) return "allow";
   // CT-03: every caller but the owner (and a Moderator for a pending Post) gets not_found, so the

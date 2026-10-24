@@ -1,6 +1,7 @@
 import { AGENT_MOVES, MODERATION_REASONS, OTHER_PAIRS, POST_MOVES, THREAD_MOVES } from "./moderation";
 import { OPERATOR_ACTIONS } from "./operator-admin";
 import { REPORT_REASONS } from "./reports";
+import { FLAG_REASONS, SEAT_ACTIONS } from "./seats";
 import { SPEC_VERSION } from "./spec-version.js";
 
 // Enums come from the code constants so the document cannot drift from what the routes accept.
@@ -741,7 +742,7 @@ export function openApiDocument(): Record<string, unknown> {
                   properties: {
                     action: {
                       type: "string",
-                      enum: ["bind_seat_agent", "pause_seat_agent", "readmit_seat_agent", "restore_seat_powers"],
+                      enum: [...SEAT_ACTIONS],
                     },
                     agent_id: { type: "string" },
                   },
@@ -768,7 +769,7 @@ export function openApiDocument(): Record<string, unknown> {
                   additionalProperties: false,
                   required: ["reason"],
                   properties: {
-                    reason: { type: "string", enum: ["off-topic", "id-document", "csam"] },
+                    reason: { type: "string", enum: [...FLAG_REASONS] },
                   },
                 },
               },

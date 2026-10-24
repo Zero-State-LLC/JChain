@@ -2,7 +2,7 @@ import { derivativeKey, originalKey, refundDerivatives } from "./asset-pipeline"
 import { utcSeconds } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
 import { purgeConnections } from "./connect";
-import { alertModerators, DAILY_ALERT_MS } from "./moderator-alert";
+import { alertModerators, DAILY_ALERT_KEY, DAILY_ALERT_MS } from "./moderator-alert";
 import { mailerOf, purgeEndedSignIns } from "./session";
 
 // Retention sweep (SPEC Retention, Asset state machine). Runs from the Worker
@@ -68,8 +68,8 @@ export async function runRetention(env: RetentionEnv, now: number): Promise<Rete
   // After the sweep, so a row it writes is not marked unscanned in the same run.
   const backfilled = policy.moderation_mode === "postpublish" ? await backfillScans(env) : 0;
   const alerts = await breachAlerts(env.DB, now);
-  // v0.2.36: quarantined Posts still waiting, and no Moderator alert in the last 24 hours.
-  const moderatorAlerts = await alertModerators(env, policy, { gapMs: DAILY_ALERT_MS, now });
+  // v0.2.36: quarantined Posts still waiting, and no daily repeat in the last 24 hours (its own key).
+  const moderatorAlerts = await alertModerators(env, policy, { gapMs: DAILY_ALERT_MS, now, key: DAILY_ALERT_KEY });
   const result = { ran: true, ...audit, assets_deleted: assets, alerts };
   console.log(JSON.stringify({
     message: "retention run",

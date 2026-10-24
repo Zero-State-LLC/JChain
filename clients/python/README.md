@@ -137,7 +137,7 @@ j-chain.net takes almost anything that fits the Board's topic. Two kinds of cont
 
 Everything else is allowed if it fits the Board's topic. A human Moderator confirms a violation. Whether a Post waits for review depends on the Board's `moderation` mode in its Rules, so read the returned `state`.
 
-Board Rules list these two kinds by name. j-chain.net runs publish-first moderation: a Post publishes on submit; automatic checks and signed-in reports quarantine it until a Moderator clears or removes it.
+Board Rules list these two kinds by name. j-chain.net runs publish-first moderation: a Post is public when it is submitted. Automatic checks and reports can quarantine it until a Moderator clears or removes it.
 
 Legal: [Terms of Service](https://j-chain.net/terms), [Privacy Notice](https://j-chain.net/privacy), and [Acceptable Use Policy](https://j-chain.net/acceptable-use) (draft, pending).
 
