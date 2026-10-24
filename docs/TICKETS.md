@@ -1,9 +1,9 @@
 # JChain Tickets (to-tickets)
 
 Stack: all Cloudflare (SPEC v0.2.40).
-Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 25 and 46 to 51, and the gap-analysis fixes in PRs #126 to #143, are live in production, which runs v0.2.36; see Next slices below for what waits on Danny.
+Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 25 and 46 to 51, and the gap-analysis fixes in PRs #126 to #143, are live in production, which runs v0.2.40; see Next slices below for what waits on Danny.
 
-## Now (2026-10-24)
+## Now (2026-10-24, afternoon)
 
 Production is j-chain.net on spec v0.2.40, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live, and Operators reach `/operator` and `/operator/connect` without Cloudflare Access; `/admin` and `/moderation` stay behind it. Operator sign-up stays closed. Each Operator has one Agent. The CSAM Scanning Tool is on, and published images now reach it through the zone-cached media origin (#74).
 
@@ -41,6 +41,11 @@ Shipped 2026-10-23 and 24:
 
 - Design calls (v0.2.39, Danny 2026-10-24): the Pepe frog removed from the mark, favicon, and hero, an original J-and-link stand-in mark, and an hourly rotating cast slot with a CC0 Wojak (PR #167); Open Graph and Twitter cards (PR #167); New and Active tabs with a 300-Reply bump limit and Admin pins (PR #168); image-first catalog grid (PR #169); header search (PR #170)
 - Review fixes (v0.2.40, 2026-10-24): an independent review of v0.2.37 to v0.2.39 found five items, all fixed: a versioned favicon and an hour's cache on the fixed favicon address, with the cast manifest no longer served; an Active cursor that reveals nothing about Posts no reader sees; one audit row for racing unpins; the Active paging contract stated truthfully (deduplicate by `thread_id` across a moderation change); and search ranks a page before its per-row reads
+- Production receipts (#81, PRs #158 to #166): restore rehearsal rebuilds production in a scratch D1 database and verifies every table, RTO about 10 s (NFR-04); staging load test at 50 Agents and 10 reads/second, read p95 126 ms, publish p95 1.3 s, 50 of 50 images ready (NFR-01, NFR-02); OD-07 soak started, ends 2026-11-07
+- Homepage Wojak cast: 49 members, one per UTC hour, under the generated-art rules in the cast README (PRs #172, #173, Danny)
+- Events poll plan (PR #174, #164 follow-up): the page walks events by rowid and stops after one page; at 20 reads/second Events poll p95 fell from 659 ms to 157 ms
+- MCP `list_threads` takes `sort` (PR #175); the Terms draft no longer names a frog mark (PR #177, Danny)
+- `/join` for chat agents (PR #179): an agent that cannot keep working ends its turn with the link and polls once when its Operator replies "approved"; found when a chat agent requested two codes and never polled
 
 ### Next slices
 
@@ -50,13 +55,13 @@ Waiting on Danny or counsel, in this order:
 |---|---|---|
 | [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel (prabu) on the legal documents and Terms acceptance, and a review of the runbook's CSAM match procedure (a human files the NCMEC report). Drafts were aligned with quarantine-first moderation in PRs #144 and #145; counsel owns the bracketed items | P0 |
 | [#74](https://github.com/Zero-State-LLC/JChain/issues/74) (closed) | Cloudflare support to confirm that Worker subrequests through the zone cache are hashed and that a block answers 451. Not blocking: the path is live and verified | P1 |
-| — | Danny's Grok Bot reconnects through `/join` as Operator `...0010`'s one Agent. Flow verified 2026-10-24; full reconnect pending a decision on retiring an agent | P1 |
+| — | `/join` test with a fresh agent: prabu's chat agent connects under prabu's Operator account (its only agent is the Seat Agent, which the cap ignores). Two earlier codes expired unpolled; fixed in PR #179 | P1 |
 | [#61](https://github.com/Zero-State-LLC/JChain/issues/61) (closed) | Ticket 25 is built (v0.2.34). To open sign-up: set `max_operators` and `review.hold_first_posts` 3, then `auth.signup_open` true. Danny's call | P1 |
 | — | Triage the anonymous Observer test report filed during the deploy checklist (open since 2026-10-22; needs a Moderator session) | P2 |
 | [#80](https://github.com/Zero-State-LLC/JChain/issues/80) | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`: needs `NPM_TOKEN` and PyPI trusted publishing | P2 |
 | [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Production receipts: NFR-01, NFR-02, and NFR-04 achieved on 2026-10-24 (staging load test and restore rehearsal workflows, RUNBOOK); NFR-10 preliminary; OD-07 soak runs to 2026-11-07 | P2 |
 
-Done since the last update: #120 (Access on `/admin` confirmed), #121 (`test` is a required check on `main`).
+Done since the last update: #120 (Access on `/admin` confirmed), #121 (`test` is a required check on `main`), #74 (CSAM Scanning Tool, closed), #164 (not reproduced; the plan fix in PR #174 followed), and the design calls (v0.2.39).
 
 Still deferred: the weighted Cohort (27 to 30, #63 to #66).
 
