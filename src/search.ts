@@ -12,7 +12,7 @@ import { VISIBLE_POST, visiblePost } from "./visibility";
 // Header search over published Posts (Danny, 2026-10-24: "build all"). A human page only: there
 // is no /v1 search route, and agents keep the JSON API as it is.
 //
-// Substring search with escaped LIKE over the posts table itself, not a full-text index: D1
+// Literal substring search (instr) over the posts table itself, not a full-text index: D1
 // cannot export a database that holds a virtual table, and the restore rehearsal (#81) depends
 // on export. Erased text is gone from posts, so it can never match. Every row is read through the
 // Visibility Projection, so only what an anonymous reader may see is ever listed.
@@ -70,10 +70,13 @@ export function searchTerms(text: string): string[] {
   return terms;
 }
 
-// A LIKE pattern that matches the term anywhere, literally: %, _, and \ in the term are escaped
-// with \ (the queries say ESCAPE '\'), so user input never becomes a wildcard.
-export function likePattern(term: string): string {
-  return `%${term.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+// The needle for a term. The queries match with instr() on lower(text), not LIKE: D1 caps a LIKE
+// pattern at 50 bytes, too short for a 100-character query, and instr() has no wildcard syntax at
+// all, so %, _, \, and quotes always match themselves and nothing needs escaping. SQLite's lower()
+// folds ASCII letters only, so the term is folded the same way: ASCII case does not matter, and
+// other letters match exactly (the same rule as SQLite's LIKE).
+export function foldTerm(term: string): string {
+  return term.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
 function termRegExp(term: string): RegExp {
@@ -157,10 +160,10 @@ async function searchPage(c: PageCtx): Promise<Response> {
     return response;
   }
 
-  const patterns = terms.map(likePattern);
+  const patterns = terms.map(foldTerm);
   // Every term must appear in the title, the caption, or the alt text.
   const matches = patterns.map(() =>
-    `(posts.title LIKE ? ESCAPE '\\' OR posts.caption LIKE ? ESCAPE '\\' OR posts.alt_text LIKE ? ESCAPE '\\')`).join(" AND ");
+    `(instr(lower(posts.title), ?) > 0 OR instr(lower(posts.caption), ?) > 0 OR instr(lower(posts.alt_text), ?) > 0)`).join(" AND ");
   const matchBinds = patterns.flatMap((pattern) => [pattern, pattern, pattern]);
   const from = `
       FROM posts
@@ -181,7 +184,7 @@ async function searchPage(c: PageCtx): Promise<Response> {
 
   // Posts whose title holds more of the terms come first, so a title match ranks before a
   // caption-or-alt-only match. Then newest first, then Post id.
-  const titleHits = patterns.map(() => `(CASE WHEN posts.title LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`).join(" + ");
+  const titleHits = patterns.map(() => `(CASE WHEN instr(lower(posts.title), ?) > 0 THEN 1 ELSE 0 END)`).join(" + ");
   const earlier = `FROM posts AS earlier
      WHERE earlier.thread_id = posts.thread_id AND ${visiblePost("earlier")}
        AND (earlier.created_at < posts.created_at OR (earlier.created_at = posts.created_at AND earlier.id < posts.id))`;

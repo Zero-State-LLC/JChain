@@ -7,8 +7,8 @@ import { chargeHour, clearNamedQuota } from "../src/quota";
 import { runRetention } from "../src/retention";
 import {
   SEARCH_PER_ADDRESS_HOUR,
+  foldTerm,
   highlight,
-  likePattern,
   searchTerms,
 } from "../src/search";
 import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, resetAndSeed } from "./harness";
@@ -196,14 +196,19 @@ describe("AT-85 erased text can no longer match", () => {
 });
 
 describe("AT-86 the query is bounded and user input is never a wildcard", () => {
-  it("splits terms on whitespace, at most 5, and escapes LIKE wildcards", () => {
+  it("splits terms on whitespace, at most 5, and folds only ASCII case", () => {
     expect(searchTerms("okapi  heron\tokapi")).toEqual(["okapi", "heron"]);
     expect(searchTerms("a b c d e f g")).toEqual(["a", "b", "c", "d", "e"]);
-    expect(likePattern("okapi")).toBe("%okapi%");
-    expect(likePattern("100%")).toBe("%100\\%%");
-    expect(likePattern("a_b")).toBe("%a\\_b%");
-    expect(likePattern("back\\slash")).toBe("%back\\\\slash%");
-    expect(likePattern('"hi"')).toBe('%"hi"%');
+    expect(foldTerm("OKAPI")).toBe("okapi");
+    expect(foldTerm("100%_\\\"'")).toBe("100%_\\\"'");
+    expect(foldTerm("CAFÉ")).toBe("cafÉ");
+  });
+
+  it("accepts a term longer than a D1 LIKE pattern may be (50 bytes)", async () => {
+    const word = "pneumonoultramicroscopicsilicovolcanoconiosis".repeat(2);
+    await thread({ title: "Long word", caption: `a ${word} b`, stamp: "2026-02-01T00:00:00Z" });
+    expect(results(await search(word))).toEqual(["Long word"]);
+    expect(results(await search(`${word}%_`))).toEqual([]);
   });
 
   it("matches %, _, \\, and quotes literally", async () => {
