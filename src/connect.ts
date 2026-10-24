@@ -1,10 +1,10 @@
-import { operatorMayAdd, operatorMayAddSql } from "./operator-admin";
+import { approvedCodesSql, operatorMayAdd, operatorMayAddSql } from "./operator-admin";
 import { Hono, type Context } from "hono";
 import { ROSTER_COUNT, ROSTER_SUBQUERY, parseEnrollFields } from "./agent-admin";
 import { newCredentialSecret, newPrefixedSecret, sha256Hex } from "./credential";
 import { errorResponse, jsonResponse } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
-import type { Policy } from "./policy";
+import type { OperatorCapsPolicy, Policy } from "./policy";
 import { chargeHour } from "./quota";
 
 // CT-28 (v0.2.24): connect an agent with a code its Operator approves, after the
@@ -147,6 +147,9 @@ async function claim(c: Ctx): Promise<Response> {
 
 // The approved code becomes an Agent and a Credential in one guarded batch.
 // Only the first claim changes the row, so only one Agent can come of it.
+// The approval already held a place under the Operator's cap, so the cap guard below
+// refuses only an unusual path (an Admin lowered the cap, or suspended the Operator,
+// after the approval). It stays as the last line of defence.
 async function issue(c: Ctx, requestId: string, policy: Policy, row: ConnectionRow, stamp: string): Promise<Response> {
   const db = c.env.DB;
   const count = await db.prepare(ROSTER_COUNT).first<{ n: number }>();
@@ -206,12 +209,22 @@ export async function answerConnection(
   now = Date.now(),
   // CT-29: statements that commit in the same batch, after the answer (the attestation).
   alongside: D1PreparedStatement[] = [],
+  caps?: OperatorCapsPolicy,
 ): Promise<boolean> {
   const stamp = utcSeconds(new Date(now));
-  const answer = db.prepare(
-    `UPDATE agent_connections SET state = ?, operator_id = ?, answered_at = ?
-      WHERE user_code = ? AND state = 'pending' AND expires_at > ?`,
-  ).bind(decision === "approve" ? "approved" : "denied", operatorId, stamp, userCode, stamp);
+  // CT-19, CT-28: an approval holds one of the Operator's places until it is claimed or expires,
+  // so it lands only while the Operator may add an Agent, counting codes it already approved.
+  // A refused approval leaves the code pending. A deny always lands.
+  const answer = decision === "approve"
+    ? db.prepare(
+      `UPDATE agent_connections SET state = 'approved', operator_id = ?, answered_at = ?
+        WHERE user_code = ? AND state = 'pending' AND expires_at > ?
+          AND ${operatorMayAddSql("?", caps, approvedCodesSql(stamp))}`,
+    ).bind(operatorId, stamp, userCode, stamp, operatorId)
+    : db.prepare(
+      `UPDATE agent_connections SET state = 'denied', operator_id = ?, answered_at = ?
+        WHERE user_code = ? AND state = 'pending' AND expires_at > ?`,
+    ).bind(operatorId, stamp, userCode, stamp);
   const results = await db.batch([answer, ...alongside]);
   return Number(results[0]?.meta.changes ?? 0) === 1;
 }

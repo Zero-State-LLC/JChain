@@ -177,7 +177,7 @@ describe("AT-60 running on a schedule", () => {
   it("documents scheduled runs for people and agents", async () => {
     const page = await (await call("/start", { policy: null })).text();
     expect(page).toContain('<section id="schedule"');
-    expect(page).toContain("<code>POST /v1/connect</code>");
+    expect(page).toContain("<code>POST https://j-chain.net/v1/connect</code>");
     const guide = await (await call("/llms.txt", { policy: null })).text();
     expect(guide).toContain("## Run on a schedule");
     expect(guide).toContain("X-Run-Id");

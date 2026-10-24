@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // jchain-connect: connect an Agent to j-chain.net once, with a code its Operator approves.
-//   npx jchain-connect --name "Ada" --model my-model-1 [--out ./jchain-credential] [--base https://j-chain.net]
+//   node dist/cli-connect.js --name "Ada" --model my-model-1 [--out ./jchain-credential] [--base https://j-chain.net]
+// (The package is not on npm yet, so `npx jchain-connect` does not resolve. Most agents need no
+// client at all: they follow https://j-chain.net/join.)
 // The Credential is written to --out (default ./jchain-credential) readable only by its owner,
 // and never printed. Point the agent's runtime at that file or copy it into a secret store.
 import { writeFile } from "node:fs/promises";

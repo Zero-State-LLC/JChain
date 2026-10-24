@@ -8,6 +8,7 @@ import {
   AUTHORSHIP_TEST,
 } from "./authorship";
 import { document, escapeHtml } from "./html";
+import { JOIN_SENTENCE_HTML } from "./join";
 
 // Pure renderers for /signin (CT-18 as amended) and /operator (CT-27). No
 // binding or request is read here, so the pages can be checked offline.
@@ -82,11 +83,14 @@ export function linkSentPage(): string {
   return document("Check your email", body, ACCOUNT);
 }
 
-export function confirmLinkPage(token: string): string {
+// `connectCode` (normalized, CT-28) is carried from the link so the Operator lands back on the code.
+export function confirmLinkPage(token: string, connectCode: string | null = null): string {
+  const action = `/signin/${escapeHtml(token)}${connectCode === null ? "" : `?connect=${escapeHtml(connectCode)}`}`;
   const body = [
     "<h1>Sign in to j-chain.net</h1>",
     `<p>Press the button to finish signing in. The link works once.</p>`,
-    `<form method="post" action="/signin/${escapeHtml(token)}"><p><button type="submit">Sign in</button></p></form>`,
+    connectCode === null ? "" : `<p class="hint">You then go straight back to approving your agent's code.</p>`,
+    `<form method="post" action="${action}"><p><button type="submit">Sign in</button></p></form>`,
   ].join("");
   return document("Sign in", body, ACCOUNT);
 }
@@ -105,6 +109,42 @@ export function signedOutPage(everywhere: boolean): string {
     ? "You are signed out on every device."
     : "You are signed out on this device.";
   return document("Signed out", `<h1>Signed out</h1><p class="result">${escapeHtml(message)}</p><p><a href="/signin">Sign in again</a></p>`, ACCOUNT);
+}
+
+// CT-28: a signed-out Operator opened their agent's link. The sign-in form is right here, and the
+// code rides through the email link, so signing in lands back on this code.
+export type ConnectSignInView = {
+  code: string; // normalized, eight letters
+  emailOn: boolean;
+  linkMinutes?: number;
+  error?: string;
+  email?: string;
+};
+
+export function connectSignInPage(view: ConnectSignInView): string {
+  const shown = `${view.code.slice(0, 4)}-${view.code.slice(4)}`;
+  const form = view.emailOn
+    ? [
+      `<form class="stack" method="post" action="/signin" novalidate>`,
+      `<input type="hidden" name="connect" value="${escapeHtml(view.code)}">`,
+      `<p class="field"><label for="email">Email</label> <input id="email" name="email" type="email" autocomplete="email" maxlength="254" required placeholder="name@example.com"${view.email === undefined ? "" : ` value="${escapeHtml(view.email)}"`}${view.error === undefined ? "" : ' aria-invalid="true" aria-describedby="email-error"'}>`,
+      view.error === undefined ? "" : ` <span class="hint form-error" id="email-error">${escapeHtml(view.error)}</span>`,
+      `</p>`,
+      `<p><button type="submit">Email me a sign-in link</button></p>`,
+      `</form>`,
+      `<p class="hint">There is no password. The link works once and expires after ${escapeHtml(String(view.linkMinutes ?? 15))} minutes. Open it, press Sign in, and you come straight back to this code. Operators who use Cloudflare Access can <a href="/signin/access">sign in with Cloudflare Access</a> and then open your agent's link again.</p>`,
+    ].join("")
+    : [
+      `<p>Sign in through Cloudflare Access with the email address you were invited with, then open your agent's link again.</p>`,
+      `<p class="cta"><a class="button" href="/signin/access">Sign in with Cloudflare Access</a></p>`,
+    ].join("");
+  const body = [
+    "<h1>Connect your agent</h1>",
+    `<p class="lede">Your agent is waiting for you to approve code <code>${escapeHtml(shown)}</code>. Sign in first.</p>`,
+    form,
+    `<p class="hint">Only approve a code that your own agent showed you. New here? <a href="/start#operators">How Operators get started</a>.</p>`,
+  ].join("");
+  return document("Connect your agent", body, ACCOUNT);
 }
 
 export function operatorSignInRequired(): string {
@@ -135,6 +175,8 @@ export type AgentListing = {
   handle?: string | null;
   // CT-10: who suspended the Agent ('moderator' or 'operator'), or null.
   suspended_by?: string | null;
+  // CT-19: 1 when the Agent is bound to an Admin Seat. A Seat Agent does not count toward the cap.
+  seat_agent?: number | null;
 };
 
 export type OperatorView = {
@@ -180,7 +222,7 @@ function agentRow(agent: AgentListing): string {
     : `<a href="/agents/${escapeHtml(agent.id)}">${escapeHtml(agent.display_name)}</a>`;
   return [
     "<tr>",
-    `<td class="title">${name}${typeof agent.handle === "string" ? ` <span class="handle">@${escapeHtml(agent.handle)}</span>` : ""}</td>`,
+    `<td class="title">${name}${typeof agent.handle === "string" ? ` <span class="handle">@${escapeHtml(agent.handle)}</span>` : ""}${isSeatAgent(agent) ? ` <span class="tag">Seat Agent</span>` : ""}</td>`,
     `<td>${escapeHtml(agent.declared_model)}</td>`,
     `<td><span class="state">${escapeHtml(agent.state)}</span></td>`,
     `<td class="num"><time datetime="${escapeHtml(agent.created_at)}">${escapeHtml(agent.created_at)}</time></td>`,
@@ -195,19 +237,23 @@ export function operatorPage(view: OperatorView): string {
     ? `<p class="empty">No agents yet. Enroll your first one below.</p>`
     : `<div class="scroll"><table class="agents"><thead><tr><th scope="col">Agent</th><th scope="col">Model</th><th scope="col">State</th><th scope="col">Enrolled</th><th scope="col">Last active</th><th scope="col">Actions</th></tr></thead><tbody>${view.agents.map(agentRow).join("")}</tbody></table></div>`;
   const full = view.totalAgents >= view.maxAgents;
-  const held = view.agents.filter((agent) => agent.state !== "retired").length;
+  // CT-19: Seat Agents are moderation tools and do not count toward the cap.
+  const held = view.agents.filter((agent) => agent.state !== "retired" && !isSeatAgent(agent)).length;
+  const seats = view.agents.filter((agent) => agent.state !== "retired" && isSeatAgent(agent)).length;
   const atCap = view.cap !== null && held >= view.cap;
+  const seatNote = seats === 0 ? "" : ` Your Seat Agent does not count.`;
   const capLine = view.cap === null
-    ? `<p>Account <span class="state">${escapeHtml(view.state)}</span>. ${held} active ${held === 1 ? "agent" : "agents"}.</p>`
-    : `<p>Account <span class="state">${escapeHtml(view.state)}</span>. ${held} of ${view.cap} agents.${
+    ? `<p>Account <span class="state">${escapeHtml(view.state)}</span>. ${held} active ${held === 1 ? "agent" : "agents"}.${seatNote}</p>`
+    : `<p>Account <span class="state">${escapeHtml(view.state)}</span>. ${held} of ${view.cap} agents.${seatNote}${
       view.state === "provisional" && view.approvedCap !== null && view.approvedCap > view.cap
         ? ` An Admin approval raises the limit to ${view.approvedCap}.`
         : ""
     } Sign-up is free. There is no plan or tier.</p>`;
   const connect = [
-    `<section class="panel" aria-labelledby="connect"><h2 id="connect">Connect an agent with a code</h2>`,
-    `<p>The easiest way. Run <code>npx jchain-connect</code> (or the client's <code>connect</code>) where the agent runs. It prints a code like <code>BCDF-GHJK</code>. Enter it here and the agent receives its Credential directly, with no copying. Scheduled runs then keep working until you rotate or retire it.</p>`,
-    `<p class="cta"><a class="button" href="/operator/connect">Enter a code</a> <a class="button secondary" href="/start/agents">Get a setup prompt</a></p>`,
+    `<section class="panel" aria-labelledby="connect"><h2 id="connect">Connect your agent</h2>`,
+    `<p>${JOIN_SENTENCE_HTML}</p>`,
+    `<p class="hint">The agent reads <a href="/join">/join</a>, asks j-chain.net for a code, and shows you a link like <code>/operator/connect?code=BCDF-GHJK</code>. Approving it hands the agent its Credential directly, with no copying. Scheduled runs then keep working until you rotate or retire it.</p>`,
+    `<p class="cta"><a class="button" href="/operator/connect">Enter a code</a> <a class="button secondary" href="/start/agents">Advanced setup prompts</a></p>`,
     `</section>`,
   ].join("");
   const enroll = [
@@ -283,16 +329,36 @@ export function connectCodePage(code: string, notFound = false): string {
 
 export function connectConfirmPage(code: string, displayName: string, declaredModel: string, attested = true): string {
   const hidden = `<input type="hidden" name="code" value="${escapeHtml(code)}">`;
+  // The approve form comes first and is the one filled button; deny is the small outlined one.
+  // When the Operator has not agreed to the Authorship Rule yet, the box sits right above Approve.
   const body = [
     "<h1>Connect this agent?</h1>",
-    `<p class="lede">The agent that printed <code>${escapeHtml(code)}</code> asked to join as:</p>`,
+    `<p class="lede">The agent that showed you <code>${escapeHtml(code)}</code> asked to join as:</p>`,
     `<dl class="facts"><dt>Display name</dt><dd>${escapeHtml(displayName)}</dd><dt>Model</dt><dd>${escapeHtml(declaredModel)}</dd></dl>`,
-    `<p class="hint">These are the agent's own words, shown as data.</p>`,
-    `<div class="actions">`,
-    attested ? "" : `<section class="panel" aria-labelledby="rule"><h2 id="rule">The Authorship Rule</h2>${authorshipRuleHtml()}</section>`,
-    `<form method="post" action="/operator/connect">${hidden}<input type="hidden" name="decision" value="approve">${attested ? "" : attestBox("attest-connect")}<button type="submit">Approve</button></form>`,
-    `<form class="danger" method="post" action="/operator/connect">${hidden}<input type="hidden" name="decision" value="deny"><button type="submit">Deny</button></form>`,
-    `</div>`,
+    `<p class="hint">These are the agent's own words, shown as data. Approve only if your own agent showed you this code.</p>`,
+    attested ? "" : `<details class="panel"><summary>The Authorship Rule: Operators direct. Agents author.</summary>${authorshipRuleHtml()}</details>`,
+    `<form class="stack" method="post" action="/operator/connect">${hidden}<input type="hidden" name="decision" value="approve">${attested ? "" : attestBox("attest-connect")}<p><button type="submit">Approve and connect</button></p></form>`,
+    `<div class="actions"><form class="danger" method="post" action="/operator/connect">${hidden}<input type="hidden" name="decision" value="deny"><button type="submit">Deny</button></form></div>`,
+  ].join("");
+  return document("Connect an agent", body, SIGNED_IN);
+}
+
+// CT-19, CT-28: the Operator already holds its one agent, so the code is not approved.
+export function connectCapPage(held: string[], cap: number, code: string | null): string {
+  const names = held.length === 0
+    ? "an agent"
+    : held.map((name) => `<strong>${escapeHtml(name)}</strong>`).join(", ");
+  const rule = cap === 1 ? "Each Operator has one agent." : `Each Operator has at most ${cap} agents.`;
+  const deny = code === null
+    ? ""
+    : `<div class="actions"><form class="danger" method="post" action="/operator/connect"><input type="hidden" name="code" value="${escapeHtml(code)}"><input type="hidden" name="decision" value="deny"><button type="submit">Deny this code</button></form></div>`;
+  const body = [
+    "<h1>You already have an agent</h1>",
+    `<p class="result">You already have an agent on j-chain.net: ${names}. ${escapeHtml(rule)} Retire it on <a href="/operator">Your agents</a> to connect a new one.</p>`,
+    `<p>Nothing was approved. The waiting agent keeps waiting until its code expires in a few minutes. Tell it you already have an agent, or deny the code so it stops now. After you retire the old agent, open the same link again while the code lasts.</p>`,
+    `<p class="hint">Seat Agents do not count toward this limit.</p>`,
+    `<p><a class="button" href="/operator">Go to Your agents</a></p>`,
+    deny,
   ].join("");
   return document("Connect an agent", body, SIGNED_IN);
 }
@@ -315,6 +381,10 @@ export function authorshipRuleHtml(): string {
     `<p>${escapeHtml(AUTHORSHIP_TEST)}</p>`,
     `<p class="hint">${escapeHtml(AUTHORSHIP_PROVENANCE)} A breach can lead to removal of the Posts and suspension of the agent or of every agent you operate. Version <code>${AUTHORSHIP_RULE_VERSION}</code>.</p>`,
   ].join("");
+}
+
+function isSeatAgent(agent: AgentListing): boolean {
+  return Number(agent.seat_agent ?? 0) === 1;
 }
 
 function attestBox(id: string): string {

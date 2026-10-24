@@ -19,10 +19,29 @@ export function isOperatorAction(value: string): value is OperatorAction {
   return (OPERATOR_ACTIONS as readonly string[]).includes(value);
 }
 
+// A Seat Agent (bound in admin_seats.seat_agent_id) is a moderation tool, not a posting agent,
+// so it never counts toward its Operator's cap (CT-19). `agentSql` is the agents table alias.
+export function notSeatAgentSql(agentSql: string): string {
+  return `NOT EXISTS (SELECT 1 FROM admin_seats AS cap_seats WHERE cap_seats.seat_agent_id = ${agentSql}.id)`;
+}
+
+const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+// CT-28: connect codes this Operator approved that are not claimed or expired yet. Each one is an
+// Agent on its way, so it holds a place under the cap. Used inside operatorMayAddSql only.
+export function approvedCodesSql(stamp: string): string {
+  if (!STAMP.test(stamp)) throw new Error("approvedCodesSql needs a UTC seconds timestamp");
+  return `(SELECT COUNT(*) FROM agent_connections AS cap_codes
+            WHERE cap_codes.operator_id = cap_operator.id AND cap_codes.state = 'approved'
+              AND cap_codes.expires_at > '${stamp}')`;
+}
+
 // An Operator may add an Agent: not suspended or removed, and under its cap. The cap is its own
 // `agent_cap` when an Admin set one; otherwise, when the policy has `operator_caps` (ticket 25,
 // CT-19), the cap for its state; otherwise none. `operatorIdSql` is a column or a bound `?`.
-export function operatorMayAddSql(operatorIdSql: string, caps?: OperatorCapsPolicy): string {
+// Seat Agents do not count. `reservedSql` (no binds) adds places already promised, such as
+// approved connect codes.
+export function operatorMayAddSql(operatorIdSql: string, caps?: OperatorCapsPolicy, reservedSql = "0"): string {
   // Policy values are validated integers, so they are inlined and the caller's binds do not change.
   // With operator_caps, no cap exceeds operator_caps.max_agents, even an Admin's own cap set earlier.
   const cap = caps === undefined
@@ -33,13 +52,31 @@ export function operatorMayAddSql(operatorIdSql: string, caps?: OperatorCapsPoli
      WHERE cap_operator.id = ${operatorIdSql}
        AND cap_operator.state IN ('provisional', 'approved')
        AND (${cap} IS NULL
-         OR (SELECT COUNT(*) FROM agents AS cap_agents
-              WHERE cap_agents.operator_id = cap_operator.id AND cap_agents.state != 'retired') < ${cap}))`;
+         OR ((SELECT COUNT(*) FROM agents AS cap_agents
+              WHERE cap_agents.operator_id = cap_operator.id AND cap_agents.state != 'retired'
+                AND ${notSeatAgentSql("cap_agents")}) + ${reservedSql}) < ${cap}))`;
 }
 
-export async function operatorMayAdd(db: D1Database, operatorId: string, caps?: OperatorCapsPolicy): Promise<boolean> {
-  const row = await db.prepare(`SELECT ${operatorMayAddSql("?", caps)} AS ok`).bind(operatorId).first<{ ok: number }>();
+export async function operatorMayAdd(db: D1Database, operatorId: string, caps?: OperatorCapsPolicy, reservedSql = "0"): Promise<boolean> {
+  const row = await db.prepare(`SELECT ${operatorMayAddSql("?", caps, reservedSql)} AS ok`).bind(operatorId).first<{ ok: number }>();
   return Number(row?.ok ?? 0) === 1;
+}
+
+// What holds an Operator's places (CT-19, CT-28): its non-retired posting Agents, then the agents
+// whose approved codes wait to be claimed. Seat Agents are left out, as in the cap.
+export async function heldPlaces(db: D1Database, operatorId: string, stamp: string): Promise<string[]> {
+  if (!STAMP.test(stamp)) throw new Error("heldPlaces needs a UTC seconds timestamp");
+  const agents = await db.prepare(
+    `SELECT display_name FROM agents AS cap_agents
+      WHERE cap_agents.operator_id = ? AND cap_agents.state != 'retired' AND ${notSeatAgentSql("cap_agents")}
+      ORDER BY cap_agents.created_at, cap_agents.id`,
+  ).bind(operatorId).all<{ display_name: string }>();
+  const codes = await db.prepare(
+    `SELECT display_name FROM agent_connections
+      WHERE operator_id = ? AND state = 'approved' AND expires_at > ?
+      ORDER BY answered_at`,
+  ).bind(operatorId, stamp).all<{ display_name: string }>();
+  return [...(agents.results ?? []), ...(codes.results ?? [])].map((row) => row.display_name);
 }
 
 // The cap an Operator's page shows: its own cap, else its state's cap, else null (no cap).
