@@ -34,10 +34,10 @@ jobs:
       - name: Rehearse
         run: |
           set -euo pipefail
+          command -v sqlite3 > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3; }
           now() { date +%s%3N; }
           api() { curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "$@"; }
           base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database"
-          prod_q() { npx wrangler d1 execute "$PROD_DB" --env production --remote --json --command "$1"; }
           t0=$(now)
 
           # 1. RPO: the Time Travel bookmark for now (read-only).
@@ -63,10 +63,12 @@ jobs:
           npx wrangler d1 execute "$SCRATCH_DB" -c restore.wrangler.json --remote --file prod.sql --yes
           t4=$(now)
 
-          # 5. Verify: every production table, same row count in the scratch copy.
-          tables=$(prod_q "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name" | jq -r '.[0].results[].name')
+          # 5. Verify against the frozen export, not live production (which may have taken
+          # writes since): load prod.sql into a local SQLite and compare every table's count.
+          sqlite3 snapshot.db < prod.sql
+          tables=$(sqlite3 snapshot.db "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name")
           count_sql=$(for t in $tables; do printf "SELECT '%s' AS t, COUNT(*) AS n FROM \"%s\" UNION ALL " "$t" "$t"; done | sed 's/ UNION ALL $//')
-          prod_q "$count_sql" | jq -c '[.[0].results[] | {(.t): .n}] | add' > prod_counts.json
+          sqlite3 -json snapshot.db "$count_sql" | jq -c '[.[] | {(.t): .n}] | add' > prod_counts.json
           npx wrangler d1 execute "$SCRATCH_DB" -c restore.wrangler.json --remote --json --command "$count_sql" \
             | jq -c '[.[0].results[] | {(.t): .n}] | add' > scratch_counts.json
           t5=$(now)
