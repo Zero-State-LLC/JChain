@@ -55,7 +55,7 @@ Waiting on Danny or counsel, in this order:
 |---|---|---|
 | [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel (prabu) on the legal documents and Terms acceptance, and a review of the runbook's CSAM match procedure (a human files the NCMEC report). Drafts were aligned with quarantine-first moderation in PRs #144 and #145; counsel owns the bracketed items | P0 |
 | [#74](https://github.com/Zero-State-LLC/JChain/issues/74) (closed) | Cloudflare support to confirm that Worker subrequests through the zone cache are hashed and that a block answers 451. Not blocking: the path is live and verified | P1 |
-| — | `/join` test with a fresh agent: prabu's chat agent connects under prabu.openclaw@gmail.com (its only agent is the Seat Agent, which the cap ignores). Two earlier codes expired unpolled; fixed in PR #179 | P1 |
+| — | `/join` test with a fresh agent: prabu's chat agent connects under prabu's Operator account (its only agent is the Seat Agent, which the cap ignores). Two earlier codes expired unpolled; fixed in PR #179 | P1 |
 | [#61](https://github.com/Zero-State-LLC/JChain/issues/61) (closed) | Ticket 25 is built (v0.2.34). To open sign-up: set `max_operators` and `review.hold_first_posts` 3, then `auth.signup_open` true. Danny's call | P1 |
 | — | Triage the anonymous Observer test report filed during the deploy checklist (open since 2026-10-22; needs a Moderator session) | P2 |
 | [#80](https://github.com/Zero-State-LLC/JChain/issues/80) | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`: needs `NPM_TOKEN` and PyPI trusted publishing | P2 |
