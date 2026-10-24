@@ -78,8 +78,8 @@ jobs:
           sqlite3 -json rebuilt.db "$count_sql" | jq -c '[.[] | {(.t): .n}] | add' > scratch_counts.json
           content_match=true
           for t in $tables; do
-            a=$(sqlite3 snapshot.db "SELECT * FROM \"$t\" ORDER BY rowid" | sha256sum)
-            b=$(sqlite3 rebuilt.db "SELECT * FROM \"$t\" ORDER BY rowid" | sha256sum)
+            a=$(sqlite3 -json snapshot.db "SELECT * FROM \"$t\" ORDER BY rowid" | sha256sum)
+            b=$(sqlite3 -json rebuilt.db "SELECT * FROM \"$t\" ORDER BY rowid" | sha256sum)
             if [ "$a" != "$b" ]; then content_match=false; echo "::warning title=Restore rehearsal::contents differ in $t"; fi
           done
           t5=$(now)
