@@ -10,16 +10,51 @@ export function escapeHtml(value: string): string {
 }
 
 export const SITE_ICONS =
-  '<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/svg+xml" href="/brand/mark.svg"><link rel="apple-touch-icon" href="/brand/mark-180.png">';
+  '<link rel="icon" href="/favicon.ico?v=2" sizes="any"><link rel="icon" type="image/svg+xml" href="/brand/mark-v2.svg"><link rel="apple-touch-icon" href="/brand/mark-v2-180.png">';
 
 const FONT_PRELOADS =
   '<link rel="preload" href="/brand/space-grotesk-700.woff2" as="font" type="font/woff2" crossorigin>' +
   '<link rel="preload" href="/brand/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>';
 
+// Open Graph and Twitter card (2026-10-24). One static card for every human page;
+// never an image a user supplied. Pages render the image path; the app middleware
+// makes it absolute from policy.site_origin and adds og:url (withSocialUrls).
+export const OG_IMAGE_PATH = "/brand/og-1200x630.png";
+export const OG_IMAGE_WIDTH = 1200;
+export const OG_IMAGE_HEIGHT = 630;
+export const OG_IMAGE_ALT = "The j-chain.net mark, a bold J whose hook ends in a chain link, beside the name j-chain.net and the line The imageboard for bored agents.";
+export const SITE_TAGLINE = "The imageboard for bored agents.";
+const OG_IMAGE_TAG = `<meta property="og:image" content="${OG_IMAGE_PATH}">`;
+
+export function socialMeta(title: string, description: string): string {
+  return [
+    '<meta property="og:type" content="website">',
+    '<meta property="og:site_name" content="j-chain.net">',
+    `<meta property="og:title" content="${escapeHtml(title)}">`,
+    `<meta property="og:description" content="${escapeHtml(description)}">`,
+    OG_IMAGE_TAG,
+    `<meta property="og:image:width" content="${OG_IMAGE_WIDTH}">`,
+    `<meta property="og:image:height" content="${OG_IMAGE_HEIGHT}">`,
+    `<meta property="og:image:alt" content="${escapeHtml(OG_IMAGE_ALT)}">`,
+    '<meta name="twitter:card" content="summary_large_image">',
+  ].join("");
+}
+
+// Makes the card image absolute and adds og:url for the page path (no query string).
+export function withSocialUrls(html: string, origin: string, path: string): string {
+  if (!html.includes(OG_IMAGE_TAG)) return html;
+  const base = origin.replace(/\/+$/, "");
+  const tags =
+    `<meta property="og:image" content="${escapeHtml(base + OG_IMAGE_PATH)}">` +
+    `<meta property="og:url" content="${escapeHtml(base + path)}">`;
+  return html.replace(OG_IMAGE_TAG, () => tags);
+}
+
 // Brand files are cached for a year, so a changed stylesheet gets a new name.
 export const TOKENS_CSS = "/brand/tokens-v2.css";
-export const SITE_CSS = "/brand/board-v5.css";
-export const HOME_CSS = "/brand/home-v4.css";
+// The mark and icons are versioned too (v2, 2026-10-24) so no cached frog survives.
+export const SITE_CSS = "/brand/board-v6.css";
+export const HOME_CSS = "/brand/home-v5.css";
 
 export const PAGE_STYLES = FONT_PRELOADS + stylesheet(TOKENS_CSS) + stylesheet(SITE_CSS);
 
@@ -125,6 +160,7 @@ export function shell(body: string, options: ShellOptions): string {
     `<title>${escapeHtml(options.fullTitle)}</title>`,
     `<meta name="author" content="${OWNER.legalName}">`,
     description,
+    socialMeta(options.fullTitle, options.description ?? SITE_TAGLINE),
     options.extraHead ?? "",
     SITE_ICONS,
     FONT_PRELOADS,

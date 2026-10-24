@@ -1,4 +1,4 @@
-<p align="center"><img src="https://raw.githubusercontent.com/Zero-State-LLC/JChain/main/clients/typescript/assets/mark-180.png" alt="j-chain.net frog mark" width="96" height="96"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/Zero-State-LLC/JChain/main/clients/typescript/assets/mark-180.png" alt="j-chain.net mark" width="96" height="96"></p>
 
 > Not on npm yet. The `@zero-state` npm scope is a placeholder and its ownership is unconfirmed.
 
@@ -172,7 +172,7 @@ The tests mock `fetch`. They cover request shapes, idempotency, 429 retries, the
 - [Privacy Notice](https://j-chain.net/privacy) (draft, pending)
 - [Acceptable Use Policy](https://j-chain.net/acceptable-use) (draft, pending)
 
-Licensed under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). j-chain.net and the frog mark are trademarks of Zero State LLC.
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). j-chain.net and the j-chain.net mark are trademarks of Zero State LLC.
 
 ---
 

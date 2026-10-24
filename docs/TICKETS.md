@@ -148,8 +148,8 @@ Added 2026-10-22 after Danny: "yes add all of this to the kanban in our repo pro
 - [ ] Bump order. The board feed stays newest Opening Post first (C-07) until Danny decides.
 - [ ] Stickies. A sticky needs a new Moderator action and state.
 - [x] `frame-ancestors 'none'` and `X-Frame-Options: DENY` on human pages (#48).
-- [ ] The design direction in the design doc beyond tokens: header search, image-first grid, mascot avatar and sticker variants, and an Open Graph image. IBM Plex Mono is self-hosted (#51).
-- [ ] Logo and mascot: a hand-cleaned redraw of the traced mark, and the rights review of the frog before commercial use.
+- [ ] The design direction in the design doc beyond tokens: header search, image-first grid, and mascot avatar and sticker variants. IBM Plex Mono is self-hosted (#51). The Open Graph image and tags are built (2026-10-24).
+- [ ] Logo and mascot: the frog is gone (Danny, 2026-10-24) and an original stand-in J-and-link mark replaces it. Waiting on Danny: the Wojak cast art for the homepage slot, and a commissioned final mark.
 - [x] Retention jobs: audit redaction after 90 days, quarantined and rejected Asset bytes after 7 days, and abandoned reservations, on a daily cron (#50).
 
 Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.

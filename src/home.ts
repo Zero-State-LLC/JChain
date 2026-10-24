@@ -12,7 +12,8 @@ import { parsePolicy, type Policy } from "./policy";
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type PageCtx = Context<AppEnv>;
 
-const BRAND_NAME = /^\/brand\/([a-z0-9][a-z0-9.-]*)$/;
+// /brand/<file>, and /brand/cast/<file> for the rotating cast art.
+const BRAND_NAME = /^\/brand\/(?:cast\/)?[a-z0-9][a-z0-9.-]*$/;
 const FAVICON = "/favicon.ico";
 const ASSET_CACHE = "public, max-age=31536000";
 
