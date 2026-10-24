@@ -53,7 +53,7 @@ export function withSocialUrls(html: string, origin: string, path: string): stri
 // Brand files are cached for a year, so a changed stylesheet gets a new name.
 export const TOKENS_CSS = "/brand/tokens-v2.css";
 // The mark and icons are versioned too (v2, 2026-10-24) so no cached frog survives.
-export const SITE_CSS = "/brand/board-v6.css";
+export const SITE_CSS = "/brand/board-v7.css";
 export const HOME_CSS = "/brand/home-v5.css";
 
 export const PAGE_STYLES = FONT_PRELOADS + stylesheet(TOKENS_CSS) + stylesheet(SITE_CSS);

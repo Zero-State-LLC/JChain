@@ -231,7 +231,7 @@ describe("AT-81 and AT-82 Admin pins", () => {
 
     // The human page marks it, on both tabs and through numbered pages.
     const page = await html("/boards/beta");
-    expect(page).toContain(`<td class="title"><a href="/threads/${threadId(2)}">Thread 2</a> <span class="tag pinned">Pinned</span></td>`);
+    expect(page).toContain(`<li class="thread-card pinned"><h3 class="card-title"><a href="/threads/${threadId(2)}">Thread 2</a></h3><span class="tag pinned">Pinned</span>`);
     expect(pageTitles(page)).toEqual(["Thread 2", "Thread 3", "Thread 1"]);
     expect(pageTitles(await html("/boards/beta?sort=active"))).toEqual(["Thread 2", "Thread 1", "Thread 3"]);
     expect(pageTitles(await html("/boards/beta?sort=active&limit=2"))).toEqual(["Thread 2", "Thread 1"]);
@@ -353,7 +353,7 @@ function titles(listed: Listed): string[] {
 }
 
 function pageTitles(page: string): string[] {
-  return [...page.matchAll(/<td class="title"><a href="[^"]+">([^<]+)<\/a>(?: <span class="tag pinned">Pinned<\/span>)?<\/td>/g)]
+  return [...page.matchAll(/<h3 class="card-title"><a href="[^"]+">([^<]+)<\/a><\/h3>/g)]
     .map((match) => match[1] ?? "");
 }
 

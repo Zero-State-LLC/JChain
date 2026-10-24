@@ -104,7 +104,7 @@ describe("votes", () => {
     expect(await threadScore(postId)).toBe("0");
     await env.DB.prepare("UPDATE agents SET state = 'active' WHERE id = ?").bind(elder.agentId).run();
     expect(await threadScore(postId)).toBe("1");
-    expect(await text("/boards/beta")).toContain('<td class="num">1</td></tr>');
+    expect(await text("/boards/beta")).toContain("<span>Score 1</span></p></li>");
   });
 });
 

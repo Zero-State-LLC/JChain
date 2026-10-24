@@ -126,6 +126,65 @@ describe("board topics", () => {
   });
 });
 
+describe("image-first catalog grid", () => {
+  it("lists Threads as cards with one link each, sized lazy thumbnails, the pin first, and a placeholder", async () => {
+    for (let index = 1; index <= 7; index += 1) {
+      await openingPost(index, "published");
+    }
+    for (let index = 2; index <= 7; index += 1) {
+      await withImage(index, index === 3 ? "Cat & <dog>" : `Picture ${index}`);
+    }
+    await reply(7, "2026-03-01T00:00:00Z", "published");
+    await env.DB.prepare("INSERT INTO board_pins (board_id, thread_id, pinned_at) VALUES (?, ?, ?)")
+      .bind(BOARD_ID, "01900000-0000-7000-8000-100000000001", "2026-10-24T00:00:00Z").run();
+
+    const page = await text("/boards/beta");
+    expect(page).not.toContain("<table");
+    expect(page).toContain('<section class="threads" aria-labelledby="threads"><h2 id="threads" class="visually-hidden">Threads</h2><ul class="thread-grid"><li class="thread-card pinned">');
+    expect(page).toContain('<nav class="tabs" aria-label="Thread order">');
+    expect(page.match(/<h1\b/g)).toHaveLength(1);
+    expect(titles(page)).toEqual(["Thread 1", "Thread 7", "Thread 6", "Thread 5", "Thread 4", "Thread 3", "Thread 2"]);
+
+    const listed = cards(page);
+    expect(listed).toHaveLength(7);
+    for (const card of listed) {
+      // One tab stop per card: the title link, and nothing else focusable.
+      expect(card.match(/<a /g)).toHaveLength(1);
+      expect(card).toMatch(/<h3 class="card-title"><a href="\/threads\/[0-9a-f-]{36}">/);
+      expect(card).not.toMatch(/<(button|input|select|textarea)\b/);
+      expect(card).toContain("Ada");
+    }
+
+    // The pinned Thread leads, marked once; it has no image, so it shows a placeholder with its title.
+    const [pinned, newest, , , , cat, oldest] = listed as [string, string, string, string, string, string, string];
+    expect(pinned.startsWith(' pinned">')).toBe(true);
+    expect(pinned).toContain('</h3><span class="tag pinned">Pinned</span>');
+    expect(pinned).toContain('<div class="card-media card-placeholder" aria-hidden="true"><span>Thread 1</span></div>');
+    expect(pinned).not.toContain("<img");
+    expect(page.match(/>Pinned<\/span>/g)).toHaveLength(1);
+    expect(listed.slice(1).every((card) => card.startsWith('">'))).toBe(true);
+
+    // Thumbnails have a fixed size, escaped alt text, and load lazily past the first row.
+    expect(page.match(/<img src="\/v1\/assets\/[^"]+\/content\?variant=thumb" width="320" height="320" alt="[^"]+"/g)).toHaveLength(6);
+    expect(cat).toContain('width="320" height="320" alt="Cat &amp; &lt;dog&gt;">');
+    expect(page).not.toContain("<dog>");
+    expect(listed.slice(0, 6).some((card) => card.includes("loading="))).toBe(false);
+    expect(oldest).toContain('alt="Picture 2" loading="lazy">');
+
+    // Reply count and last post time as a time element.
+    expect(newest).toContain("<span>1 reply</span>");
+    expect(newest).toContain('<span>Last post <time datetime="2026-03-01T00:00:00Z">2026-03-01 00:00 UTC</time></span>');
+    expect(pinned).toContain("<span>0 replies</span>");
+    expect(pinned).toContain('<time datetime="2026-02-01T00:00:00Z">');
+
+    // Agents keep the JSON API, unchanged.
+    const api = await json(await call(`/v1/boards/${BOARD_ID}/threads`, { email: OPERATOR }));
+    const items = api.items as Array<{ title: string; pinned: boolean }>;
+    expect(items.map((item) => item.title)).toEqual(["Thread 1", "Thread 7", "Thread 6", "Thread 5", "Thread 4", "Thread 3", "Thread 2"]);
+    expect(items[0]?.pinned).toBe(true);
+  });
+});
+
 describe("numbered board pages", () => {
   it("pages threads newest first with numbered links and a last post time", async () => {
     for (let index = 1; index <= 7; index += 1) {
@@ -218,7 +277,27 @@ async function reply(index: number, stamp: string, state: string): Promise<void>
 }
 
 function titles(html: string): string[] {
-  return [...html.matchAll(/<td class="title"><a href="[^"]+">([^<]+)<\/a><\/td>/g)].map((match) => match[1]);
+  return [...html.matchAll(/<h3 class="card-title"><a href="[^"]+">([^<]+)<\/a><\/h3>/g)].map((match) => match[1]);
+}
+
+// The board feed's Thread cards, in page order (Danny, 2026-10-24: the image-first grid).
+function cards(html: string): string[] {
+  return html.split('<li class="thread-card').slice(1).map((part) => part.slice(0, part.indexOf("</li>")));
+}
+
+async function withImage(index: number, alt: string): Promise<void> {
+  const suffix = String(index).padStart(12, "0").slice(1);
+  const assetId = `01900000-0000-7000-8000-4${suffix}`;
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO assets (id, agent_id, state, content_type, byte_size, sha256, original_stored, created_at, expires_at)
+       VALUES (?, ?, 'ready', 'image/webp', 4, ?, 0, ?, ?)`,
+    ).bind(assetId, AGENT_ID, String(index).padStart(64, "0"), "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+    env.DB.prepare(
+      `UPDATE posts SET asset_id = ?, alt_text = ?, provenance_source = 'model', rights_attestation = 'I made this.', license = 'cc0'
+        WHERE id = ?`,
+    ).bind(assetId, alt, `01900000-0000-7000-8000-2${suffix}`),
+  ]);
 }
 
 function pagerNav(html: string): string {
