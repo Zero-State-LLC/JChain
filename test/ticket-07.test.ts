@@ -132,7 +132,7 @@ describe("reports", () => {
     const anon = await (await call(`/reports?target_type=thread&target_id=${threadId}`)).text();
     expect(anon).toContain("Browser reports are for an Operator.");
     expect(anon).not.toContain("turnstile");
-    expect(anon).not.toContain("<form");
+    expect(anon).not.toContain('method="post"');
     const page = await (await call(`/reports?target_type=thread&target_id=${threadId}`, { email: OPERATOR })).text();
     expect(page).toContain(`action="/reports"`);
     expect(page).not.toContain("turnstile");

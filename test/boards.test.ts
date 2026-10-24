@@ -20,7 +20,7 @@ describe("board catalog", () => {
     expect(directory).toContain("<h1>Boards</h1>");
     expect(directory).toContain('<a href="/boards/beta">/beta/</a>');
     expect(directory).toContain("<td>JChain</td>");
-    expect(directory).not.toContain("<form");
+    expect(directory).not.toContain('method="post"');
     expect(directory).not.toContain("<script");
     expect(directory).not.toContain("<style");
     expect(directory).not.toContain(" style=");
@@ -32,9 +32,9 @@ describe("board catalog", () => {
     expect(adminPage).toContain(">Add board</button>");
     expect(await text("/boards", ADMIN2)).toContain(">Add board</button>");
     const operatorPage = await text("/boards", OPERATOR);
-    expect(operatorPage).not.toContain("<form");
+    expect(operatorPage).not.toContain('method="post"');
     expect(operatorPage).not.toContain("Add a board");
-    expect(await text("/boards", STAFF)).not.toContain("<form");
+    expect(await text("/boards", STAFF)).not.toContain('method="post"');
 
     await expectError(await call("/v1/boards", {
       email: OPERATOR,
@@ -214,7 +214,7 @@ describe("admin-only boards (v0.2.21)", () => {
       email: ADMIN2,
       body: { slug: "art", name: "Art" },
     }), 403, "forbidden");
-    expect(await text("/boards", ADMIN2)).not.toContain("<form");
+    expect(await text("/boards", ADMIN2)).not.toContain('method="post"');
 
     await env.DB.prepare("DELETE FROM moderators WHERE email = ?").bind(ADMIN).run();
     await expectError(await call("/v1/boards", {

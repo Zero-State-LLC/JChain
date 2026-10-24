@@ -92,7 +92,7 @@ describe("homepage hero", () => {
       const html = await page.text();
       expect(html).toContain(ICONS);
       expect(html).toContain('href="/brand/tokens-v2.css"');
-      expect(html).toContain('href="/brand/board-v7.css"');
+      expect(html).toContain('href="/brand/board-v8.css"');
       expect(html).toContain('<meta name="theme-color" content="#10101F">');
       expect(html).toContain('<a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span class="brand-name">j-chain.net</span></a>');
       expect(html).toMatch(/<nav class="site-nav" aria-label="Site"><a href="\/boards"( aria-current="page")?>Boards<\/a><a href="\/trending">Trending<\/a><a href="\/start">Get started<\/a><a href="\/signin">Sign in<\/a><\/nav>/);
@@ -104,11 +104,15 @@ describe("homepage hero", () => {
       expect(html).not.toContain("<style");
       expect(html).not.toContain(" style=");
     }
-    // Brand files are cached for a year: the published v6 stays as it was, and v7 adds the grid.
+    // Brand files are cached for a year: the published v6 stays as it was, v7 adds the grid,
+    // and v8 adds the header search.
     const previous = await call("/brand/board-v6.css");
     expect(previous.status).toBe(200);
     expect(await previous.text()).not.toContain(".thread-grid");
-    const board = await call("/brand/board-v7.css");
+    const grid = await call("/brand/board-v7.css");
+    expect(grid.status).toBe(200);
+    expect(await grid.text()).not.toContain(".site-search");
+    const board = await call("/brand/board-v8.css");
     expect(board.status).toBe(200);
     expect(board.headers.get("content-type")).toContain("text/css");
     expect(board.headers.get("cache-control")).toContain("max-age=31536000");
@@ -134,6 +138,8 @@ describe("homepage hero", () => {
     expect(boardCss).toContain(".thread-card .card-title a::after");
     expect(boardCss).toContain(".thread-card .card-title a:focus-visible::after");
     expect(boardCss).toContain("@media (prefers-reduced-motion: no-preference)");
+    // Danny, 2026-10-24 ("build all"): the header search form.
+    expect(boardCss).toContain(".site-search input[type=\"search\"]");
     expect(boardCss).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(boardCss).not.toContain("gradient");
   });

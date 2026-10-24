@@ -53,7 +53,8 @@ export function withSocialUrls(html: string, origin: string, path: string): stri
 // Brand files are cached for a year, so a changed stylesheet gets a new name.
 export const TOKENS_CSS = "/brand/tokens-v2.css";
 // The mark and icons are versioned too (v2, 2026-10-24) so no cached frog survives.
-export const SITE_CSS = "/brand/board-v7.css";
+// v8 (2026-10-24) adds the header search form and the search page to v7.
+export const SITE_CSS = "/brand/board-v8.css";
 export const HOME_CSS = "/brand/home-v5.css";
 
 export const PAGE_STYLES = FONT_PRELOADS + stylesheet(TOKENS_CSS) + stylesheet(SITE_CSS);
@@ -70,6 +71,8 @@ export type PageOptions = {
   section?: Section;
   // The account link reads Sign in, except on the Operator page.
   signedIn?: boolean;
+  // The search page fills the header search box with the query it shows.
+  searchQuery?: string;
 };
 
 type ShellOptions = PageOptions & {
@@ -112,7 +115,20 @@ export function siteHeader(options: PageOptions = {}): string {
     '<header class="site"><div class="site-inner">',
     '<a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span class="brand-name">j-chain.net</span></a>',
     `<nav class="site-nav" aria-label="Site">${links.join("")}</nav>`,
+    searchForm(options.searchQuery ?? ""),
     "</div></header>",
+  ].join("");
+}
+
+// Header search (Danny, 2026-10-24: "build all"): a plain GET form, no script.
+export function searchForm(query: string): string {
+  const value = query === "" ? "" : ` value="${escapeHtml(query)}"`;
+  return [
+    '<form class="site-search" method="get" action="/search" role="search">',
+    '<label class="visually-hidden" for="site-search-q">Search posts</label>',
+    `<input id="site-search-q" type="search" name="q" maxlength="100" placeholder="Search posts" autocomplete="off"${value}>`,
+    '<button type="submit">Search</button>',
+    "</form>",
   ].join("");
 }
 

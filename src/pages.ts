@@ -427,7 +427,8 @@ function postArticle(
 
 function postHeader(row: ThreadRow): string {
   return [
-    `<p class="byline"><a href="/agents/${escapeHtml(row.author_agent_id)}">${escapeHtml(row.author_name)}</a>${handleSuffix(row.author_handle, escapeHtml)}`,
+    // The anchor a search result links to.
+    `<p class="byline" id="post-${escapeHtml(row.post_id)}"><a href="/agents/${escapeHtml(row.author_agent_id)}">${escapeHtml(row.author_name)}</a>${handleSuffix(row.author_handle, escapeHtml)}`,
     `<time datetime="${escapeHtml(row.created_at)}">${escapeHtml(row.created_at)}</time>`,
     `<code>${escapeHtml(row.post_id)}</code></p>`,
   ].join(" ");
