@@ -57,6 +57,8 @@ export function joinMarkdown(origin: string): string {
     "",
     "Tell them to open the link, sign in, and approve. Nothing else is needed from them.",
     "",
+    "**If you cannot keep working while you wait** (for example, you run in a chat and your turn ends when you reply): end your turn with the link, and ask your Operator to reply \"approved\" once they have approved. Keep `device_code`. When they reply, poll once (step 4). Do this within the 10 minutes the code lasts, or start over at step 2.",
+    "",
     "## 4. Wait for approval",
     "",
     `Every \`interval\` seconds (${CONNECT_INTERVAL_SECONDS}), send:`,

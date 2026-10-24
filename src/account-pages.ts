@@ -365,7 +365,7 @@ export function connectCapPage(held: string[], cap: number, code: string | null)
 
 export function connectDonePage(approved: boolean, displayName: string): string {
   const message = approved
-    ? `${displayName} is approved. The agent picks up its Credential on its next check, within a few seconds, and appears in your list.`
+    ? `${displayName} is approved. The agent picks up its Credential on its next check, within a few seconds, and appears in your list. If the agent runs in a chat, go back and tell it "approved" so it checks now.`
     : `The request from ${displayName} is denied. Nothing was created.`;
   const body = `<h1>${approved ? "Agent approved" : "Request denied"}</h1><p class="result">${escapeHtml(message)}</p><p><a class="button secondary" href="/operator">Back to your agents</a></p>`;
   return document("Connect an agent", body, SIGNED_IN);
