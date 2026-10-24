@@ -8,5 +8,245 @@
     "license": "CC0 1.0 Universal Public Domain Dedication",
     "width": 180,
     "height": 179
+  },
+  {
+    "file": "wojak-doomer.webp",
+    "name": "Doomer",
+    "alt": "Doomer wojak in a black beanie and hoodie with a cigarette.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-yes-chad.webp",
+    "name": "Yes Chad",
+    "alt": "Yes Chad wojak in profile with a short green beard.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-soyjak.webp",
+    "name": "Soyjak",
+    "alt": "Soyjak with purple glasses, mouth wide open, pointing.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-bloomer.webp",
+    "name": "Bloomer",
+    "alt": "Bloomer wojak smiling in front of an orange sun.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-coomer.webp",
+    "name": "Coomer",
+    "alt": "Coomer wojak with wide bloodshot eyes and a scraggly beard.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-zoomer.webp",
+    "name": "Zoomer",
+    "alt": "Zoomer wojak with curly hair in a hoodie, staring at a glowing phone.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-brainlet.webp",
+    "name": "Brainlet",
+    "alt": "Brainlet wojak with a tiny head and a blank smile.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-galaxy-brain.webp",
+    "name": "Galaxy Brain",
+    "alt": "Galaxy Brain wojak with a huge glowing green brain.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-feels.webp",
+    "name": "Feels",
+    "alt": "Feels wojak with a single tear and a sad smile.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-smug.webp",
+    "name": "Smug",
+    "alt": "Smug wojak with a knowing half smile.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-gigachad.webp",
+    "name": "Gigachad",
+    "alt": "Gigachad with a chiseled jaw and huge shoulders, drawn in pencil.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-boomer.webp",
+    "name": "Boomer",
+    "alt": "Boomer wojak in sunglasses holding a can, grinning.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-wagie.webp",
+    "name": "Wagie",
+    "alt": "Wagie wojak in a shirt, tie, and ID badge, looking tired.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-schizo.webp",
+    "name": "Schizo",
+    "alt": "Schizo wojak in a tinfoil hat with wild purple scribbles.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-neet.webp",
+    "name": "NEET",
+    "alt": "NEET wojak with messy hair in a worn sweater.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-becky.webp",
+    "name": "Becky",
+    "alt": "Becky wojak with straight shoulder-length hair and a calm face.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-doomer-girl.webp",
+    "name": "Doomer Girl",
+    "alt": "Doomer Girl in a black beanie with blue eyes and a cigarette.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-rage.webp",
+    "name": "Rage",
+    "alt": "Rage wojak with a red face, bulging eyes, and gritted teeth.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-based.webp",
+    "name": "Based",
+    "alt": "Based wojak in pixel sunglasses with arms crossed.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-comfy.webp",
+    "name": "Comfy",
+    "alt": "Comfy wojak wrapped in an orange blanket holding a warm mug.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-terminal.webp",
+    "name": "Terminal",
+    "alt": "Terminal wojak in a dark hood, face lit by green screen glow.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-scientist.webp",
+    "name": "Scientist",
+    "alt": "Scientist wojak in glasses and a lab coat holding a blue flask.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-bored.webp",
+    "name": "Bored",
+    "alt": "Bored wojak resting his chin on his hand.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
+  },
+  {
+    "file": "wojak-chad.webp",
+    "name": "Chad",
+    "alt": "Chad with blond hair and stubble in a dark suit and tie.",
+    "source": "https://github.com/Zero-State-LLC/JChain",
+    "author": "Zero State LLC (original for j-chain.net)",
+    "license": "CC0 1.0 Universal Public Domain Dedication",
+    "width": 512,
+    "height": 512
   }
 ]
