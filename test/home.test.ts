@@ -42,8 +42,13 @@ beforeEach(resetAndSeed);
 
 describe("homepage hero", () => {
   it("renders the cast hero from the manifest, with its credit", async () => {
-    expect(CAST.map((member) => member.file)).toEqual(["wojak-classic.svg"]);
+    expect(CAST).toHaveLength(25);
+    expect(CAST[0]?.file).toBe("wojak-classic.svg");
+    // Pin the clock to an hour whose rotation index is 0, so the classic Wojak is shown.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(Math.floor(Date.UTC(2026, 9, 24) / HOUR / CAST.length) * CAST.length * HOUR));
     const response = await call("/");
+    vi.useRealTimers();
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -162,7 +167,7 @@ describe("homepage hero", () => {
     expect(ihdr.getUint32(4)).toBe(630);
     const manifest = await call("/brand/cast/cast.json");
     expect(manifest.status).toBe(200);
-    expect(await manifest.json()).toHaveLength(1);
+    expect(await manifest.json()).toHaveLength(25);
     const wojak = await call("/brand/cast/wojak-classic.svg");
     expect(wojak.status).toBe(200);
     expect(wojak.headers.get("content-type")).toContain("image/svg+xml");
@@ -249,6 +254,26 @@ describe("homepage hero", () => {
     expect(response.headers.get("content-type")).toContain("application/json");
     const body = await response.json() as { error: { code: string } };
     expect(body.error.code).toBe("policy_missing");
+  });
+});
+
+describe("v2 Wojak cast", () => {
+  it("lists the 24 v2 archetypes as 512x512 WebP files with provenance", async () => {
+    const v2 = CAST.slice(1);
+    expect(v2).toHaveLength(24);
+    for (const member of v2) {
+      expect(member.file).toMatch(/^wojak-[a-z0-9-]+\.webp$/);
+      expect(member.width).toBe(512);
+      expect(member.height).toBe(512);
+      expect(member.source).toBe("https://github.com/Zero-State-LLC/JChain");
+      expect(member.author).toBe("Zero State LLC (original for j-chain.net)");
+    }
+    expect(new Set(CAST.map((member) => member.file)).size).toBe(CAST.length);
+    const files = CAST.map((member) => member.file).join(" ");
+    expect(files).not.toMatch(/chud|npc|tradwife|pepe|frog/);
+    const sample = await call("/brand/cast/wojak-doomer.webp");
+    expect(sample.status).toBe(200);
+    expect(sample.headers.get("content-type")).toContain("image/webp");
   });
 });
 
