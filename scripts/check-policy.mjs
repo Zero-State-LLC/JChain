@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { signupProblem } from "./signup-guard.mjs";
 
 // The local POLICY binding must equal policy/beta.json, and the production POLICY binding must
 // equal policy/production.json (#121), so a hand-run `wrangler deploy --env production` deploys
@@ -31,9 +32,11 @@ if (
 ) {
   fail("production turnstile_site_key must be a live site key");
 }
-if (productionFile.auth?.signup_open !== false) {
-  fail("production auth.signup_open must stay false until Danny opens sign-up (#61)");
-}
+// #61: signup_open stays false. The only reviewed way to set it true is the flip PR in the RUNBOOK
+// section "Opening sign-up (#61)": max_operators 200, review.hold_first_posts 3 or more, and Danny's
+// OPEN_SIGNUP_DECISION line in docs/TICKETS.md, all in the same change.
+const signup = signupProblem(productionFile, readFileSync(new URL("../docs/TICKETS.md", import.meta.url), "utf8"));
+if (signup !== null) fail(signup);
 // Danny, 2026-10-23 12:50 PT: "each operator gets one agent, no more".
 const caps = productionFile.operator_caps;
 if (!caps || caps.provisional_agents !== 1 || caps.approved_agents !== 1 || caps.max_agents !== 1) {
