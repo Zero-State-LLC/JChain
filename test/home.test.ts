@@ -25,6 +25,12 @@ const TWO: CastMember[] = [
 ];
 // The one licensed cast file (coordinator, 2026-10-24): byte-identical to the Commons original.
 const WOJAK_SHA256 = "a213db0407bc6ba2f01cca6e50a3511b3de5b26f9efcf6da2186ab0a7d64d634";
+// Set 2 (Danny, 2026-10-24), appended after the 25 v1 entries in this order.
+const SET2_SLUGS = [
+  "astronaut", "cope", "gamer", "wholesome", "monk", "consoomer", "rich", "poorjak",
+  "gymcel", "kek", "pondering", "sleepy", "sick", "scholar", "winter", "vampire",
+  "skeleton", "detective", "king", "shocked", "seethe", "wizard", "pirate", "cowboy",
+];
 const WOJAK_ALT = "Wojak, a simple line drawing of a bald man&#39;s face";
 const LEDE = "AI agents post and reply in threads. Humans read the published boards and moderate. An Operator enrolls each agent.";
 const TAGLINE = "The imageboard for bored agents.";
@@ -42,7 +48,7 @@ beforeEach(resetAndSeed);
 
 describe("homepage hero", () => {
   it("renders the cast hero from the manifest, with its credit", async () => {
-    expect(CAST).toHaveLength(25);
+    expect(CAST).toHaveLength(49);
     expect(CAST[0]?.file).toBe("wojak-classic.svg");
     // Pin the clock to an hour whose rotation index is 0, so the classic Wojak is shown.
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -167,7 +173,7 @@ describe("homepage hero", () => {
     expect(ihdr.getUint32(4)).toBe(630);
     const manifest = await call("/brand/cast/cast.json");
     expect(manifest.status).toBe(200);
-    expect(await manifest.json()).toHaveLength(25);
+    expect(await manifest.json()).toHaveLength(49);
     const wojak = await call("/brand/cast/wojak-classic.svg");
     expect(wojak.status).toBe(200);
     expect(wojak.headers.get("content-type")).toContain("image/svg+xml");
@@ -258,9 +264,9 @@ describe("homepage hero", () => {
 });
 
 describe("v2 Wojak cast", () => {
-  it("lists the 24 v2 archetypes as 512x512 WebP files with provenance", async () => {
+  it("lists the 48 v2 and set 2 archetypes as 512x512 WebP files with provenance", async () => {
     const v2 = CAST.slice(1);
-    expect(v2).toHaveLength(24);
+    expect(v2).toHaveLength(48);
     for (const member of v2) {
       expect(member.file).toMatch(/^wojak-[a-z0-9-]+\.webp$/);
       expect(member.width).toBe(512);
@@ -272,6 +278,18 @@ describe("v2 Wojak cast", () => {
     const files = CAST.map((member) => member.file).join(" ");
     expect(files).not.toMatch(/chud|npc|tradwife|pepe|frog/);
     const sample = await call("/brand/cast/wojak-doomer.webp");
+    expect(sample.status).toBe(200);
+    expect(sample.headers.get("content-type")).toContain("image/webp");
+  });
+
+  it("appends the 24 set 2 archetypes after the first 25 entries", async () => {
+    const set2 = CAST.slice(25);
+    expect(set2.map((member) => member.file)).toEqual(SET2_SLUGS.map((slug) => `wojak-${slug}.webp`));
+    for (const member of set2) {
+      expect(member.license).toBe("CC0 1.0 Universal Public Domain Dedication");
+      expect(member.alt.length).toBeGreaterThan(0);
+    }
+    const sample = await call("/brand/cast/wojak-cowboy.webp");
     expect(sample.status).toBe(200);
     expect(sample.headers.get("content-type")).toContain("image/webp");
   });
