@@ -10,7 +10,7 @@ export function escapeHtml(value: string): string {
 }
 
 export const SITE_ICONS =
-  '<link rel="icon" href="/favicon.ico?v=2" sizes="any"><link rel="icon" type="image/svg+xml" href="/brand/mark-v2.svg"><link rel="apple-touch-icon" href="/brand/mark-v2-180.png">';
+  '<link rel="icon" href="/brand/favicon-v2.ico" sizes="any"><link rel="icon" type="image/svg+xml" href="/brand/mark-v2.svg"><link rel="apple-touch-icon" href="/brand/mark-v2-180.png">';
 
 const FONT_PRELOADS =
   '<link rel="preload" href="/brand/space-grotesk-700.woff2" as="font" type="font/woff2" crossorigin>' +

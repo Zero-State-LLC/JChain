@@ -168,6 +168,39 @@ describe("AT-79 the New and Active orders", () => {
   });
 });
 
+describe("AT-80 the Active cursor reveals no Post a reader cannot see", () => {
+  it("keeps page 1's cursor unchanged when a quarantined or pending Post is written", async () => {
+    await threads(3);
+    await reply(1, "2026-03-01T00:00:00Z");
+    const first = await feed("sort=active&limit=2");
+    expect(titles(first)).toEqual(["Thread 1", "Thread 3"]);
+    expect(typeof first.next_cursor).toBe("string");
+
+    // A quarantined Reply, a pending Reply, and a new Thread whose Opening Post is quarantined.
+    await reply(2, "2026-03-02T00:00:00Z", "quarantined");
+    await reply(3, "2026-03-03T00:00:00Z", "pending_review");
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)")
+        .bind(threadId(9), BOARD_ID, "2026-03-04T00:00:00Z"),
+      env.DB.prepare(
+        "INSERT INTO posts (id, thread_id, author_agent_id, title, caption, state, created_at) VALUES (?, ?, ?, 'Hidden thread', '', 'quarantined', ?)",
+      ).bind(openingId(9), threadId(9), AGENT_ID, "2026-03-04T00:00:00Z"),
+    ]);
+    const again = await feed("sort=active&limit=2");
+    expect(titles(again)).toEqual(["Thread 1", "Thread 3"]);
+    expect(again.next_cursor).toBe(first.next_cursor);
+
+    // The old cursor still pages the rest.
+    expect(titles(await feed(`limit=2&cursor=${first.next_cursor ?? ""}`))).toEqual(["Thread 2"]);
+
+    // Clearing the quarantined Reply makes it visible: page 1 now sees it.
+    await env.DB.prepare("UPDATE posts SET state = 'published' WHERE thread_id = ? AND title IS NULL").bind(threadId(2)).run();
+    const cleared = await feed("sort=active&limit=2");
+    expect(titles(cleared)).toEqual(["Thread 2", "Thread 1"]);
+    expect(cleared.next_cursor).not.toBe(first.next_cursor);
+  });
+});
+
 describe("AT-81 and AT-82 Admin pins", () => {
   it("lets only an Admin pin, through Access", async () => {
     await threads(2);
@@ -271,6 +304,52 @@ describe("AT-81 and AT-82 Admin pins", () => {
     // A pin changes no Post state.
     const states = await env.DB.prepare("SELECT DISTINCT state FROM posts").all<{ state: string }>();
     expect(states.results.map((row) => row.state)).toEqual(["published"]);
+  });
+
+  it("AT-81 writes one unpin_thread row when two unpins race, and the other is state_conflict", async () => {
+    await threads(2);
+    const pin = { action: "pin_thread", thread_id: threadId(1) };
+    const unpin = { action: "unpin_thread", thread_id: threadId(1) };
+    expect((await call("/v1/admin/pins", { email: ADMIN, body: pin })).status).toBe(200);
+    const raced = await Promise.all([
+      call("/v1/admin/pins", { email: ADMIN, body: unpin }),
+      call("/v1/admin/pins", { email: ADMIN, body: unpin }),
+    ]);
+    const outcomes = await Promise.all(raced.map(async (response) => {
+      const body = await response.json() as { error?: { code: string } };
+      return `${response.status} ${body.error?.code ?? "ok"}`;
+    }));
+    expect(outcomes.sort()).toEqual(["200 ok", "409 state_conflict"]);
+    // Back to back, the second is state_conflict too.
+    await expectCode(await call("/v1/admin/pins", { email: ADMIN, body: unpin }), 409, "state_conflict");
+    expect(await pinRows()).toEqual([]);
+    expect(sortRows(await audits())).toEqual(sortRows([
+      { action: "pin_thread", target_id: threadId(1), actor_email: ADMIN },
+      { action: "unpin_thread", target_id: threadId(1), actor_email: ADMIN },
+    ]));
+
+    // An unpin racing a replacement: the old Thread gets one unpin_thread row whichever wins.
+    expect((await call("/v1/admin/pins", { email: ADMIN, body: pin })).status).toBe(200);
+    const [unpinned, replaced] = await Promise.all([
+      call("/v1/admin/pins", { email: ADMIN, body: unpin }),
+      call("/v1/admin/pins", { email: ADMIN, body: { action: "pin_thread", thread_id: threadId(2) } }),
+    ]);
+    expect(replaced.status).toBe(200);
+    const replacedBody = await replaced.json() as { replaced_thread_id: string | null };
+    if (unpinned.status === 200) {
+      expect(replacedBody.replaced_thread_id).toBeNull();
+    } else {
+      await expectCode(unpinned, 409, "state_conflict");
+      expect(replacedBody.replaced_thread_id).toBe(threadId(1));
+    }
+    expect(await pinRows()).toEqual([{ board_id: BOARD_ID, thread_id: threadId(2) }]);
+    expect(sortRows(await audits())).toEqual(sortRows([
+      { action: "pin_thread", target_id: threadId(1), actor_email: ADMIN },
+      { action: "unpin_thread", target_id: threadId(1), actor_email: ADMIN },
+      { action: "pin_thread", target_id: threadId(1), actor_email: ADMIN },
+      { action: "unpin_thread", target_id: threadId(1), actor_email: ADMIN },
+      { action: "pin_thread", target_id: threadId(2), actor_email: ADMIN },
+    ]));
   });
 
   it("AT-82 does not show a pinned Thread whose Opening Post is quarantined", async () => {

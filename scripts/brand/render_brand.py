@@ -128,11 +128,13 @@ def main() -> None:
         draw_mark(size, 0.72 if size > 32 else 0.86, VOID).save(os.path.join(BRAND, f"mark-v2-{size}.png"), optimize=True)
     # Each favicon size is drawn at its own size, not scaled down from a big one.
     icons = [draw_mark(size, 0.86, VOID) for size in (64, 16, 32, 48)]
-    icons[0].save(
-        os.path.join(ROOT, "public", "favicon.ico"),
-        sizes=[(16, 16), (32, 32), (48, 48), (64, 64)],
-        append_images=icons[1:],
-    )
+    # The page links the versioned copy, cached for a year; /favicon.ico is cached for an hour.
+    for target in (os.path.join(BRAND, "favicon-v2.ico"), os.path.join(ROOT, "public", "favicon.ico")):
+        icons[0].save(
+            target,
+            sizes=[(16, 16), (32, 32), (48, 48), (64, 64)],
+            append_images=icons[1:],
+        )
     og_image().save(os.path.join(BRAND, "og-1200x630.png"), optimize=True)
 
 

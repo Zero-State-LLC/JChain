@@ -25,9 +25,10 @@ export function parseSort(raw: string | undefined): BoardSort | null | "malforme
 // Replies it is the newest visible Post. From BUMP_LIMIT on it is the BUMP_LIMIT-th visible
 // Reply, oldest first, so later Replies add nothing. A snapshot id leaves out Posts written
 // after the first page of an API listing, so later pages keep the order the first page saw.
-// The snapshot is the highest posts rowid committed when page 1 was read (codex review on #168):
-// a rowid is assigned when the row is inserted, so a Reply that commits later, even one whose id
-// was allocated earlier, is above it. Posts rows are never deleted, so rowids only grow.
+// The snapshot is the highest rowid of the Board's visible Posts when page 1 was read (codex
+// review on #168, v0.2.40): a rowid is assigned when the row is inserted, so a Reply that commits
+// later, even one whose id was allocated earlier, is above it. Posts rows are never deleted, so
+// rowids only grow.
 // The snapshot is a validated whole number, so it is inlined.
 export function bumpSql(opening: string, snapshot: number | null): string {
   if (snapshot !== null && !Number.isSafeInteger(snapshot)) throw new Error("bad snapshot");
@@ -44,9 +45,16 @@ export function bumpSql(opening: string, snapshot: number | null): string {
     ${opening}.created_at))`;
 }
 
-// The commit-order boundary for an Active listing: every Post inserted after this read is above it.
-export async function postsSnapshot(db: D1Database): Promise<number> {
-  const row = await db.prepare("SELECT COALESCE(MAX(rowid), 0) AS n FROM posts").first<{ n: number }>();
+// The commit-order boundary for an Active listing: the highest rowid of the Board's Posts a reader
+// sees (Visibility Projection). Every Post inserted after this read is above it, since rowids only
+// grow. Only visible Posts count, so the cursor does not reveal how many Posts were written that no
+// reader sees (independent review, v0.2.40): a quarantined or pending Post leaves it unchanged.
+export async function postsSnapshot(db: D1Database, boardId: string): Promise<number> {
+  const row = await db.prepare(
+    `SELECT COALESCE(MAX(posts.rowid), 0) AS n
+       FROM posts JOIN threads ON threads.id = posts.thread_id
+      WHERE threads.board_id = ? AND ${VISIBLE_POST}`,
+  ).bind(boardId).first<{ n: number }>();
   return Number(row?.n ?? 0);
 }
 

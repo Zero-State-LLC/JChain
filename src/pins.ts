@@ -100,19 +100,25 @@ export async function applyPin(db: D1Database, actor: string, action: PinAction,
   const now = utcSeconds();
   if (action === "unpin_thread") {
     if (thread.current !== thread.id) return { ok: false, code: "state_conflict", message: NOT_PINNED };
-    await db.batch([
+    // The audit row is written only while the pin row still exists, before the DELETE in the same
+    // batch, so of two racing unpins only the one that removes the pin writes a row; the other is
+    // state_conflict, as if it had read the Board after the first (independent review, v0.2.40).
+    const results = await db.batch([
+      unpinAudit(db, actor, thread.board_id, thread.id, now),
       db.prepare("DELETE FROM board_pins WHERE board_id = ? AND thread_id = ?").bind(thread.board_id, thread.id),
-      audit(db, actor, thread.id, "unpin_thread", now),
     ]);
+    if (changes(results[1]) === 0) return { ok: false, code: "state_conflict", message: NOT_PINNED };
     return { ok: true, boardId: thread.board_id, threadId: thread.id, pinned: false, replaced: null };
   }
   if (Number(thread.visible) !== 1) return { ok: false, code: "state_conflict", message: NOT_PUBLISHED };
   if (thread.current === thread.id) return { ok: false, code: "state_conflict", message: ALREADY };
   const statements: D1PreparedStatement[] = [];
+  // A replacement unpins the old Thread the same way: an unpin that raced ahead of this write
+  // already wrote that Thread's unpin_thread row, so this batch writes none for it.
   if (thread.current !== null) {
     statements.push(
+      unpinAudit(db, actor, thread.board_id, thread.current, now),
       db.prepare("DELETE FROM board_pins WHERE board_id = ? AND thread_id = ?").bind(thread.board_id, thread.current),
-      audit(db, actor, thread.current, "unpin_thread", now),
     );
   }
   statements.push(
@@ -120,8 +126,9 @@ export async function applyPin(db: D1Database, actor: string, action: PinAction,
       .bind(thread.board_id, thread.id, now),
     audit(db, actor, thread.id, "pin_thread", now),
   );
+  let results: D1Result[];
   try {
-    await db.batch(statements);
+    results = await db.batch(statements);
   } catch (error) {
     // A concurrent pin on the same Board won the primary key: nothing in this batch is kept.
     if (error instanceof Error && error.message.includes("UNIQUE")) {
@@ -129,7 +136,23 @@ export async function applyPin(db: D1Database, actor: string, action: PinAction,
     }
     throw error;
   }
-  return { ok: true, boardId: thread.board_id, threadId: thread.id, pinned: true, replaced: thread.current };
+  const replaced = thread.current !== null && changes(results[1]) > 0 ? thread.current : null;
+  return { ok: true, boardId: thread.board_id, threadId: thread.id, pinned: true, replaced };
+}
+
+function changes(result: D1Result | undefined): number {
+  return Number(result?.meta.changes ?? 0);
+}
+
+// The unpin_thread row, written only while the Board's pin row for the Thread exists.
+function unpinAudit(db: D1Database, actor: string, boardId: string, threadId: string, at: string): D1PreparedStatement {
+  return db.prepare(
+    `INSERT INTO moderation_actions (
+       id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
+     )
+     SELECT ?, ?, 'thread', ?, 'unpin_thread', 'rules', NULL, NULL, ?
+      WHERE EXISTS (SELECT 1 FROM board_pins WHERE board_id = ? AND thread_id = ?)`,
+  ).bind(uuidv7(), actor, threadId, at, boardId, threadId);
 }
 
 function audit(db: D1Database, actor: string, threadId: string, action: PinAction, at: string): D1PreparedStatement {
