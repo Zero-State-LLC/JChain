@@ -86,6 +86,8 @@ Images: 50 of 50 `ready`, all within 60 seconds; time to `ready` p50 3.2 s, p95 
 
 From production `post_scans` on 2026-10-24: 5 Posts scanned since the scan went live, all `safe`, none unscanned. Time from publish to scan result: 3 s for four, 5 s for one (second resolution), so median 3 s and the worst 5 s. Neurons per scan 16 to 20, 91 in all. Five is too few for a real p95; re-read it when there are 100 scans, and replace the scan's fixed neuron estimate with the measured figure then. No automatic quarantine has happened yet, so there is no quarantine-to-decision time.
 
+Re-read these figures on `/admin`, section **Content Scan (NFR-10)**, under the Gauges (AT-88). It reads the database on each load and shows, for the last 7 days and all time, scans by result, publish-to-scan median and p95, quarantine-to-decision median and p95, each with its sample size ("not enough data" below 20), neurons today and over 7 days against `moderation.ai_neurons_per_day`, automatic quarantines by source, and the oldest Post waiting in the Quarantined queue. Its line "Neurons per scan, all time" puts the recorded average next to the planning estimate and counts toward the 100 scans; replace the fixed estimate only when it reads 100 of 100.
+
 ## Restore drill
 
 `npm test` runs `drills the five incidents`. It logs `message` `restore drill` with each step's milliseconds and `rto_ms`. `nfr_04_achieved` is true when every step recovers and `rto_ms` is under 4 hours. The RPO of 24 hours is covered by D1 Time Travel, which keeps 30 days. The drill does not call a live restore.

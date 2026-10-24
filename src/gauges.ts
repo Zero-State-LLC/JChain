@@ -3,6 +3,7 @@
 import { escapeHtml } from "./html";
 import { utcSeconds } from "./ids";
 import type { Policy } from "./policy";
+import { MEDIA_MATCH_ACTOR } from "./quarantine";
 
 type GaugeEnv = Pick<Env, "DB" | "QUOTA">;
 
@@ -347,4 +348,236 @@ export function usageSection(rows: UsageRow[]): string {
       }).join("")
     }</tbody></table></div>`;
   return `<section aria-labelledby="admin-usage"><h2 id="admin-usage">Agent usage, last 7 days</h2>${body}</section>`;
+}
+
+// NFR-10 (Danny, 2026-10-24): the Content Scan section. Read from D1 on each load, over a rolling
+// 7 days and all time. Every sample list is bounded to the most recent SAMPLE_LIMIT rows.
+const SAMPLE_LIMIT = 5000;
+const MIN_SAMPLES = 20;
+const WEEK_DAYS = 7;
+// The planning figure in NFR-07b: about 27 neurons a Post. The RUNBOOK keeps the scan's fixed
+// estimate until there are ESTIMATE_REVIEW_SCANS scans; this page only shows the two side by side.
+const PLANNING_NEURONS_PER_SCAN = 27;
+const ESTIMATE_REVIEW_SCANS = 100;
+// Every stored time is ISO 8601 UTC, so `>= ''` keeps every row.
+const ALL_TIME = "";
+
+export type Percentiles = { n: number; median: number | null; p95: number | null };
+export type ScanCounts = { safe: number; unsafe: number; unscanned: number; pending: number };
+export type ScanGauges = {
+  counts: { week: ScanCounts; all: ScanCounts };
+  publishToScan: { week: Percentiles; all: Percentiles };
+  quarantineToDecision: { week: Percentiles; all: Percentiles };
+  neurons: { today: number; weekTotal: number; weekScans: number; allTotal: number; allScans: number };
+  quarantines: { scan: number; seat_agents: number; report: number };
+  oldestQuarantined: { since: string; seconds: number; waiting: number } | null;
+};
+
+// Which automatic path wrote a 'quarantine' audit row, from its actor: 'system' is the Content
+// Scan, 'seat_agent' a Seat Flag, and a report quarantine shares its actor and time with the
+// 'report' row of the same request (the CSAM Scanning Tool's source is also 'report').
+// NULL is a Moderator quarantine, which is not automatic. Every read below is one pass over the
+// audit rows with window functions, never a lookup per row, because the audit table has no index
+// on its target or actor.
+const CLASSIFIED = `tagged AS (
+     SELECT id, target_type, target_id, action, created_at, actor_email,
+            MAX(action = 'report') OVER (PARTITION BY actor_email, created_at) AS with_report
+       FROM moderation_actions
+      WHERE action IN ('quarantine', 'restore', 'remove', 'report')
+   ), classified AS (
+     SELECT id, target_id, action, created_at,
+            CASE
+              WHEN action != 'quarantine' THEN NULL
+              WHEN actor_email = 'system' THEN 'scan'
+              WHEN actor_email = 'seat_agent' THEN 'seat_agents'
+              WHEN actor_email = '${MEDIA_MATCH_ACTOR}' OR with_report = 1 THEN 'report'
+              ELSE NULL
+            END AS source
+       FROM tagged
+      WHERE target_type = 'post' AND action IN ('quarantine', 'restore', 'remove')
+   )`;
+
+function secondsBetween(from: string, to: string): string {
+  return `CAST(MAX(0, ROUND((julianday(${to}) - julianday(${from})) * 86400)) AS INTEGER)`;
+}
+
+const COUNTS_SQL = "SELECT result, COUNT(*) AS n FROM post_scans WHERE published_at >= ? GROUP BY result";
+// A result is safe or unsafe. An unscanned mark is not a scan result, so it is not a sample.
+const PUBLISH_TO_SCAN_SQL = `SELECT ${secondsBetween("published_at", "scanned_at")} AS s
+   FROM post_scans
+  WHERE result IN ('safe', 'unsafe') AND scanned_at IS NOT NULL AND scanned_at >= ?
+  ORDER BY scanned_at DESC LIMIT ${SAMPLE_LIMIT}`;
+const NEURONS_SQL = `SELECT COALESCE(SUM(neurons), 0) AS total, COUNT(*) AS scans
+   FROM post_scans WHERE result IN ('safe', 'unsafe') AND scanned_at >= ?`;
+const SOURCES_SQL = `WITH ${CLASSIFIED}
+   SELECT source, COUNT(*) AS n FROM classified
+    WHERE action = 'quarantine' AND source IS NOT NULL AND created_at >= ?
+    GROUP BY source`;
+// The pairing of the hide-to-decision log line, read back from the audit log. A Post's quarantine,
+// Clear (restore), and Archive (remove) rows are put in audit order (time, then id, which is time
+// ordered within a second). A Clear or Archive made in the window is a sample when the row just
+// before it is an automatic quarantine, so only the first decision closes a quarantine.
+const QUARANTINE_TO_DECISION_SQL = `WITH ${CLASSIFIED}, ordered AS (
+     SELECT id, action, created_at,
+            LAG(action) OVER by_post AS prev_action,
+            LAG(created_at) OVER by_post AS prev_at,
+            LAG(source) OVER by_post AS prev_source
+       FROM classified
+     WINDOW by_post AS (PARTITION BY target_id ORDER BY created_at, id)
+   )
+   SELECT ${secondsBetween("prev_at", "created_at")} AS s FROM ordered
+    WHERE action IN ('restore', 'remove') AND prev_action = 'quarantine' AND prev_source IS NOT NULL
+      AND created_at >= ?
+    ORDER BY created_at DESC, id DESC LIMIT ${SAMPLE_LIMIT}`;
+// The Quarantined queue is every quarantined Post. A Post waits from its latest quarantine.
+const OLDEST_QUARANTINED_SQL = `SELECT MIN(COALESCE(latest.at, posts.created_at)) AS since, COUNT(*) AS waiting
+   FROM posts
+   LEFT JOIN (
+     SELECT target_id, MAX(created_at) AS at FROM moderation_actions
+      WHERE target_type = 'post' AND action = 'quarantine'
+      GROUP BY target_id
+   ) AS latest ON latest.target_id = posts.id
+  WHERE posts.state = 'quarantined'`;
+
+function rowsOf(result: D1Result | undefined): Array<Record<string, unknown>> {
+  return (result?.results ?? []).filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null);
+}
+
+function firstOf(result: D1Result | undefined): Record<string, unknown> {
+  return rowsOf(result)[0] ?? {};
+}
+
+function scanCounts(result: D1Result | undefined): ScanCounts {
+  const counts: ScanCounts = { safe: 0, unsafe: 0, unscanned: 0, pending: 0 };
+  for (const row of rowsOf(result)) {
+    const key = row.result;
+    if (key === "safe" || key === "unsafe" || key === "unscanned" || key === "pending") counts[key] = num(row.n);
+  }
+  return counts;
+}
+
+// Nearest rank: the value at rank ceil(q * n) of the sorted samples. Fewer than MIN_SAMPLES is no figure.
+export function percentiles(values: number[]): Percentiles {
+  const sorted = [...values].sort((a, b) => a - b);
+  const n = sorted.length;
+  if (n < MIN_SAMPLES) return { n, median: null, p95: null };
+  const at = (q: number): number => sorted[Math.max(0, Math.ceil(q * n) - 1)] ?? 0;
+  return { n, median: at(0.5), p95: at(0.95) };
+}
+
+function samples(result: D1Result | undefined): number[] {
+  return rowsOf(result).map((row) => num(row.s));
+}
+
+export async function readScanGauges(db: D1Database, now = new Date()): Promise<ScanGauges> {
+  const today = utcSeconds(dayStart(now));
+  const week = utcSeconds(new Date(now.getTime() - WEEK_DAYS * 24 * 60 * 60 * 1000));
+  const [
+    countsWeek, countsAll, scanWeek, scanAll, neuronsToday, neuronsWeek, neuronsAll, sources,
+    decisionWeek, decisionAll, oldest,
+  ] = await db.batch([
+    db.prepare(COUNTS_SQL).bind(week),
+    db.prepare(COUNTS_SQL).bind(ALL_TIME),
+    db.prepare(PUBLISH_TO_SCAN_SQL).bind(week),
+    db.prepare(PUBLISH_TO_SCAN_SQL).bind(ALL_TIME),
+    db.prepare(NEURONS_SQL).bind(today),
+    db.prepare(NEURONS_SQL).bind(week),
+    db.prepare(NEURONS_SQL).bind(ALL_TIME),
+    db.prepare(SOURCES_SQL).bind(week),
+    db.prepare(QUARANTINE_TO_DECISION_SQL).bind(week),
+    db.prepare(QUARANTINE_TO_DECISION_SQL).bind(ALL_TIME),
+    db.prepare(OLDEST_QUARANTINED_SQL),
+  ]);
+  const quarantines = { scan: 0, seat_agents: 0, report: 0 };
+  for (const row of rowsOf(sources)) {
+    const key = row.source;
+    if (key === "scan" || key === "seat_agents" || key === "report") quarantines[key] = num(row.n);
+  }
+  const oldestRow = firstOf(oldest);
+  const since = typeof oldestRow.since === "string" ? oldestRow.since : null;
+  const sinceMs = since === null ? Number.NaN : Date.parse(since);
+  return {
+    counts: { week: scanCounts(countsWeek), all: scanCounts(countsAll) },
+    publishToScan: { week: percentiles(samples(scanWeek)), all: percentiles(samples(scanAll)) },
+    quarantineToDecision: { week: percentiles(samples(decisionWeek)), all: percentiles(samples(decisionAll)) },
+    neurons: {
+      today: num(firstOf(neuronsToday).total),
+      weekTotal: num(firstOf(neuronsWeek).total),
+      weekScans: num(firstOf(neuronsWeek).scans),
+      allTotal: num(firstOf(neuronsAll).total),
+      allScans: num(firstOf(neuronsAll).scans),
+    },
+    quarantines,
+    oldestQuarantined: since === null || Number.isNaN(sinceMs)
+      ? null
+      : { since, seconds: Math.max(0, Math.floor((now.getTime() - sinceMs) / 1000)), waiting: num(oldestRow.waiting) },
+  };
+}
+
+function percentileCell(value: Percentiles): string {
+  if (value.median === null || value.p95 === null) return `Not enough data (n = ${value.n}, needs ${MIN_SAMPLES})`;
+  return `median ${formatNumber(value.median)} s, p95 ${formatNumber(value.p95)} s (n = ${formatNumber(value.n)})`;
+}
+
+export function formatAge(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  if (s < 60) return `${s} s`;
+  const minutes = Math.floor(s / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ${minutes % 60} min`;
+  return `${Math.floor(hours / 24)} d ${hours % 24} h`;
+}
+
+const RESULT_LABELS: Array<[keyof ScanCounts, string]> = [
+  ["safe", "Safe"],
+  ["unsafe", "Unsafe"],
+  ["unscanned", "Unscanned"],
+  ["pending", "Pending"],
+];
+
+export function scanSection(data: ScanGauges, policy: Policy): string {
+  const limit = policy.moderation?.ai_neurons_per_day ?? null;
+  const counts = RESULT_LABELS.map(([key, label]) =>
+    `<tr><th scope="row">${label}</th><td class="num">${formatNumber(data.counts.week[key])}</td><td class="num">${formatNumber(data.counts.all[key])}</td></tr>`).join("");
+  const latency: Array<[string, { week: Percentiles; all: Percentiles }]> = [
+    ["Publish to scan result", data.publishToScan],
+    ["Quarantine to Moderator decision", data.quarantineToDecision],
+  ];
+  const latencyRows = latency.map(([label, value]) =>
+    `<tr><th scope="row">${label}</th><td>${percentileCell(value.week)}</td><td>${percentileCell(value.all)}</td></tr>`).join("");
+  const weekAverage = data.neurons.weekScans === 0 ? null : data.neurons.weekTotal / data.neurons.weekScans;
+  const neuronTiles: Gauge[] = [
+    { label: "Neurons recorded on scans today", used: data.neurons.today, limit },
+    { label: "Neurons, last 7 days", used: data.neurons.weekTotal, limit: limit === null ? null : limit * WEEK_DAYS },
+    weekAverage === null
+      ? { label: "Neurons per scan, 7-day average", used: null, limit: null, note: "No scans" }
+      : { label: `Neurons per scan, 7-day average of ${formatNumber(data.neurons.weekScans)} scans`, used: Number(weekAverage.toFixed(1)), limit: null },
+  ];
+  const sourceTiles: Gauge[] = [
+    { label: "Quarantined by the Content Scan, last 7 days", used: data.quarantines.scan, limit: null },
+    { label: "Quarantined by the Seat Agents, last 7 days", used: data.quarantines.seat_agents, limit: null },
+    { label: "Quarantined by a signed-in report, last 7 days", used: data.quarantines.report, limit: null },
+  ];
+  const oldest = data.oldestQuarantined;
+  const waiting = oldest === null
+    ? `<li><span class="num">None waiting</span> Oldest in the Quarantined queue</li>`
+    : `<li><span class="num">${escapeHtml(formatAge(oldest.seconds))}</span><span class="num"> since <time datetime="${escapeHtml(oldest.since)}">${escapeHtml(oldest.since)}</time>, ${formatNumber(oldest.waiting)} waiting</span> Oldest in the Quarantined queue</li>`;
+  const measured = data.neurons.allScans === 0
+    ? "no scans recorded yet"
+    : `average ${(data.neurons.allTotal / data.neurons.allScans).toLocaleString("en-US", { maximumFractionDigits: 1 })} over ${formatNumber(data.neurons.allScans)} scans`;
+  return [
+    `<section class="gauges" aria-labelledby="admin-scan"><h2 id="admin-scan">Content Scan (NFR-10)</h2>`,
+    `<p class="hint">Read on each load. Last 7 days is rolling, and each time reads at most the ${formatNumber(SAMPLE_LIMIT)} most recent samples. A median and p95 need ${MIN_SAMPLES} samples; n is the sample size. Times are whole seconds; today is UTC.</p>`,
+    `<h3>Scans by result</h3>`,
+    `<div class="scroll"><table class="usage"><thead><tr><th scope="col">Result</th><th scope="col">Last 7 days</th><th scope="col">All time</th></tr></thead><tbody>${counts}</tbody></table></div>`,
+    `<h3>Time to a result</h3>`,
+    `<div class="scroll"><table class="usage"><thead><tr><th scope="col">Measure</th><th scope="col">Last 7 days</th><th scope="col">All time</th></tr></thead><tbody>${latencyRows}</tbody></table></div>`,
+    `<h3>Neurons</h3>`,
+    `<ul>${neuronTiles.map(gaugeItem).join("")}</ul>`,
+    `<p>Neurons per scan, all time: ${measured}, next to the planning estimate of about ${PLANNING_NEURONS_PER_SCAN}. The scan keeps its fixed estimate until there are ${ESTIMATE_REVIEW_SCANS} scans (${formatNumber(Math.min(data.neurons.allScans, ESTIMATE_REVIEW_SCANS))} of ${ESTIMATE_REVIEW_SCANS}).</p>`,
+    `<h3>Automatic quarantines</h3>`,
+    `<ul>${sourceTiles.map(gaugeItem).join("")}${waiting}</ul>`,
+    "</section>",
+  ].join("");
 }
