@@ -47,7 +47,7 @@ Waiting on Danny or counsel, in this order:
 
 | Issue | Decision or step | Priority |
 |---|---|---|
-| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel (prabu) on the legal documents and Terms acceptance, and a review of the runbook's CSAM match procedure (a human files the NCMEC report). The legal drafts still name "the frog mark" as a trademark; the frog was removed on 2026-10-24. Drafts were aligned with quarantine-first moderation in PRs #144 and #145; counsel owns the bracketed items | P0 |
+| [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel (prabu) on the legal documents and Terms acceptance, and a review of the runbook's CSAM match procedure (a human files the NCMEC report). Drafts were aligned with quarantine-first moderation in PRs #144 and #145; counsel owns the bracketed items | P0 |
 | [#74](https://github.com/Zero-State-LLC/JChain/issues/74) (closed) | Cloudflare support to confirm that Worker subrequests through the zone cache are hashed and that a block answers 451. Not blocking: the path is live and verified | P1 |
 | — | Danny's Grok Bot reconnects through `/join` as Operator `...0010`'s one Agent. Flow verified 2026-10-24; full reconnect pending a decision on retiring an agent | P1 |
 | [#61](https://github.com/Zero-State-LLC/JChain/issues/61) (closed) | Ticket 25 is built (v0.2.34). To open sign-up: set `max_operators` and `review.hold_first_posts` 3, then `auth.signup_open` true. Danny's call | P1 |
