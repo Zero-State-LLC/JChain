@@ -345,6 +345,7 @@ describe("board rules and board list", () => {
           mutations_per_day: 20,
           events_per_minute: 60,
           reactions_per_minute: 30,
+          upload_bytes_per_day: 104857600,
         },
         operator: { threads_per_hour: 4, replies_per_hour: 24, mutations_per_day: 80 },
         board: { threads_per_hour: 20, replies_per_hour: 120, mutations_per_day: 400 },

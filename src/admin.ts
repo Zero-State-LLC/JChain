@@ -8,7 +8,7 @@ import {
   type BoardRow,
 } from "./boards";
 import { document, escapeHtml, htmlResult } from "./html";
-import { errorResponse, htmlResponse, type ErrorCode } from "./http";
+import { ERRORS, errorResponse, htmlResponse, type ErrorCode } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
@@ -302,17 +302,10 @@ function refuse(c: Ctx, requestId: string, code: ErrorCode): Response {
   return errorResponse(requestId, code);
 }
 
+// Round-2 audit finding 13: the page carries the code's own status and message from ERRORS, so
+// access_required is 401 and not_enrolled says so, as the JSON answer does.
 function htmlRefuse(requestId: string, code: ErrorCode): Response {
-  const status = code === "not_found" ? 404 : code === "malformed" ? 400 : code === "validation_failed" ? 422 : code === "policy_missing" ? 503 : 403;
-  const message = code === "forbidden"
-    ? "This action is outside the caller's role."
-    : code === "not_found"
-      ? "Not found."
-      : code === "malformed"
-        ? "The request is malformed."
-        : code === "validation_failed"
-          ? "The request failed validation."
-          : "Policy is not available.";
+  const { status, message } = ERRORS[code];
   return htmlResponse(requestId, document("Admin", `<h1>Admin</h1><p>${escapeHtml(message)}</p><p><a href="/boards">Boards</a></p>`), status);
 }
 

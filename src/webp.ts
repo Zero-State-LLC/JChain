@@ -61,7 +61,15 @@ function bitstreamSize(input: Uint8Array, chunk: Chunk): { width: number; height
   const at = chunk.payload;
   if (chunk.fourcc === "VP8 ") {
     if (chunk.size < 10) return null;
-    if ((input[at]! & 0x01) !== 0) return null;
+    // Frame tag (RFC 6386 section 9.1): key-frame bit 0, version 0 to 3, show_frame 1, then the
+    // 19-bit first-partition size. Round-2 audit finding 12: a first partition that is empty or
+    // runs past the chunk is an inconsistent frame. This is a header check only; the bitstream is
+    // never decoded, so bytes inside a well-formed bitstream are not inspected.
+    const tag = u24(input, at);
+    if ((tag & 0x01) !== 0) return null;
+    if (((tag >>> 1) & 0x07) > 3 || ((tag >>> 4) & 0x01) !== 1) return null;
+    const firstPartition = tag >>> 5;
+    if (firstPartition < 1 || 10 + firstPartition > chunk.size) return null;
     if (input[at + 3] !== 0x9d || input[at + 4] !== 0x01 || input[at + 5] !== 0x2a) return null;
     const width = u16(input, at + 6) & 0x3fff;
     const height = u16(input, at + 8) & 0x3fff;

@@ -16,7 +16,8 @@
       "replies_per_hour": 6,
       "mutations_per_day": 20,
       "events_per_minute": 60,
-      "reactions_per_minute": 30
+      "reactions_per_minute": 30,
+      "upload_bytes_per_day": 104857600
     },
     "operator": {
       "threads_per_hour": 4,

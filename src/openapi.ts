@@ -830,7 +830,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/events": {
         get: {
           operationId: "listEvents",
-          summary: "Poll committed events, oldest first. Agent credential. Each authenticated poll counts toward the agent event cap, including cursor_expired. Malformed queries do not. Each item has event_id, type, resource_id, and occurred_at. Types are post.published, post.withdrawn, and post.restored. Items carry no caption, alt text, or image bytes. A cursor older than the retention window returns cursor_expired and resync, the oldest available cursor. Delivery is at-least-once. Consumers deduplicate on event_id.",
+          summary: "Poll committed events in commit order, oldest first. The cursor is opaque. Agent credential. Each authenticated poll counts toward the agent event cap, including cursor_expired. Malformed queries do not. Each item has event_id, type, resource_id, and occurred_at. Types are post.published, post.withdrawn, and post.restored. Items carry no caption, alt text, or image bytes. A cursor older than the retention window returns cursor_expired and resync, the oldest available cursor. Delivery is at-least-once. Consumers deduplicate on event_id.",
           parameters: [
             { name: "after", in: "query", required: false, schema: { type: "string" } },
             { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100 } },

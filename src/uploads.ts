@@ -13,7 +13,7 @@ import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency
 import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import type { Policy } from "./policy";
 import { requireAgent, requireModerator } from "./principal";
-import { agentError, logRejected, processingHeadroom, rateLimited, readAgentLimits } from "./quota";
+import { agentError, chargeUploadBytes, logRejected, processingHeadroom, rateLimited, readAgentLimits } from "./quota";
 import { type AssetReader, projectAsset } from "./visibility";
 
 type UploadEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
@@ -109,6 +109,16 @@ async function reserve(c: Ctx): Promise<Response> {
     return rateLimited(requestId, await readAgentLimits(c.env, policy, principal.agentId), blocked.retryAfter);
   }
 
+  // Round-2 audit findings 4 and 5: the declared display and thumbnail bytes count toward the
+  // Agent's upload_bytes_per_day window before anything is reserved. Staged bytes never exceed
+  // what was declared, so this also bounds what the Agent can stage, stored or rejected.
+  const uploadBytes = parsed.byteSize + (parsed.thumb?.byteSize ?? 0);
+  const uploadWindow = await chargeUploadBytes(c.env, policy, principal.agentId, uploadBytes);
+  if (!uploadWindow.ok) {
+    logRejected(principal.agentId, "agent", "upload_bytes");
+    return rateLimited(requestId, await readAgentLimits(c.env, policy, principal.agentId), uploadWindow.retryAfter);
+  }
+
   const assetId = uuidv7();
   const token = await newUploadToken();
   const createdAt = utcSeconds();
@@ -135,7 +145,7 @@ async function reserve(c: Ctx): Promise<Response> {
     c.env.DB.prepare(
       "INSERT INTO upload_tokens (asset_id, token_hash, expires_at) VALUES (?, ?, ?)",
     ).bind(assetId, await sha256Hex(token), expiresAt),
-  ], { upload_token: token });
+  ], { upload_token: token }, uploadWindow.refund);
 }
 
 // Replaces the stored token hash so the earlier token stops working. Only a live reservation is reissued.
@@ -206,13 +216,13 @@ async function putPart(c: Ctx, part: Part): Promise<Response> {
 
   const sniffed = sniffedType(capped.bytes);
   if (sniffed === null) {
-    return rejectUpload(c, part, reservation.agent_id, route, key, bodyHash, assetId, "unsupported_type", "unsupported_media", capped.bytes);
+    return rejectUpload(c, reservation.agent_id, route, key, bodyHash, assetId, "unsupported_type", "unsupported_media");
   }
   if (sniffed !== reservation.content_type) {
-    return rejectUpload(c, part, reservation.agent_id, route, key, bodyHash, assetId, "signature_mismatch", "validation_failed", capped.bytes);
+    return rejectUpload(c, reservation.agent_id, route, key, bodyHash, assetId, "signature_mismatch", "validation_failed");
   }
   if (isAnimated(capped.bytes, sniffed)) {
-    return rejectUpload(c, part, reservation.agent_id, route, key, bodyHash, assetId, "animated", "validation_failed", capped.bytes);
+    return rejectUpload(c, reservation.agent_id, route, key, bodyHash, assetId, "animated", "validation_failed");
   }
 
   const blocked = await processingHeadroom(c.env, policy);
@@ -426,6 +436,8 @@ async function remember(
   outcome: Outcome,
   statements: D1PreparedStatement[],
   reveal: Record<string, unknown> = {},
+  // Refunds a charge taken for this request when none of its writes committed.
+  refund: () => Promise<void> = async () => {},
 ): Promise<Response> {
   if (outcome.body.limits === undefined) outcome.body.limits = await readAgentLimits(env, policy, agentId);
   statements.push(idempotencyInsert(
@@ -442,6 +454,7 @@ async function remember(
     await env.DB.batch(statements);
   } catch (error) {
     // A concurrent request with the same key committed first; the batch is atomic, so none of ours did.
+    await refund();
     if (!(error instanceof Error && error.message.includes("UNIQUE"))) throw error;
     const raced = await readIdempotency(env.DB, agentId, route, key, bodyHash);
     if (raced.action === "conflict") return agentError(env, policy, requestId, agentId, "idempotency_conflict");
@@ -456,7 +469,6 @@ async function remember(
 
 async function rejectUpload(
   c: Ctx,
-  part: Part,
   agentId: string,
   route: string,
   key: string,
@@ -464,14 +476,14 @@ async function rejectUpload(
   assetId: string,
   reason: ReasonCode,
   code: ErrorCode,
-  bytes: Uint8Array,
 ): Promise<Response> {
-  await c.env.MEDIA.put(part.stagedKey(assetId), bytes, { httpMetadata: { contentType: "application/octet-stream" } });
+  // Round-2 audit finding 5: bytes rejected at PUT time (unsupported type, signature mismatch,
+  // animation) are never written to R2. The Asset is rejected with its reason and nothing staged.
   const requestId = c.get("requestId");
   const outcome = failure(code);
   return remember(c.env, requestId, c.get("policy"), agentId, route, key, bodyHash, outcome, [
     c.env.DB.prepare(
-      `UPDATE assets SET state = 'rejected', reason_code = ?, rejected_at = ?, ${part.storedColumn} = 1 WHERE id = ? AND state = 'reserved'`,
+      "UPDATE assets SET state = 'rejected', reason_code = ?, rejected_at = ? WHERE id = ? AND state = 'reserved'",
     ).bind(reason, utcSeconds(), assetId),
   ]);
 }

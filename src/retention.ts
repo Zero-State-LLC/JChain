@@ -41,6 +41,15 @@ export type RetentionResult = {
 };
 
 const UPLOAD_ALERT_SECONDS = 300;
+
+// Asset retention guards, on an `assets` row. Retention never deletes an Asset a legal-hold Post
+// references (any state), a quarantined Asset a quarantined Post still waits on, or a ready Asset
+// any Post references.
+const NO_HELD_POST = `NOT EXISTS (
+  SELECT 1 FROM posts WHERE posts.asset_id = assets.id AND posts.legal_hold = 1)`;
+const NO_WAITING_POST = `NOT EXISTS (
+  SELECT 1 FROM posts WHERE posts.asset_id = assets.id AND posts.state = 'quarantined')`;
+const NO_POST = "NOT EXISTS (SELECT 1 FROM posts WHERE posts.asset_id = assets.id)";
 const REVIEW_ALERT_SECONDS = 3600;
 
 export async function runRetention(env: RetentionEnv, now: number): Promise<RetentionResult> {
@@ -155,7 +164,11 @@ async function redactAudit(
 //   after created_at + reservation_hours;
 // - reserved and never completed, RESERVATION_GRACE_HOURS after expires_at
 //   (reservation_hours after reserve);
+// - ready and referenced by no Post, retention.rejected_upload_days after
+//   created_at (round-2 audit finding 4);
 // - deletion_pending left by an interrupted run, at any age.
+// A quarantined Asset that a quarantined Post still references waits for the
+// Moderator's Clear or Archive and is never aged (v0.2.36 quarantine-first).
 // Stored derivative bytes are refunded to the global r2_bytes counter once per
 // Asset, before the R2 delete, so a repeated run neither loses nor doubles it.
 async function deleteExpiredAssets(env: RetentionEnv, policy: Policy, now: number): Promise<number> {
@@ -176,23 +189,32 @@ async function deleteExpiredAssets(env: RetentionEnv, policy: Policy, now: numbe
          OR (state = 'quarantined' AND COALESCE(
               quarantined_at,
               (SELECT MAX(created_at) FROM moderation_actions
-                WHERE target_type = 'asset' AND target_id = assets.id AND action = 'quarantine_asset')) < ?))
-      AND NOT EXISTS (
-        SELECT 1 FROM posts WHERE posts.asset_id = assets.id AND posts.legal_hold = 1
-      )
+                WHERE target_type = 'asset' AND target_id = assets.id AND action = 'quarantine_asset')) < ?
+            AND ${NO_WAITING_POST})
+         OR (state = 'ready' AND created_at < ? AND ${NO_POST}))
+      AND ${NO_HELD_POST}
       ORDER BY created_at, id
       LIMIT ?`,
-  ).bind(reservationCutoff, keepCutoff, legacyRejectedCutoff, keepCutoff, RETENTION_BATCH).all<{ id: string }>();
-  const ids = (listed.results ?? []).map((row) => row.id);
+  ).bind(reservationCutoff, keepCutoff, legacyRejectedCutoff, keepCutoff, keepCutoff, RETENTION_BATCH).all<{ id: string }>();
+  const candidates = (listed.results ?? []).map((row) => row.id);
+  if (candidates.length === 0) return 0;
+  const listedPlaceholders = candidates.map(() => "?").join(", ");
+  // The guards are re-checked in the write, so a Post that took a ready Asset, or a quarantine of
+  // a Post, between the read and this write keeps the Asset.
+  await env.DB.prepare(
+    `UPDATE assets SET state = 'deletion_pending'
+      WHERE id IN (${listedPlaceholders}) AND ${NO_HELD_POST}
+        AND (state IN ('reserved', 'rejected')
+          OR (state = 'quarantined' AND ${NO_WAITING_POST})
+          OR (state = 'ready' AND ${NO_POST}))`,
+  ).bind(...candidates).run();
+  const pending = await env.DB.prepare(
+    `SELECT id FROM assets WHERE id IN (${listedPlaceholders}) AND state = 'deletion_pending' ORDER BY created_at, id`,
+  ).bind(...candidates).all<{ id: string }>();
+  const ids = (pending.results ?? []).map((row) => row.id);
   if (ids.length === 0) return 0;
   const placeholders = ids.map(() => "?").join(", ");
-  await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE assets SET state = 'deletion_pending'
-        WHERE id IN (${placeholders}) AND state IN ('reserved', 'rejected', 'quarantined')`,
-    ).bind(...ids),
-    env.DB.prepare(`DELETE FROM upload_tokens WHERE asset_id IN (${placeholders})`).bind(...ids),
-  ]);
+  await env.DB.prepare(`DELETE FROM upload_tokens WHERE asset_id IN (${placeholders})`).bind(...ids).run();
   for (const id of ids) await refundDerivatives(env, id);
   await env.MEDIA.delete(ids.flatMap((id) => [
     originalKey(id),
