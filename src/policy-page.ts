@@ -19,6 +19,8 @@ const BINDINGS: Array<{ name: string; what: string; need: Need; kind: "object" |
   { name: "CF_ANALYTICS_TOKEN", what: "Secret for the Cloudflare gauges", need: "optional", kind: "text" },
   { name: "CF_ACCOUNT_ID", what: "Account id for the Cloudflare gauges", need: "optional", kind: "text" },
   { name: "D1_DATABASE_ID", what: "Database id for the Cloudflare gauges", need: "optional", kind: "text" },
+  { name: "MEDIA_ORIGIN", what: "Zone-cached image origin for the CSAM Scanning Tool", need: "optional", kind: "text" },
+  { name: "MEDIA_ORIGIN_KEY", what: "Secret header value the image origin's WAF rule requires", need: "optional", kind: "text" },
   { name: "BUILD_SHA", what: "Deployed commit, shown on /version", need: "optional", kind: "text" },
 ];
 
