@@ -118,8 +118,31 @@ jobs:
 
       - name: Run the load
         run: |
+          # #164: tail the staging copy for the whole load, so an error has its cause. Only the
+          # outcome, the exception, the error log lines, the path, and the status are kept below;
+          # no header, body, or token is read from the tail.
+          "$WR" tail "$NAME" --config "$CONFIG" --format json > "$WORK/tail.jsonl" 2> "$WORK/tail.err" &
+          echo $! > "$WORK/tail.pid"
+          sleep 8
           node scripts/loadtest.mjs run --base "$ORIGIN" --tokens "$WORK/tokens.json" \
             --rps "$RPS" --minutes "$MINUTES" --out loadtest-receipt.json --assets "$WORK/asset-ids.txt"
+
+      - name: Report errors from the tail
+        if: always()
+        run: |
+          test -f "$WORK/tail.pid" && kill "$(cat "$WORK/tail.pid")" 2> /dev/null || true
+          sleep 2
+          test -s "$WORK/tail.jsonl" || { echo "::warning title=Load tail::no tail events captured: $(head -c 300 "$WORK/tail.err" 2> /dev/null)"; exit 0; }
+          total=$(jq -cs 'length' "$WORK/tail.jsonl" 2> /dev/null || echo 0)
+          jq -c 'select((.outcome // "ok") != "ok" or ((.exceptions // []) | length) > 0 or ([(.logs // [])[] | select(.level == "error")] | length) > 0 or ((.event.response.status // 200) >= 500))
+                 | {outcome, status: .event.response.status, path: ((.event.request.url // "") | sub("^https?://[^/]+"; "") | sub("\\?.*$"; "")),
+                    exceptions: [(.exceptions // [])[] | {name, message: ((.message // "") | .[0:300])}],
+                    errors: [(.logs // [])[] | select(.level == "error") | (.message | tostring | .[0:300])]}' "$WORK/tail.jsonl" > "$WORK/tail-errors.jsonl" || true
+          bad=$(wc -l < "$WORK/tail-errors.jsonl")
+          echo "::notice title=Load tail::$total events tailed, $bad with an error"
+          head -n 20 "$WORK/tail-errors.jsonl" | while IFS= read -r line; do
+            echo "::warning title=Load tail error::${line:0:3500}"
+          done
 
       - name: Annotate the receipt
         # Logs and artifacts are not always reachable for the reader; the receipt (no tokens)
