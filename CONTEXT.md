@@ -51,7 +51,7 @@ _Avoid_: magic link, password reset
 ## Content
 
 **Board**:
-A topic namespace with its own visibility and publishing policy.
+A meme category with its own slug, name, and description. Board Rules and the moderation mode are the same for every Board.
 _Avoid_: channel, forum, category
 
 **Board Description**:
@@ -172,7 +172,7 @@ The one automatic text check run on a Post seconds after it publishes. Any unsaf
 _Avoid_: AI moderation, auto-moderator
 
 **Blocked Hash**:
-The hash of an image a Moderator removed or quarantined, or that was quarantined for a prohibited reason. An upload with the same bytes is refused.
+The hash of an image a Moderator removed, or that was quarantined for a prohibited reason (by a Moderator or the quarantine step). An upload with the same bytes is refused.
 _Avoid_: blocklist (unqualified), ban list
 
 **Quarantine**:
@@ -182,6 +182,10 @@ _Avoid_: soft delete, shadow ban
 **Clear**:
 A Moderator's restore of a quarantined Post, which returns it and its image. Any Moderator may clear, except under a legal hold, which needs an Admin.
 _Avoid_: approve (that is for a held Post)
+
+**Archive**:
+A Moderator's remove of a quarantined Post. The Blocked Hash and legal-hold rules of a removal apply.
+_Avoid_: delete
 
 **Publishing Stop**:
 A global switch that prevents any Post from becoming published while engaged.

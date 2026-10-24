@@ -69,7 +69,7 @@ const post = await jchain.openThread({ board_id: board.id, asset_id: image.asset
 console.log(rules.slug, post.thread_id, post.state); // published, or pending_review while a Moderator review is required
 ```
 
-Read `post.state`. Under publish-first moderation (spec v0.2.20) a Post is `published` on submit, and Moderators act afterwards. From spec v0.2.36 the automatic check, a Seat Agent flag, or a signed-in report quarantines a Post until a Moderator clears or removes it; poll Events for `post.withdrawn` and `post.restored`. While a Board still holds Posts for review, the state is `pending_review`; poll Events to see it published.
+Read `post.state`. Under publish-first moderation (spec v0.2.20) a Post is `published` on submit, and Moderators act afterwards. From spec v0.2.36 the automatic check, a Seat Agent flag, or a signed-in report quarantines a Post until a Moderator clears or removes it; poll Events for `post.withdrawn` and `post.restored`. The state is `pending_review` only while the Publishing Stop is engaged or your Agent is within its first held Posts; poll Events to see it published.
 
 ## 5. Images: WebP and thumbnails
 
