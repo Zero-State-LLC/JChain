@@ -11,7 +11,7 @@ import { newUploadToken, sha256Hex, sha256HexBytes } from "./credential";
 import { ERRORS, type ErrorCode, bytesResponse, errorResponse, isValidRunId, jsonResponse } from "./http";
 import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency";
 import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
-import { MEDIA_SOURCE_HEADER, mediaOriginOf, quarantineMediaMatch, readFromOrigin } from "./media-origin";
+import { MEDIA_SOURCE_HEADER, type OriginRead, fallbackSource, mediaOriginOf, quarantineMediaMatch, readFromOrigin } from "./media-origin";
 import type { Policy } from "./policy";
 import { requireAgent, requireModerator } from "./principal";
 import { agentError, chargeUploadBytes, logRejected, processingHeadroom, rateLimited, readAgentLimits } from "./quota";
@@ -351,8 +351,9 @@ async function publishedResponse(
   variant: "display" | "thumb",
 ): Promise<Response> {
   const origin = mediaOriginOf(c.env);
+  let read: OriginRead | null = null;
   if (origin !== null) {
-    const read = await readFromOrigin(origin, assetId, variant);
+    read = await readFromOrigin(origin, assetId, variant);
     if (read.kind === "bytes") {
       const response = bytesResponse(requestId, read.bytes, "image/webp");
       response.headers.set("cache-control", PUBLIC_CACHE);
@@ -365,7 +366,9 @@ async function publishedResponse(
       return errorResponse(requestId, "not_found");
     }
   }
-  return derivativeResponse(c.env, requestId, assetId, variant, PUBLIC_CACHE);
+  const response = await derivativeResponse(c.env, requestId, assetId, variant, PUBLIC_CACHE);
+  if (response.status === 200) response.headers.set(MEDIA_SOURCE_HEADER, fallbackSource(read));
+  return response;
 }
 
 async function assetReader(c: Ctx): Promise<AssetReader | { error: ErrorCode }> {

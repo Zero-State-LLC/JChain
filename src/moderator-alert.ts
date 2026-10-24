@@ -5,6 +5,7 @@
 // alert per 15 minutes service-wide; a suppressed alert sends nothing, and the next one counts
 // everything waiting. Every email counts toward auth.emails_per_day. Addresses are never logged.
 import type { Policy } from "./policy";
+import { MEDIA_MATCH_ACTOR } from "./quarantine";
 import { chargeSignInEmail } from "./quota";
 import { mailerOf, type MailMessage } from "./session";
 
@@ -23,6 +24,7 @@ const SOURCE_NAMES: Readonly<Record<string, string>> = {
   scan: "content scan",
   seat_agents: "Seat Agent flag",
   report: "signed-in report",
+  csam_tool: "CSAM Scanning Tool match",
 };
 
 // Returns how many emails were sent. Never throws: a failure here never touches the quarantine.
@@ -53,14 +55,15 @@ export async function alertModerators(
       return 0;
     }
     const latest = await env.DB.prepare(
-      `SELECT posts.quarantined_by AS source, moderation_actions.reason_code AS reason
+      `SELECT CASE WHEN moderation_actions.actor_email = ? THEN 'csam_tool' ELSE posts.quarantined_by END AS source,
+              moderation_actions.reason_code AS reason
          FROM posts
          JOIN moderation_actions ON moderation_actions.target_type = 'post'
           AND moderation_actions.target_id = posts.id AND moderation_actions.action = 'quarantine'
         WHERE posts.state = 'quarantined'
         ORDER BY moderation_actions.created_at DESC, moderation_actions.id DESC
         LIMIT 1`,
-    ).first<{ source: string | null; reason: string }>();
+    ).bind(MEDIA_MATCH_ACTOR).first<{ source: string | null; reason: string }>();
     const listed = await env.DB.prepare("SELECT email FROM moderators ORDER BY email").all<{ email: string }>();
     const link = new URL("/moderation", policy.site_origin).toString();
     let sent = 0;

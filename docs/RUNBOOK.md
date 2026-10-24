@@ -107,7 +107,7 @@ Rotating the secret: change the WAF rule and the Worker secret together. In betw
 
 ### Verification after a deploy
 
-1. `curl -sI "https://j-chain.net/v1/assets/<published-asset-id>/content?variant=display"` twice. Both show `cache-control: public, max-age=300`. The second shows `x-jchain-media: origin-hit` (the first may be `origin-miss`). `x-jchain-media: r2` means the origin is not configured or failed: search Workers Logs for `media_origin_fallback`, which names the status.
+1. `curl -sI "https://j-chain.net/v1/assets/<published-asset-id>/content?variant=display"` twice. Both show `cache-control: public, max-age=300`. The second shows `x-jchain-media: origin-hit` (the first may be `origin-miss`). `x-jchain-media: r2` means the origin is not configured (the secret is unset). `r2-fallback-403` means the origin refused the Worker: the secret does not match the WAF rule (set it again with `printf %s`, never `echo`, which adds a newline). `r2-fallback-error` or another status: search Workers Logs for `media_origin_fallback`.
 2. `curl -sI "https://img-origin.j-chain.net/derivatives/<asset-id>/display"` without the header gets `403` from the WAF rule. Anything else means the origin is open to the public: fix the WAF rule first.
 3. Repeat step 1 with an Asset that has no published Post. The response is `404` or `401` with `cache-control: no-store`, and no `x-jchain-media` header.
 4. Confirm no Cache Rule gives `j-chain.net/v1/assets/` a longer edge TTL than the 300 second max-age. The one-day TTL applies only to `img-origin.j-chain.net`, which the public cannot read. Purge a `j-chain.net` image URL by hand if a prohibited image was cached there before the Post left `published`.

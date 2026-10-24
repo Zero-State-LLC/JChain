@@ -109,7 +109,7 @@ describe("AT-78 published images come through the zone-cached origin", () => {
     const response = await call(contentPath(seeded.assetId, "display"), { env: originEnv() });
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("public, max-age=300");
-    expect(response.headers.get("x-jchain-media")).toBe("r2");
+    expect(response.headers.get("x-jchain-media")).toBe("r2-fallback-500");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(R2_BYTES);
     const lines = warned.mock.calls.map((args) => String(args[0]));
     expect(lines).toContain(JSON.stringify({ event: "media_origin_fallback", status: 500, asset_id: seeded.assetId }));
@@ -125,7 +125,7 @@ describe("AT-78 published images come through the zone-cached origin", () => {
     const seeded = await seedPost(author.agentId);
     const response = await call(contentPath(seeded.assetId, "display"), { env: originEnv() });
     expect(response.status).toBe(200);
-    expect(response.headers.get("x-jchain-media")).toBe("r2");
+    expect(response.headers.get("x-jchain-media")).toBe("r2-fallback-error");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(R2_BYTES);
     const lines = warned.mock.calls.map((args) => String(args[0]));
     expect(lines).toContain(JSON.stringify({ event: "media_origin_fallback", status: null, asset_id: seeded.assetId }));
@@ -168,7 +168,7 @@ describe("AT-78 a CSAM Scanning Tool block (451) fails closed", () => {
 
     for (const postId of [seeded.postId, sibling]) {
       expect(await postRow(postId)).toEqual({ state: "quarantined", quarantined_by: "report", queue_first: 1, legal_hold: 1 });
-      expect(await audit(postId)).toEqual([{ actor_email: "system", action: "quarantine", reason_code: "csam" }]);
+      expect(await audit(postId)).toEqual([{ actor_email: "csam-scanning-tool", action: "quarantine", reason_code: "csam" }]);
       expect(await withdrawn(postId)).toBe(1);
     }
     expect((await assetRow(seeded.assetId))?.state).toBe("quarantined");
@@ -178,6 +178,7 @@ describe("AT-78 a CSAM Scanning Tool block (451) fails closed", () => {
     expect(sent).toHaveLength(3);
     expect(sent.every((message) => message.subject === ALERT_SUBJECT)).toBe(true);
     expect(sent.some((message) => message.text.includes(seeded.assetId))).toBe(false);
+    expect(sent[0]?.text).toContain("CSAM Scanning Tool match");
 
     // The bytes stay unservable, and a quarantined Asset never reaches the origin again.
     await expectError(await call(path, { env: target }), 404, "not_found");

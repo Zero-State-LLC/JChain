@@ -7,6 +7,10 @@ import { uuidv7 } from "./ids";
 
 export type QuarantineSource = "scan" | "seat_agents" | "report";
 
+// v0.2.37 (#74): the audit actor of a CSAM Scanning Tool block, so the Moderator email and the
+// moderation page can name it. Its source is 'report' only so the author cannot appeal it.
+export const MEDIA_MATCH_ACTOR = "csam-scanning-tool";
+
 export type QuarantinePlan = {
   postId: string;
   assetId: string | null;
