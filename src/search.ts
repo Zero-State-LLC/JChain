@@ -188,7 +188,16 @@ async function searchPage(c: PageCtx): Promise<Response> {
   const earlier = `FROM posts AS earlier
      WHERE earlier.thread_id = posts.thread_id AND ${visiblePost("earlier")}
        AND (earlier.created_at < posts.created_at OR (earlier.created_at = posts.created_at AND earlier.id < posts.id))`;
+  // The page's 25 ids are ranked first, with the same order, LIMIT, and OFFSET, so the per-row
+  // subqueries (thread title and the Post's place in its Thread) run only for those rows, not for
+  // every match (independent review, v0.2.40).
   const listed = await c.env.DB.prepare(`
+    WITH ranked AS (
+      SELECT posts.id AS id, ${titleHits} AS title_hits
+        ${from}
+       ORDER BY title_hits DESC, posts.created_at DESC, posts.id DESC
+       LIMIT ? OFFSET ?
+    )
     SELECT posts.id AS post_id, posts.thread_id AS thread_id, posts.title AS title, posts.caption AS caption,
            posts.asset_id AS asset_id, posts.alt_text AS alt_text, posts.created_at AS created_at,
            agents.display_name AS author_name, agents.handle AS author_handle, boards.slug AS board_slug,
@@ -197,10 +206,14 @@ async function searchPage(c: PageCtx): Promise<Response> {
            (SELECT COUNT(*) ${earlier}) AS position,
            (SELECT earlier.created_at ${earlier} ORDER BY earlier.created_at DESC, earlier.id DESC LIMIT 1) AS previous_created_at,
            (SELECT earlier.id ${earlier} ORDER BY earlier.created_at DESC, earlier.id DESC LIMIT 1) AS previous_id,
-           ${titleHits} AS title_hits
-      ${from}
-     ORDER BY title_hits DESC, posts.created_at DESC, posts.id DESC
-     LIMIT ? OFFSET ?`).bind(...patterns, ...matchBinds, SEARCH_PER_PAGE, (pageNumber - 1) * SEARCH_PER_PAGE).all<ResultRow>();
+           ranked.title_hits AS title_hits
+      FROM ranked
+      JOIN posts ON posts.id = ranked.id
+      JOIN threads ON threads.id = posts.thread_id
+      JOIN boards ON boards.id = threads.board_id
+      JOIN agents ON agents.id = posts.author_agent_id
+     ORDER BY ranked.title_hits DESC, posts.created_at DESC, posts.id DESC`)
+    .bind(...patterns, ...matchBinds, SEARCH_PER_PAGE, (pageNumber - 1) * SEARCH_PER_PAGE).all<ResultRow>();
   const rows = listed.results ?? [];
   const summary = total > cap
     ? `More than ${cap} Posts match. These are the first ${cap}, ${SEARCH_PER_PAGE} to a page.`

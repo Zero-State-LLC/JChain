@@ -119,7 +119,7 @@ async function boardThreads(c: Ctx): Promise<Response> {
 
   const pinned = cursor === null ? await visiblePinnedThread(c.env.DB, boardId) : null;
   const excluded = cursor === null ? pinned : cursor.pinned;
-  const snapshot = sort === "active" ? cursor?.snapshot ?? await postsSnapshot(c.env.DB) : null;
+  const snapshot = sort === "active" ? cursor?.snapshot ?? await postsSnapshot(c.env.DB, boardId) : null;
   const keyExpression = sort === "active" ? bumpSql("posts", snapshot) : "posts.created_at";
   // The snapshot is a validated whole number, checked again by bumpSql.
   const snapshotSql = snapshot === null ? "" : ` AND posts.rowid <= ${snapshot}`;

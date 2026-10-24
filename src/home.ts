@@ -16,6 +16,9 @@ type PageCtx = Context<AppEnv>;
 const BRAND_NAME = /^\/brand\/(?:cast\/)?[a-z0-9][a-z0-9.-]*$/;
 const FAVICON = "/favicon.ico";
 const ASSET_CACHE = "public, max-age=31536000";
+// /favicon.ico keeps its fixed address, so it is cached for an hour: a change in place reaches
+// browsers that fetch it by convention. Pages link the versioned /brand/favicon-v2.ico.
+const FAVICON_CACHE = "public, max-age=3600";
 
 export function mountHome(app: Hono<AppEnv>): void {
   app.get("/", homePage);
@@ -121,7 +124,7 @@ async function staticAsset(c: PageCtx): Promise<Response> {
   if (etag !== null) headers.set("etag", etag);
   const length = asset.headers.get("content-length");
   if (length !== null) headers.set("content-length", length);
-  headers.set("cache-control", ASSET_CACHE);
+  headers.set("cache-control", pathname === FAVICON ? FAVICON_CACHE : ASSET_CACHE);
   headers.set("x-request-id", requestId);
   if (c.req.method === "HEAD") await asset.body?.cancel();
   return new Response(c.req.method === "HEAD" ? null : asset.body, { status: 200, headers });

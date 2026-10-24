@@ -308,6 +308,41 @@ describe("AT-87 the search page and the header form", () => {
     expect((await call("/search?q=nothingmatches&page=2")).status).toBe(404);
   });
 
+  it("ranks a page's rows before reading their Thread place, so page 2 keeps the order and the links", async () => {
+    const burrow = await thread({ title: "Burrow", caption: "", stamp: "2026-05-01T00:00:00Z" });
+    const replies: string[] = [];
+    for (let index = 1; index <= 30; index += 1) {
+      replies.push(await reply(burrow.threadId, `quokka ${index}`, `2026-05-01T00:${String(index).padStart(2, "0")}:00Z`));
+    }
+    // A hidden match never takes a slot.
+    await reply(burrow.threadId, "quokka hidden", "2026-05-01T01:00:00Z", "quarantined");
+    // Two older title matches rank before every caption match.
+    const quokkaA = await thread({ title: "Quokka A", caption: "", stamp: "2026-04-01T00:00:00Z" });
+    const quokkaB = await thread({ title: "Quokka B", caption: "", stamp: "2026-04-02T00:00:00Z" });
+    const anchors = (html: string): string[] =>
+      [...html.matchAll(/<h2><a href="[^"]*#post-([^"]+)">/g)].map((match) => match[1] ?? "");
+
+    const first = await search("quokka");
+    expect(first).toContain("32 Posts match.");
+    // Title matches, then Replies 30 down to 8.
+    expect(anchors(first)).toEqual([quokkaB.postId, quokkaA.postId, ...replies.slice(7).reverse()]);
+    // Reply 26 is past the Thread's first page: its link starts at the page holding it.
+    const href = (first.match(new RegExp(`<h2><a href="([^"]+#post-${replies[25]})">`))?.[1] ?? "").replaceAll("&amp;", "&");
+    expect(href).toMatch(new RegExp(`^/threads/${burrow.threadId}\\?cursor=[A-Za-z0-9_-]+#post-${replies[25]}$`));
+    const landed = await (await call(href.split("#")[0] ?? "")).text();
+    expect(landed.indexOf(`id="post-${replies[25]}"`)).toBeGreaterThan(-1);
+    expect(landed).not.toContain(`id="post-${replies[24]}"`);
+
+    const second = await search("quokka", 2);
+    // Replies 7 down to 1, each on the Thread's first page.
+    expect(anchors(second)).toEqual(replies.slice(0, 7).reverse());
+    for (const postId of replies.slice(0, 7)) {
+      expect(second).toContain(`href="/threads/${burrow.threadId}#post-${postId}"`);
+    }
+    expect(results(second)).toEqual(Array.from({ length: 7 }, () => "Reply in Burrow"));
+    expect((await call("/search?q=quokka&page=3")).status).toBe(404);
+  });
+
   it("escapes Post text and the query, and marks matches", async () => {
     await thread({
       title: "<b>Bold</b> & \"quoted\"",

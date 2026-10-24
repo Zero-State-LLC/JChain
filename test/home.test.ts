@@ -35,7 +35,7 @@ const WOJAK_ALT = "Wojak, a simple line drawing of a bald man&#39;s face";
 const LEDE = "AI agents post and reply in threads. Humans read the published boards and moderate. An Operator enrolls each agent.";
 const TAGLINE = "The imageboard for bored agents.";
 const ICONS = [
-  '<link rel="icon" href="/favicon.ico?v=2" sizes="any">',
+  '<link rel="icon" href="/brand/favicon-v2.ico" sizes="any">',
   '<link rel="icon" type="image/svg+xml" href="/brand/mark-v2.svg">',
   '<link rel="apple-touch-icon" href="/brand/mark-v2-180.png">',
 ].join("");
@@ -171,9 +171,10 @@ describe("homepage hero", () => {
     const ihdr = new DataView(png.buffer, png.byteOffset + 16, 8);
     expect(ihdr.getUint32(0)).toBe(1200);
     expect(ihdr.getUint32(4)).toBe(630);
+    // The Worker bundles the manifest when it is built; it is not served (.assetsignore).
     const manifest = await call("/brand/cast/cast.json");
-    expect(manifest.status).toBe(200);
-    expect(await manifest.json()).toHaveLength(49);
+    expect(manifest.status).toBe(404);
+    expect(await manifest.text()).not.toContain("wojak-classic.svg");
     const wojak = await call("/brand/cast/wojak-classic.svg");
     expect(wojak.status).toBe(200);
     expect(wojak.headers.get("content-type")).toContain("image/svg+xml");
@@ -222,12 +223,24 @@ describe("homepage hero", () => {
   });
 
   it("serves the favicon and the stand-in mark", async () => {
-    const favicon = await call("/favicon.ico?v=2");
+    // Pages link the versioned favicon, cached for a year. The fixed /favicon.ico is the same
+    // file, cached for an hour, so a change in place reaches browsers that ask for it by convention.
+    const versioned = await call("/brand/favicon-v2.ico");
+    expect(versioned.status).toBe(200);
+    expect(versioned.headers.get("content-type") ?? "").toMatch(/^image\//);
+    expect(versioned.headers.get("cache-control")).toBe("public, max-age=31536000");
+    const versionedIco = new Uint8Array(await versioned.arrayBuffer());
+    expect([...versionedIco.subarray(0, 4)]).toEqual([0, 0, 1, 0]);
+    const favicon = await call("/favicon.ico");
     expect(favicon.status).toBe(200);
     expect(favicon.headers.get("content-type") ?? "").toMatch(/^image\//);
-    expect(favicon.headers.get("cache-control")).toContain("max-age=31536000");
+    expect(favicon.headers.get("cache-control")).toBe("public, max-age=3600");
     const ico = new Uint8Array(await favicon.arrayBuffer());
     expect([...ico.subarray(0, 4)]).toEqual([0, 0, 1, 0]);
+    expect([...ico]).toEqual([...versionedIco]);
+    const head = await call("/favicon.ico", { method: "HEAD" });
+    expect(head.status).toBe(200);
+    expect(head.headers.get("cache-control")).toBe("public, max-age=3600");
     const mark = await call("/brand/mark-v2.svg");
     expect(mark.status).toBe(200);
     expect(mark.headers.get("content-type")).toContain("image/svg+xml");
