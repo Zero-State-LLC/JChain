@@ -204,7 +204,7 @@ async function feed(c: PageCtx): Promise<Response> {
   ];
   const list = rows.length === 0
     ? `<p class="empty">No published threads.</p>`
-    : feedTable(rows);
+    : feedGrid(rows);
   const sortQuery: Record<string, string> = sort === "active" ? { sort: "active" } : {};
   const description = board.description === ""
     ? ""
@@ -1123,24 +1123,56 @@ function queueSection(
   return `<section class="queue" aria-labelledby="${id}"><h2 id="${id}">${heading}</h2>${body}</section>`;
 }
 
-function feedTable(items: FeedRow[]): string {
-  const rows = items.map((item) => {
-    const title = item.title ?? "";
-    return [
-      "<tr>",
-      `<td class="thumb">${imageTag(item.asset_id, item.alt_text, "thumb")}</td>`,
-      item.pinned === true
-        ? `<td class="title"><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a> <span class="tag pinned">Pinned</span></td>`
-        : `<td class="title"><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a></td>`,
-      `<td>${escapeHtml(item.author_name)}${handleSuffix(item.author_handle, escapeHtml)}</td>`,
-      `<td class="num"><time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></td>`,
-      `<td class="num">${countText(item.reply_count)}</td>`,
-      `<td class="num">${timeText(item.last_post_at)}</td>`,
-      `<td class="num">${countText(item.score ?? 0)}</td>`,
-      "</tr>",
-    ].join("");
-  }).join("");
-  return `<div class="scroll"><table class="catalog"><thead><tr><th scope="col"><span class="visually-hidden">Thumb</span></th><th scope="col">Title</th><th scope="col">Author</th><th scope="col">Time</th><th scope="col">Replies</th><th scope="col">Last post</th><th scope="col">Score</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+// Danny, 2026-10-24 ("build all"): the board feed is an image-first grid of Thread cards.
+// One real link per card (the title), stretched over the card by CSS: one tab stop, no nested links.
+// Thumbnails sit in a fixed square box with width and height set, so nothing shifts as they load.
+// Cards past the widest first row load lazily.
+const CARD_THUMB_EDGE = 320;
+const EAGER_CARDS = 6;
+
+function feedGrid(items: FeedRow[]): string {
+  const cards = items.map((item, index) => threadCard(item, index < EAGER_CARDS)).join("");
+  return `<section class="threads" aria-labelledby="threads"><h2 id="threads" class="visually-hidden">Threads</h2><ul class="thread-grid">${cards}</ul></section>`;
+}
+
+function threadCard(item: FeedRow, eager: boolean): string {
+  const title = item.title === null || item.title.trim() === "" ? "Untitled" : item.title;
+  const pinned = item.pinned === true;
+  const replies = Number(item.reply_count);
+  const replyLabel = replies === 1 ? "reply" : "replies";
+  return [
+    pinned ? `<li class="thread-card pinned">` : `<li class="thread-card">`,
+    `<h3 class="card-title"><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a></h3>`,
+    pinned ? `<span class="tag pinned">Pinned</span>` : "",
+    cardMedia(item.asset_id, item.alt_text, title, eager),
+    `<p class="card-by">${escapeHtml(item.author_name)}${handleSuffix(item.author_handle, escapeHtml)}</p>`,
+    `<p class="card-facts">`,
+    `<span>${countText(item.reply_count)} ${replyLabel}</span>`,
+    `<span>Last post ${cardTime(item.last_post_at)}</span>`,
+    `<span>Score ${countText(item.score ?? 0)}</span>`,
+    `</p>`,
+    "</li>",
+  ].join("");
+}
+
+function cardMedia(assetId: string | null, alt: string | null, title: string, eager: boolean): string {
+  if (assetId === null) {
+    return `<div class="card-media card-placeholder" aria-hidden="true"><span>${escapeHtml(title)}</span></div>`;
+  }
+  const src = `/v1/assets/${escapeHtml(assetId)}/content?variant=thumb`;
+  const size = `width="${CARD_THUMB_EDGE}" height="${CARD_THUMB_EDGE}"`;
+  const loading = eager ? "" : ` loading="lazy"`;
+  if (alt === null || alt === "") {
+    return `<div class="card-media"><img src="${src}" ${size} alt=""${loading}></div><p class="alt-missing">Image description missing</p>`;
+  }
+  return `<div class="card-media"><img src="${src}" ${size} alt="${escapeHtml(alt)}"${loading}></div>`;
+}
+
+// The full timestamp stays in datetime; the card shows minutes in UTC so it fits a narrow column.
+function cardTime(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "—";
+  const shown = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value) ? `${value.slice(0, 10)} ${value.slice(11, 16)} UTC` : value;
+  return `<time datetime="${escapeHtml(value)}">${escapeHtml(shown)}</time>`;
 }
 
 function countText(value: number | string): string {

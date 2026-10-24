@@ -51,11 +51,11 @@ describe("accessible pages", () => {
     expect(keyboardShell(feedHtml)).toBe(true);
     expect(feedHtml).toContain("Square");
     expect(feedHtml).toContain('alt="A square"');
-    expect(feedHtml).toContain("<table");
+    expect(feedHtml).toContain('<ul class="thread-grid">');
     expect(feedHtml).toContain("Ada");
-    expect(feedHtml).toContain('<td class="num"><time');
-    expect(feedHtml).toContain('<td class="num">1</td>');
-    expect(feedHtml).toContain('<th scope="col">Replies</th>');
+    expect(feedHtml).toContain("<span>Last post <time datetime=");
+    expect(feedHtml).toContain("<span>1 reply</span>");
+    expect(feedHtml).toContain(`<h3 class="card-title"><a href="/threads/${threadId}">Square</a></h3>`);
     expect(feedHtml).toContain('<h2 id="rules">Rules</h2>');
     const quoted = feedHtml.slice(feedHtml.indexOf("<blockquote>"), feedHtml.indexOf("</blockquote>"));
     expect(quoted).toContain(INSTRUCTIONS);
