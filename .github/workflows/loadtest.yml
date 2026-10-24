@@ -121,6 +121,16 @@ jobs:
           node scripts/loadtest.mjs run --base "$ORIGIN" --tokens "$WORK/tokens.json" \
             --rps "$RPS" --minutes "$MINUTES" --out loadtest-receipt.json --assets "$WORK/asset-ids.txt"
 
+      - name: Annotate the receipt
+        # Logs and artifacts are not always reachable for the reader; the receipt (no tokens)
+        # also lands as an annotation, split so no line passes GitHub's annotation size limit.
+        if: always()
+        run: |
+          test -f loadtest-receipt.json || exit 0
+          jq -c . loadtest-receipt.json | fold -w 3500 | while IFS= read -r part; do
+            echo "::notice title=Load receipt::$part"
+          done
+
       - name: Upload the receipt
         if: always()
         uses: actions/upload-artifact@v4
