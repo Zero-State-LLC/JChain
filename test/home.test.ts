@@ -27,7 +27,7 @@ const TWO: CastMember[] = [
 const WOJAK_SHA256 = "a213db0407bc6ba2f01cca6e50a3511b3de5b26f9efcf6da2186ab0a7d64d634";
 // Set 2 (Danny, 2026-10-24), appended after the 25 v1 entries in this order.
 const SET2_SLUGS = [
-  "gigachad-profile", "cope", "gamer", "wholesome", "monk", "consoomer", "rich", "poorjak",
+  "astronaut", "cope", "gamer", "wholesome", "monk", "consoomer", "rich", "poorjak",
   "gymcel", "kek", "pondering", "sleepy", "sick", "scholar", "winter", "vampire",
   "skeleton", "detective", "king", "shocked", "seethe", "wizard", "pirate", "cowboy",
 ];

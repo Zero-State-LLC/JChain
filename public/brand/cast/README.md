@@ -55,7 +55,7 @@ The homepage mascot is a rotating cast of Wojaks (Danny, 2026-10-24). This folde
 | `wojak-scientist.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Scientist | CC0 1.0 Universal Public Domain Dedication |
 | `wojak-bored.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Bored | CC0 1.0 Universal Public Domain Dedication |
 | `wojak-chad.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Chad | CC0 1.0 Universal Public Domain Dedication |
-| `wojak-gigachad-profile.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Gigachad Profile | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-astronaut.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Astronaut | CC0 1.0 Universal Public Domain Dedication |
 | `wojak-cope.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Cope | CC0 1.0 Universal Public Domain Dedication |
 | `wojak-gamer.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Gamer | CC0 1.0 Universal Public Domain Dedication |
 | `wojak-wholesome.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Wholesome | CC0 1.0 Universal Public Domain Dedication |
@@ -80,7 +80,7 @@ The homepage mascot is a rotating cast of Wojaks (Danny, 2026-10-24). This folde
 | `wojak-pirate.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Pirate | CC0 1.0 Universal Public Domain Dedication |
 | `wojak-cowboy.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Cowboy | CC0 1.0 Universal Public Domain Dedication |
 
-The 24 `wojak-<archetype>.webp` files (v2, 2026-10-24) are 512 x 512 WebP squares, metadata-free, on the brand void background. The 24 set 2 files (2026-10-24, from `wojak-gigachad-profile.webp` to `wojak-cowboy.webp` in the table) use the same format. All 48 rotate with the classic Wojak, one entry per UTC hour.
+The 24 `wojak-<archetype>.webp` files (v2, 2026-10-24) are 512 x 512 WebP squares, metadata-free, on the brand void background. The 24 set 2 files (2026-10-24, from `wojak-astronaut.webp` to `wojak-cowboy.webp` in the table) use the same format. All 48 rotate with the classic Wojak, one entry per UTC hour.
 
 `wojak-classic.svg` is byte-identical to the Commons original (sha256 `a213db0407bc6ba2f01cca6e50a3511b3de5b26f9efcf6da2186ab0a7d64d634`), and a test asserts that hash, so do not edit it. Commons also tags it "fan art"; that tag is informational, not a license. The file has its own white background.
 
@@ -97,7 +97,7 @@ The 24 `wojak-<archetype>.webp` files (v2, 2026-10-24) are 512 x 512 WebP square
 
 - Every cast member must be CC0, licensed to Zero State LLC for commercial use, original commissioned art, or original art generated for j-chain.net. Keep the license or the commission agreement with Danny. For generated art, record the tool, the date, and Danny's sign-off in the pull request. Wojak's original creator is unknown and has not been known to enforce, but that is not a license.
 - Generated art must be new, not traced or derived from a third-party file or photo. GigaChad, for example, must not be generated from Krista Sudmalis's photos.
-- Generated art must match the existing cast in quality and style: clean hand-drawn Wojak lines, legible at 512 x 512, no artifacts, no stray text or watermarks, and only the brand palette (void #10101F, paper #F1F0EB, green #72FF8B, purple #A35BFF, orange #FF9C45, cyan #55E5FF, danger #FF687B).
+- Generated art must match the existing cast in quality and style: clean hand-drawn Wojak lines, legible at 512 x 512, no artifacts, and no stray text or watermarks. Lead with the brand palette (void #10101F, paper #F1F0EB, green #72FF8B, purple #A35BFF, orange #FF9C45, cyan #55E5FF, danger #FF687B); small archetype-appropriate accent colors are allowed.
 - The Wojaks on pngimg.com are CC BY-NC 4.0: non-commercial only, so never usable here.
 - No Pepe the Frog, and no other known third-party character.
 - Exclude these variants:
