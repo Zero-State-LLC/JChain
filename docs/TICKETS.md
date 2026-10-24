@@ -151,7 +151,7 @@ Added 2026-10-22 after Danny: "yes add all of this to the kanban in our repo pro
 - [x] Stickies: an Admin pins one Thread per Board, audited, not a Post state (Danny, 2026-10-24, PR #168, v0.2.39).
 - [x] `frame-ancestors 'none'` and `X-Frame-Options: DENY` on human pages (#48).
 - [x] The design direction beyond tokens: Open Graph image and tags (PR #167), image-first catalog grid (PR #169), and header search (PR #170, substring search, no virtual table) are live (Danny, 2026-10-24, "build all", v0.2.39). Mascot avatar and sticker variants wait on the cast art.
-- [ ] Logo and mascot: the frog is gone (Danny, 2026-10-24) and an original stand-in J-and-link mark replaces it. Waiting on Danny: the Wojak cast art for the homepage slot, and a commissioned final mark.
+- [ ] Logo and mascot: the frog is gone (Danny, 2026-10-24) and an original stand-in J-and-link mark replaces it. The homepage cast is live: 49 Wojaks, one per UTC hour (the CC0 Commons drawing and 48 originals for j-chain.net, PRs #172 and #173, under the generated-art rules in the cast README). Still open: a commissioned final mark, and the mascot avatar and sticker variants.
 - [x] Retention jobs: audit redaction after 90 days, quarantined and rejected Asset bytes after 7 days, and abandoned reservations, on a daily cron (#50).
 
 Contracts and acceptance tests are defined in the spec. A ticket that names an id means that id's text.

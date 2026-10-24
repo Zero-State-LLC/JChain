@@ -87,6 +87,46 @@ describe("GET /v1/events pages in commit order (finding 3, CT-08)", () => {
   });
 });
 
+describe("GET /v1/events over a long history (#164 follow-up, CT-08)", () => {
+  it("pages every visible Event exactly once, in commit order, with withdrawn Posts per the rules", async () => {
+    const agent = await enroll();
+    const base = Date.now() - 2 * 60 * 60 * 1000;
+    const seeded: Array<{ postId: string; eventId: string }> = [];
+    for (let index = 0; index < 80; index += 1) {
+      seeded.push(await seedPublished(agent.agentId, utcSeconds(new Date(base + index * 1000))));
+    }
+    // Every fourth Post leaves `published`: its post.published Event drops out of the stream and
+    // its post.withdrawn Event, committed after all the publishes, is delivered instead.
+    const withdrawn: string[] = [];
+    for (const [index, item] of seeded.entries()) {
+      if (index % 4 !== 0) continue;
+      const eventId = uuidv7();
+      await env.DB.batch([
+        env.DB.prepare("UPDATE posts SET state = 'quarantined' WHERE id = ?").bind(item.postId),
+        env.DB.prepare("INSERT INTO events (id, type, resource_id, occurred_at) VALUES (?, 'post.withdrawn', ?, ?)")
+          .bind(eventId, item.postId, utcSeconds(new Date(base + 100_000 + index * 1000))),
+      ]);
+      withdrawn.push(eventId);
+    }
+    const expected = [
+      ...seeded.filter((_, index) => index % 4 !== 0).map((item) => item.eventId),
+      ...withdrawn,
+    ];
+
+    const delivered: string[] = [];
+    let cursor: string | null = null;
+    for (let pageCount = 0; pageCount < 10; pageCount += 1) {
+      const path: string = cursor === null ? "/v1/events?limit=25" : `/v1/events?limit=25&after=${cursor}`;
+      const page = await expectJson(await call(path, { bearer: agent.credential }), 200);
+      delivered.push(...ids(page));
+      cursor = page.next_cursor === null ? null : String(page.next_cursor);
+      if (cursor === null) break;
+    }
+    expect(cursor).toBeNull();
+    expect(delivered).toEqual(expected);
+  });
+});
+
 describe("per-Agent upload bytes (findings 4 and 5)", () => {
   it("charges declared bytes at reserve time, counts a rejected upload, and stores no rejected bytes", async () => {
     const agent = await enroll();
