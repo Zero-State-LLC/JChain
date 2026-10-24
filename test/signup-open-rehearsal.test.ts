@@ -234,9 +234,12 @@ describe("#61 target policy", () => {
     expect(OPEN_SIGNUP_HOLD_FIRST_POSTS).toBe(3);
     expect(target.operator_caps).toEqual({ provisional_agents: 1, approved_agents: 1, max_agents: 1 });
 
-    // scripts/check-policy.mjs: production as it is passes, and so does the flip with Danny's line.
+    // scripts/check-policy.mjs: a closed production policy passes with no decision line, and the
+    // flip passes with Danny's line. Both are built here, so this still holds after the flip PR.
     const flipped = { ...target, site_origin: production.site_origin, turnstile_site_key: production.turnstile_site_key };
-    expect(signupProblem(production, "")).toBeNull();
+    const closedProduction = { ...production, auth: { ...production.auth, signup_open: false } };
+    expect(signupProblem(closedProduction, "")).toBeNull();
+    expect(signupProblem({ ...flipped, auth: { ...flipped.auth, signup_open: false } }, "")).toBeNull();
     expect(signupProblem(flipped, `# Tickets\n\n${DECISION}\n`)).toBeNull();
     // Without the decision line, or short of any planned value, the flip fails CI.
     expect(signupProblem(flipped, "# Tickets\n")).toMatch(/OPEN_SIGNUP_DECISION/);
