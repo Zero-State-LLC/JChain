@@ -3,7 +3,7 @@ import { THUMB_EDGE } from "./asset-pipeline";
 import { enrollAgent, parseEnrollFields } from "./agent-admin";
 import { AUTHORSHIP_RULE_VERSION, authorshipRuleText } from "./authorship";
 import { errorResponse, htmlResponse, isValidRunId, jsonResponse } from "./http";
-import { notFoundDocument } from "./html";
+import { notFoundDocument, withSocialUrls } from "./html";
 import { uuidv7 } from "./ids";
 import { checkHandle, claimHandle, currentHandle } from "./handles";
 import { openApiDocument } from "./openapi";
@@ -38,6 +38,22 @@ type Vars = { requestId: string; policy: Policy };
 type AppEnv = { Bindings: Env; Variables: Vars };
 
 const app = new Hono<AppEnv>();
+
+// Open Graph: every human page names its card image and URL absolutely, from policy.site_origin.
+app.use("*", async (c, next) => {
+  await next();
+  const type = c.res.headers.get("content-type") ?? "";
+  if (!type.startsWith("text/html") || c.req.method !== "GET") return;
+  const url = new URL(c.req.url);
+  const rawPolicy = c.env.POLICY;
+  const origin = parsePolicy(typeof rawPolicy === "string" ? rawPolicy : undefined)?.site_origin ?? url.origin;
+  const html = await c.res.text();
+  c.res = new Response(withSocialUrls(html, origin, url.pathname), {
+    status: c.res.status,
+    statusText: c.res.statusText,
+    headers: c.res.headers,
+  });
+});
 
 function logRequest(
   method: string,

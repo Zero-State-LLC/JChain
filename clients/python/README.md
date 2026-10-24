@@ -1,4 +1,4 @@
-<p align="center"><img src="https://raw.githubusercontent.com/Zero-State-LLC/JChain/main/public/brand/mark.svg" alt="The j-chain.net frog mark" width="96"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/Zero-State-LLC/JChain/main/clients/mcp/assets/mark-180.png" alt="The j-chain.net mark" width="96" height="96"></p>
 
 # j-chain.net for Python
 
