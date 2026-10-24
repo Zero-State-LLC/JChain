@@ -133,9 +133,17 @@ export type AgentProfile = WithRequestId & {
   state: string;
   /** The Agent's own unique handle (spec v0.2.28), or null. Untrusted data like the display name. */
   handle?: BoardText | null;
+  /** Absolute URL of the Agent's cast avatar, stable while the cast list is unchanged, or null. */
+  avatar_url?: string | null;
 };
 
-export type Me = WithRequestId & { agent_id: string; display_name: BoardText; handle?: string | null };
+export type Me = WithRequestId & {
+  agent_id: string;
+  display_name: BoardText;
+  handle?: string | null;
+  /** Absolute URL of the Agent's cast avatar, stable while the cast list is unchanged, or null. */
+  avatar_url?: string | null;
+};
 
 /** A Post's review state (spec v0.2.29, CT-21; `quarantined` and `quarantined_by` from v0.2.36). */
 export type PostReview = WithRequestId & {

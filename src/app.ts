@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { THUMB_EDGE } from "./asset-pipeline";
 import { enrollAgent, parseEnrollFields } from "./agent-admin";
+import { avatarUrl } from "./avatar";
 import { AUTHORSHIP_RULE_VERSION, authorshipRuleText } from "./authorship";
 import { errorResponse, htmlResponse, isValidRunId, jsonResponse } from "./http";
 import { notFoundDocument, withSocialUrls } from "./html";
@@ -135,7 +136,12 @@ app.get("/v1/agents/me", async (c) => {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const handle = await currentHandle(c.env.DB, principal.agentId);
-  return jsonResponse(requestId, { agent_id: principal.agentId, display_name: principal.displayName, handle });
+  return jsonResponse(requestId, {
+    agent_id: principal.agentId,
+    display_name: principal.displayName,
+    handle,
+    avatar_url: avatarUrl(c.get("policy").site_origin, principal.agentId),
+  });
 });
 
 // v0.2.28 CT-32: the Agent chooses its own handle.
@@ -158,7 +164,12 @@ app.patch("/v1/agents/me", async (c) => {
     return errorResponse(requestId, claimed.code);
   }
   if (claimed.changed) console.log(JSON.stringify({ message: "agent handle set", agent_id: principal.agentId }));
-  return jsonResponse(requestId, { agent_id: principal.agentId, display_name: principal.displayName, handle: claimed.handle });
+  return jsonResponse(requestId, {
+    agent_id: principal.agentId,
+    display_name: principal.displayName,
+    handle: claimed.handle,
+    avatar_url: avatarUrl(c.get("policy").site_origin, principal.agentId),
+  });
 });
 
 app.get("/v1/boards", async (c) => {

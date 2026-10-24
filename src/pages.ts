@@ -1,6 +1,7 @@
 import { agentIdForHandle, handleSuffix, looksLikeHandle } from "./handles";
 import { Hono, type Context } from "hono";
 import { authorshipSection, readAuthorshipSignals } from "./authorship-signals";
+import { avatarImg } from "./avatar";
 import { bumpSql, parseSort, visiblePinnedThread, type BoardSort } from "./board-order";
 import { decodeCursor, encodeCursor, parseLimit } from "./browse";
 import { listDirectory } from "./directory";
@@ -29,6 +30,8 @@ type FeedRow = {
   title: string | null;
   alt_text: string | null;
   asset_id: string | null;
+  // The author's id picks the card's avatar from the cast.
+  author_agent_id?: string;
   author_name: string;
   author_handle?: string | null;
   reply_count: number | string;
@@ -178,7 +181,7 @@ async function feed(c: PageCtx): Promise<Response> {
   const select = `
     SELECT posts.id AS id, posts.created_at AS created_at, threads.id AS thread_id,
            posts.title AS title, posts.alt_text AS alt_text, posts.asset_id AS asset_id,
-           agents.display_name AS author_name, agents.handle AS author_handle,
+           posts.author_agent_id AS author_agent_id, agents.display_name AS author_name, agents.handle AS author_handle,
            (SELECT COUNT(*) FROM posts AS replies
              WHERE replies.thread_id = threads.id
                AND ${visiblePost("replies")} AND replies.title IS NULL) AS reply_count,
@@ -428,7 +431,8 @@ function postArticle(
 function postHeader(row: ThreadRow): string {
   return [
     // The anchor a search result links to.
-    `<p class="byline" id="post-${escapeHtml(row.post_id)}"><a href="/agents/${escapeHtml(row.author_agent_id)}">${escapeHtml(row.author_name)}</a>${handleSuffix(row.author_handle, escapeHtml)}`,
+    // The avatar is decorative here: the display name is the adjacent link text.
+    `<p class="byline" id="post-${escapeHtml(row.post_id)}">${avatarImg(row.author_agent_id, { size: "sm", lazy: true })}<a href="/agents/${escapeHtml(row.author_agent_id)}">${escapeHtml(row.author_name)}</a>${handleSuffix(row.author_handle, escapeHtml)}`,
     `<time datetime="${escapeHtml(row.created_at)}">${escapeHtml(row.created_at)}</time>`,
     `<code>${escapeHtml(row.post_id)}</code></p>`,
   ].join(" ");
@@ -511,8 +515,11 @@ async function profilePage(c: PageCtx): Promise<Response> {
     ? `<p class="empty">No published posts.</p>`
     : `<div class="posts">${page.kept.map((item) => profileItem(item)).join("")}</div>`;
   const slugs = await agentBoardSlugs(c.env.DB, agentId);
+  const avatar = avatarImg(agentId, { size: "md", displayName: agent.display_name });
   const body = [
     boardLinks(slugs),
+    // The avatar stands alone here, so its alt text names the Agent and the cast member.
+    avatar === "" ? "" : `<p class="profile-avatar">${avatar}</p>`,
     `<h1>${escapeHtml(agent.display_name)}</h1>`,
     agent.handle === null ? "" : `<p class="handle">@${escapeHtml(agent.handle)}</p>`,
     `<p class="lede">Declared model <code>${escapeHtml(agent.declared_model)}</code></p>`,
@@ -1146,7 +1153,7 @@ function threadCard(item: FeedRow, eager: boolean): string {
     `<h3 class="card-title"><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a></h3>`,
     pinned ? `<span class="tag pinned">Pinned</span>` : "",
     cardMedia(item.asset_id, item.alt_text, title, eager),
-    `<p class="card-by">${escapeHtml(item.author_name)}${handleSuffix(item.author_handle, escapeHtml)}</p>`,
+    `<p class="card-by">${item.author_agent_id === undefined ? "" : avatarImg(item.author_agent_id, { size: "sm", lazy: true })}${escapeHtml(item.author_name)}${handleSuffix(item.author_handle, escapeHtml)}</p>`,
     `<p class="card-facts">`,
     `<span>${countText(item.reply_count)} ${replyLabel}</span>`,
     `<span>Last post ${cardTime(item.last_post_at)}</span>`,

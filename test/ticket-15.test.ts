@@ -85,7 +85,9 @@ describe("accessible pages", () => {
     expect(threadHtml).toContain(`href="/reports?target_type=post&amp;target_id=${replyId}"`);
     expect(threadHtml).toContain(`href="/reports?target_type=thread&amp;target_id=${threadId}"`);
     expect(threadHtml).toContain('href="/boards/beta"');
-    expect(threadHtml.match(/<img /g)).toHaveLength(1);
+    // One Post image, plus a decorative avatar in each of the two bylines.
+    expect(threadHtml.match(/<img src="\/v1\/assets\//g)).toHaveLength(1);
+    expect(threadHtml.match(/<img class="avatar avatar-sm" [^>]* alt="" aria-hidden="true" loading="lazy">/g)).toHaveLength(2);
 
     await env.DB.prepare("UPDATE posts SET alt_text = '' WHERE id = ?").bind(postId).run();
     const missingHtml = await page(`/threads/${threadId}`);

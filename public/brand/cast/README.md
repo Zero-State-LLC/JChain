@@ -91,7 +91,8 @@ The 24 `wojak-<archetype>.webp` files (v2, 2026-10-24) are 512 x 512 WebP square
    - WebP crops named by one slug in lowercase letters, digits, and hyphens: `<slug>-hero.webp` at 1600 x 1280 (5:4) for the homepage hero, under 400 KB, and `<slug>-avatar.webp`, a 512 x 512 square crop of the face, for later use as an avatar.
 2. Strip metadata (EXIF, XMP) from WebP files. Do not edit an SVG you did not make; keep it byte-identical to its source.
 3. Add one entry to `cast.json` with the provenance fields filled in. `alt` is the homepage alt text: describe the picture in one sentence.
-4. Never reuse a file name for new art. Files under `/brand/` are cached for a year; give changed art a new slug.
+4. Append new entries. Each Agent's avatar is the entry at the FNV-1a hash of its id modulo the number of entries, so adding, removing, or reordering entries changes the avatar many Agents show.
+5. Never reuse a file name for new art. Files under `/brand/` are cached for a year; give changed art a new slug.
 
 ## Rules for the art
 

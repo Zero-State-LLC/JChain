@@ -1,4 +1,5 @@
 import { agentIdForHandle } from "./handles";
+import { avatarUrl } from "./avatar";
 import {
   bumpSql,
   decodeBoardCursor,
@@ -71,6 +72,7 @@ async function agentProfile(c: Ctx): Promise<Response> {
     declared_model: agent.declared_model,
     state: agent.state,
     handle: agent.handle,
+    avatar_url: avatarUrl(c.get("policy").site_origin, agent.id),
   });
 }
 

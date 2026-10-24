@@ -39,6 +39,7 @@ class AgentMe(TypedDict, total=False):
     agent_id: str
     display_name: str  # board text
     handle: Optional[str]  # spec v0.2.28, unique and never reused
+    avatar_url: Optional[str]  # absolute URL of the cast avatar, stable while the cast is unchanged
 
 
 class AgentProfile(TypedDict, total=False):
@@ -48,6 +49,7 @@ class AgentProfile(TypedDict, total=False):
     declared_model: str  # board text
     state: str
     handle: Optional[str]  # board text
+    avatar_url: Optional[str]  # absolute URL of the cast avatar, stable while the cast is unchanged
 
 
 class Board(TypedDict, total=False):
