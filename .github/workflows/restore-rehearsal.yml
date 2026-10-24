@@ -1,0 +1,114 @@
+name: Restore rehearsal
+# Issue #81, NFR-04 (RPO 24 hours, RTO 4 hours). Manual only. Reads production D1 `jchain`
+# (a Time Travel bookmark lookup and one export), then rebuilds it in a scratch database,
+# checks every table's row count against production, times each step, and deletes the
+# scratch database. It never writes to production: there is no `time-travel restore` here.
+# A D1 export briefly blocks other queries on the database while it runs; production is
+# about half a megabyte, so the block is a few seconds.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: restore-rehearsal
+  cancel-in-progress: false
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 315fb44b61212825452aad0ca566ea42
+      PROD_DB: jchain
+      PROD_DB_ID: 44d928f1-b180-4de1-a46f-a92afb5c8392
+      SCRATCH_DB: jchain-restore-rehearsal-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Require the deploy token
+        run: test -n "$CLOUDFLARE_API_TOKEN" || { echo "Set the CLOUDFLARE_API_TOKEN repository secret first."; exit 1; }
+      - run: npm ci
+      - name: Rehearse
+        run: |
+          set -euo pipefail
+          now() { date +%s%3N; }
+          api() { curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "$@"; }
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database"
+          prod_q() { npx wrangler d1 execute "$PROD_DB" --env production --remote --json --command "$1"; }
+          t0=$(now)
+
+          # 1. RPO: the Time Travel bookmark for now (read-only).
+          npx wrangler d1 time-travel info "$PROD_DB" --env production --json > bookmark.json
+          t1=$(now)
+
+          # 2. Snapshot production with one export.
+          npx wrangler d1 export "$PROD_DB" --env production --remote --output prod.sql
+          t2=$(now)
+          bytes=$(wc -c < prod.sql)
+
+          # 3. A scratch database, and a config that names only it.
+          api -X POST "$base" -d "{\"name\":\"$SCRATCH_DB\"}" > created.json
+          scratch_id=$(jq -r '.result.uuid // empty' created.json)
+          test -n "$scratch_id" || { cat created.json; echo "could not create the scratch database"; exit 1; }
+          test "$scratch_id" != "$PROD_DB_ID" || { echo "scratch id equals production"; exit 1; }
+          echo "$scratch_id" > scratch_id
+          jq -n --arg n "$SCRATCH_DB" --arg id "$scratch_id" \
+            '{name:"restore-rehearsal",compatibility_date:"2026-10-01",d1_databases:[{binding:"DB",database_name:$n,database_id:$id}]}' > restore.wrangler.json
+          t3=$(now)
+
+          # 4. Rebuild.
+          npx wrangler d1 execute "$SCRATCH_DB" -c restore.wrangler.json --remote --file prod.sql --yes
+          t4=$(now)
+
+          # 5. Verify: every production table, same row count in the scratch copy.
+          tables=$(prod_q "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name" | jq -r '.[0].results[].name')
+          count_sql=$(for t in $tables; do printf "SELECT '%s' AS t, COUNT(*) AS n FROM \"%s\" UNION ALL " "$t" "$t"; done | sed 's/ UNION ALL $//')
+          prod_q "$count_sql" | jq -c '[.[0].results[] | {(.t): .n}] | add' > prod_counts.json
+          npx wrangler d1 execute "$SCRATCH_DB" -c restore.wrangler.json --remote --json --command "$count_sql" \
+            | jq -c '[.[0].results[] | {(.t): .n}] | add' > scratch_counts.json
+          t5=$(now)
+          match=$(jq -n --slurpfile a prod_counts.json --slurpfile b scratch_counts.json '$a[0] == $b[0]')
+
+          rto_ms=$((t5 - t0))
+          jq -n \
+            --argjson bookmark "$(jq -c . bookmark.json)" \
+            --argjson counts "$(cat prod_counts.json)" \
+            --argjson match "$match" \
+            --argjson bytes "$bytes" \
+            --argjson lookup $((t1 - t0)) --argjson export $((t2 - t1)) --argjson create $((t3 - t2)) \
+            --argjson import $((t4 - t3)) --argjson verify $((t5 - t4)) --argjson rto "$rto_ms" \
+            '{bookmark:$bookmark, export_bytes:$bytes, tables:($counts|length), rows:([$counts[]]|add),
+              counts_match:$match, ms:{bookmark:$lookup, export:$export, create:$create, import:$import, verify:$verify},
+              rto_ms:$rto, rto_target_ms:14400000, nfr_04_achieved:($match and $rto < 14400000)}' > receipt.json
+          cat receipt.json
+          {
+            echo "## Restore rehearsal (NFR-04)"
+            echo
+            echo "| Step | ms |"
+            echo "|---|---|"
+            jq -r '.ms | to_entries[] | "| \(.key) | \(.value) |"' receipt.json
+            jq -r '"| **total (RTO)** | **\(.rto_ms)** |"' receipt.json
+            echo
+            jq -r '"Tables \(.tables), rows \(.rows), export \(.export_bytes) bytes, counts match: \(.counts_match), NFR-04 achieved: \(.nfr_04_achieved)"' receipt.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$match" = "true" || { echo "row counts differ"; diff <(jq -S . prod_counts.json) <(jq -S . scratch_counts.json) || true; exit 1; }
+      - name: Delete the scratch database
+        if: always()
+        run: |
+          set -euo pipefail
+          test -f scratch_id || { echo "no scratch database was created"; exit 0; }
+          id=$(cat scratch_id)
+          test "$id" != "$PROD_DB_ID" || { echo "refusing to delete production"; exit 1; }
+          curl -sS -X DELETE -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$id" | tee deleted.json
+          jq -e '.success == true' deleted.json > /dev/null
+      - name: Keep the receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-receipt
+          path: receipt.json
+          if-no-files-found: ignore
