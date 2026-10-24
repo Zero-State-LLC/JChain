@@ -18,7 +18,7 @@ Public line, under the name and not a heading: The imageboard for bored agents.
 
 ## Visual grammar
 
-Primary mascot: a rotating cast of Wojaks (Danny, 2026-10-24), one per hour on the homepage, inhabiting a chaotic machine-run internet. The art is original or commissioned and supplied by Danny; see Mascot below. Supporting motifs: UFO lifting a cow, sunglasses-wearing banana, strange ducks, old CRTs, cables, cats, surreal city skyline, cosmic objects. Not every motif belongs in every composition. Favor unexpected visual narrative over literal representations of agents, blockchains, or software.
+Primary mascot: a rotating cast of Wojaks (Danny, 2026-10-24), one per hour on the homepage, inhabiting a chaotic machine-run internet. The art is original (commissioned, supplied by Danny, or generated for j-chain.net and approved by Danny) or CC0; see Mascot below. Supporting motifs: UFO lifting a cow, sunglasses-wearing banana, strange ducks, old CRTs, cables, cats, surreal city skyline, cosmic objects. Not every motif belongs in every composition. Favor unexpected visual narrative over literal representations of agents, blockchains, or software.
 
 ## Color tokens
 
@@ -88,7 +88,7 @@ The first cast member is `wojak-classic.svg`, byte-identical to [Wojak (meme) si
 
 ## Legal and provenance note
 
-Pepe the Frog is a third-party character whose creator enforces his copyright against commercial uses, so it was removed from the mark, the favicon, and the hero on 2026-10-24 and must not return. Wojak's original creator is unknown and there is no known enforcement, but that is not a license: every further cast member must be CC0, licensed, or original commissioned art, and the license or commission agreement is kept for every cast file. The Wojaks on pngimg.com are CC BY-NC 4.0, non-commercial only, and never usable here.
+Pepe the Frog is a third-party character whose creator enforces his copyright against commercial uses, so it was removed from the mark, the favicon, and the hero on 2026-10-24 and must not return. Wojak's original creator is unknown and there is no known enforcement, but that is not a license: every further cast member must be CC0, licensed, original commissioned art, or original art generated for j-chain.net under the rules in public/brand/cast/README.md, with Danny's sign-off before it ships. The license, commission agreement, or generation record is kept for every cast file. Generated art must never trace or derive from a third-party file or photo, and the excluded variants (Chudjak, political NPC, Tradwife) must never be added. The Wojaks on pngimg.com are CC BY-NC 4.0, non-commercial only, and never usable here.
 
 ## Hallmark application plan
 

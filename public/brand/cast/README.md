@@ -1,6 +1,6 @@
 # Homepage cast
 
-The homepage mascot is a rotating cast of Wojaks (Danny, 2026-10-24). This folder holds the cast art and the manifest the Worker reads. The art is supplied by Danny, a commissioned artist, or a CC0 or licensed source. No agent draws, traces, redraws, recolors, or edits cast art.
+The homepage mascot is a rotating cast of Wojaks (Danny, 2026-10-24). This folder holds the cast art and the manifest the Worker reads. The art is supplied by Danny, a commissioned artist, a CC0 or licensed source, or generated as original art by an agent or AI tool. Generated art must meet the rules below and needs Danny's sign-off before it is added to cast.json. No agent traces, redraws, recolors, or edits third-party art, or generates from a third-party image or photo.
 
 ## How the rotation works
 
@@ -55,8 +55,32 @@ The homepage mascot is a rotating cast of Wojaks (Danny, 2026-10-24). This folde
 | `wojak-scientist.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Scientist | CC0 1.0 Universal Public Domain Dedication |
 | `wojak-bored.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Bored | CC0 1.0 Universal Public Domain Dedication |
 | `wojak-chad.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Chad | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-gigachad-profile.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Gigachad Profile | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-cope.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Cope | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-gamer.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Gamer | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-wholesome.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Wholesome | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-monk.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Monk | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-consoomer.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Consoomer | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-rich.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Rich | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-poorjak.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Poorjak | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-gymcel.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Gymcel | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-kek.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Kek | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-pondering.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Pondering | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-sleepy.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Sleepy | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-sick.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Sick | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-scholar.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Scholar | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-winter.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Winter | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-vampire.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Vampire | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-skeleton.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Skeleton | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-detective.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Detective | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-king.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), King | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-shocked.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Shocked | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-seethe.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Seethe | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-wizard.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Wizard | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-pirate.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Pirate | CC0 1.0 Universal Public Domain Dedication |
+| `wojak-cowboy.webp` | [github.com/Zero-State-LLC/JChain](https://github.com/Zero-State-LLC/JChain) | Zero State LLC (original for j-chain.net), Cowboy | CC0 1.0 Universal Public Domain Dedication |
 
-The 24 `wojak-<archetype>.webp` files (v2, 2026-10-24) are 512 x 512 WebP squares, metadata-free, on the brand void background. They rotate with the classic Wojak, one entry per UTC hour.
+The 24 `wojak-<archetype>.webp` files (v2, 2026-10-24) are 512 x 512 WebP squares, metadata-free, on the brand void background. The 24 set 2 files (2026-10-24, from `wojak-gigachad-profile.webp` to `wojak-cowboy.webp` in the table) use the same format. All 48 rotate with the classic Wojak, one entry per UTC hour.
 
 `wojak-classic.svg` is byte-identical to the Commons original (sha256 `a213db0407bc6ba2f01cca6e50a3511b3de5b26f9efcf6da2186ab0a7d64d634`), and a test asserts that hash, so do not edit it. Commons also tags it "fan art"; that tag is informational, not a license. The file has its own white background.
 
@@ -71,7 +95,9 @@ The 24 `wojak-<archetype>.webp` files (v2, 2026-10-24) are 512 x 512 WebP square
 
 ## Rules for the art
 
-- Every cast member must be CC0, licensed to Zero State LLC for commercial use, or original commissioned art. Keep the license or the commission agreement with Danny. Wojak's original creator is unknown and has not been known to enforce, but that is not a license.
+- Every cast member must be CC0, licensed to Zero State LLC for commercial use, original commissioned art, or original art generated for j-chain.net. Keep the license or the commission agreement with Danny. For generated art, record the tool, the date, and Danny's sign-off in the pull request. Wojak's original creator is unknown and has not been known to enforce, but that is not a license.
+- Generated art must be new, not traced or derived from a third-party file or photo. GigaChad, for example, must not be generated from Krista Sudmalis's photos.
+- Generated art must match the existing cast in quality and style: clean hand-drawn Wojak lines, legible at 512 x 512, no artifacts, no stray text or watermarks, and only the brand palette (void #10101F, paper #F1F0EB, green #72FF8B, purple #A35BFF, orange #FF9C45, cyan #55E5FF, danger #FF687B).
 - The Wojaks on pngimg.com are CC BY-NC 4.0: non-commercial only, so never usable here.
 - No Pepe the Frog, and no other known third-party character.
 - Exclude these variants:
@@ -79,3 +105,7 @@ The 24 `wojak-<archetype>.webp` files (v2, 2026-10-24) are 512 x 512 WebP square
   - The political NPC variant.
   - The Tradwife variant.
 - The board's Prohibited Content rules apply to the cast like any other image.
+
+## License
+
+The files in this folder are dedicated to the public domain under CC0 1.0 Universal (see the Exception in the repository LICENSE). No trademark rights in the j-chain.net or JChain names or marks are waived. Attribution to j-chain.net is appreciated but not required.
