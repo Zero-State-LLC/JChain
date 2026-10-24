@@ -3,17 +3,21 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { utcSeconds, uuidv7 } from "../src/ids";
+import { derivativeKey } from "../src/asset-pipeline";
 import { ALERT_SUBJECT } from "../src/moderator-alert";
 import { clearNamedQuota } from "../src/quota";
 import { runRetention } from "../src/retention";
 import postpublishFixture from "./fixtures/policy-postpublish.json";
-import { ADMIN, ADMIN2, ADMIN2_OPERATOR_ID, BOARD_ID, MODERATOR, OPERATOR, STAFF, call, resetAndSeed } from "./harness";
+import {
+  ADMIN, ADMIN2, ADMIN2_OPERATOR_ID, BOARD_ID, MODERATOR, OPERATOR, STAFF, call, clearSignInQuota, resetAndSeed,
+} from "./harness";
 
 // v0.2.36 quarantine-first moderation (Danny, 2026-10-23 3:44 PM PT): posting happens first, the
 // system recommends a Post for moderation, messages the Moderators, and quarantines the Post until a
 // Moderator clears or archives it.
 
 const POSTPUBLISH = JSON.stringify(postpublishFixture);
+const ORIGIN = "https://jchain.example.test";
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const SECRET_CAPTION = "obsidian-walrus-caption";
 const SECRET_TITLE = "Quixotic Heron Title";
@@ -50,7 +54,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("every system signal quarantines through one helper", () => {
+describe("AT-73 every system signal quarantines through one helper", () => {
   it("quarantines on a scan result in a non-S4 category, with no Blocked Hashes", async () => {
     const author = await enroll(AUTHOR_NAME, ADMIN2);
     const seeded = await seedPost(author.agentId);
@@ -130,7 +134,7 @@ describe("every system signal quarantines through one helper", () => {
   });
 });
 
-describe("Seat Flags quarantine (CT-22, AT-42)", () => {
+describe("AT-73 Seat Flags quarantine (CT-22, AT-42)", () => {
   it("quarantines on one active flag of any reason, and a trial flag stays shadow", async () => {
     const seat = await enroll("SeatTwo", ADMIN2);
     await expectJson(await call("/v1/admin/seats/2", {
@@ -172,7 +176,7 @@ describe("Seat Flags quarantine (CT-22, AT-42)", () => {
   });
 });
 
-describe("Clear and Archive", () => {
+describe("AT-74 Clear and Archive", () => {
   it("lets any Moderator clear a quarantine: the Post and its Asset return and its reports close", async () => {
     const author = await enroll(AUTHOR_NAME, ADMIN2);
     const seeded = await seedPost(author.agentId);
@@ -215,11 +219,13 @@ describe("Clear and Archive", () => {
   it("never lets a Clear release an Asset another Post holds under a legal hold (review 4365291514)", async () => {
     const author = await enroll(AUTHOR_NAME, ADMIN2);
     const held = await seedPost(author.agentId);
-    const sharing = await seedPost(author.agentId);
-    await env.DB.prepare("UPDATE posts SET asset_id = ? WHERE id = ?").bind(held.assetId, sharing.postId).run();
-    await expectJson(await report(held.postId, "csam"), 201);
-    await expectJson(await report(sharing.postId, "spam"), 201);
-    expect(await postRow(sharing.postId)).toMatchObject({ state: "quarantined", legal_hold: 0 });
+    const sharing = await sharePost(author.agentId, held.assetId);
+    // A csam removal keeps the held Post for preservation and quarantines the image with every
+    // published Post on it, under the same hold.
+    await expectJson(await moderateWith(STAFF, held.postId, "remove", "csam"), 200);
+    expect(await postRow(held.postId)).toMatchObject({ state: "removal_pending", legal_hold: 1 });
+    expect(await postRow(sharing.postId)).toMatchObject({ state: "quarantined", legal_hold: 1 });
+    expect(await withdrawn(sharing.postId)).toBe(1);
 
     await expectError(await moderate(STAFF, "post", sharing.postId, "restore"), 403, "forbidden");
     await expectError(await moderate(ADMIN, "post", sharing.postId, "restore"), 409, "state_conflict");
@@ -237,7 +243,7 @@ describe("Clear and Archive", () => {
     expect(await reportStates(seeded.postId)).toEqual(["triaged"]);
   });
 
-  it("closes a Post's open reports when a Moderator hides it", async () => {
+  it("AT-75 closes a Post's open reports when a Moderator hides it", async () => {
     stubSiteverify();
     const author = await enroll(AUTHOR_NAME, ADMIN2);
     const seeded = await seedPost(author.agentId);
@@ -250,7 +256,225 @@ describe("Clear and Archive", () => {
   });
 });
 
-describe("dismiss_report", () => {
+describe("AT-73 and AT-74 a shared image is one item", () => {
+  it("quarantines every published Post on the image in one batch, with one alert", async () => {
+    const sent: Sent[] = [];
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const first = await seedPost(author.agentId);
+    const second = await sharePost(author.agentId, first.assetId);
+    const pending = await sharePost(author.agentId, first.assetId, "pending_review");
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      env: withMail(sent),
+      body: { target_type: "post", target_id: first.postId, reason_code: "spam" },
+    }), 201);
+    for (const postId of [first.postId, second.postId]) {
+      expect(await postRow(postId)).toEqual({ state: "quarantined", quarantined_by: "report", queue_first: 1, legal_hold: 0 });
+      expect(await withdrawn(postId)).toBe(1);
+      expect(await audit(postId, "quarantine")).toEqual([{ actor_email: OPERATOR, action: "quarantine", reason_code: "spam" }]);
+    }
+    // A pending Post on the image keeps waiting for its approval; it was never public.
+    expect((await postRow(pending.postId))?.state).toBe("pending_review");
+    expect(await withdrawn(pending.postId)).toBe(0);
+    expect((await assetRow(first.assetId))?.state).toBe("quarantined");
+    // No published Post is left on the quarantined image.
+    const published = await env.DB.prepare("SELECT COUNT(*) AS n FROM posts WHERE asset_id = ? AND state = 'published'")
+      .bind(first.assetId).first<{ n: number }>();
+    expect(Number(published?.n)).toBe(0);
+    // One alert: one email per Moderator, counting both Posts.
+    expect(sent).toHaveLength(3);
+    expect(sent[0]?.text).toContain("2 quarantined Posts are waiting");
+  });
+
+  it("carries a prohibited reason and a legal hold to every Post on the image", async () => {
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const first = await seedPost(author.agentId);
+    const second = await sharePost(author.agentId, first.assetId);
+    await expectJson(await report(first.postId, "csam"), 201);
+    expect(await postRow(second.postId)).toEqual({ state: "quarantined", quarantined_by: "report", queue_first: 1, legal_hold: 1 });
+    expect(await audit(second.postId, "quarantine")).toEqual([{ actor_email: OPERATOR, action: "quarantine", reason_code: "csam" }]);
+    expect(await blockedCount(first.assetId)).toBeGreaterThan(0);
+  });
+
+  it("quarantines a sibling through a Seat Flag and a scan as well", async () => {
+    const seat = await enroll("SeatTwo", ADMIN2);
+    await expectJson(await call("/v1/admin/seats/2", {
+      email: ADMIN,
+      body: { action: "bind_seat_agent", agent_id: seat.agentId },
+    }), 200);
+    await env.DB.prepare("UPDATE admin_seats SET seat_state = 'active', seat_trial_count = 10 WHERE seat = 2").run();
+    const author = await enroll(AUTHOR_NAME, OPERATOR);
+    const flagged = await seedPost(author.agentId);
+    const flaggedSibling = await sharePost(author.agentId, flagged.assetId);
+    await expectJson(await seatFlag(flagged.postId, seat.credential, "off-topic"), 200);
+    expect(await postRow(flaggedSibling.postId)).toMatchObject({ state: "quarantined", quarantined_by: "seat_agents" });
+    expect(await audit(flaggedSibling.postId)).toEqual([{ actor_email: "seat_agent", action: "quarantine", reason_code: "off-topic" }]);
+
+    const scanned = await seedPost(author.agentId);
+    const scannedSibling = await sharePost(author.agentId, scanned.assetId);
+    await pendingScan(scanned.postId);
+    await runScan(scanEnv(stubAi({ response: "unsafe\nS10" })), scanned.postId);
+    expect(await postRow(scannedSibling.postId)).toMatchObject({ state: "quarantined", quarantined_by: "scan" });
+    expect(await audit(scannedSibling.postId)).toEqual([{ actor_email: "system", action: "quarantine", reason_code: "scan_s10" }]);
+  });
+
+  it("clears the whole group together and only then releases the image", async () => {
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const first = await seedPost(author.agentId);
+    const second = await sharePost(author.agentId, first.assetId);
+    await expectJson(await report(first.postId, "spam"), 201);
+    // Clearing the sibling, which the report never named, clears the reported Post too.
+    const cleared = await expectJson(await moderate(STAFF, "post", second.postId, "restore"), 200);
+    expect(cleared.state).toBe("published");
+    for (const postId of [first.postId, second.postId]) {
+      expect(await postRow(postId)).toEqual({ state: "published", quarantined_by: null, queue_first: 0, legal_hold: 0 });
+      expect(await audit(postId, "restore")).toEqual([{ actor_email: STAFF, action: "restore", reason_code: "other" }]);
+      const restored = await env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE resource_id = ? AND type = 'post.restored'")
+        .bind(postId).first<{ n: number }>();
+      expect(Number(restored?.n)).toBe(1);
+    }
+    expect(await reportStates(first.postId)).toEqual(["triaged"]);
+    expect(await assetRow(first.assetId)).toEqual({ state: "ready", quarantined_at: null });
+  });
+
+  it("refuses a group Clear while a member is prohibited and held, until an Admin clears all of it", async () => {
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const first = await seedPost(author.agentId);
+    const second = await sharePost(author.agentId, first.assetId);
+    await expectJson(await report(first.postId, "csam"), 201);
+    expect(await postRow(second.postId)).toMatchObject({ state: "quarantined", legal_hold: 1 });
+    // A Moderator without a seat clears no Post of the group: the image stays quarantined and its
+    // prohibited Blocked Hashes stay.
+    await expectError(await moderate(STAFF, "post", second.postId, "restore"), 403, "forbidden");
+    await expectError(await moderate(STAFF, "post", first.postId, "restore"), 403, "forbidden");
+    expect((await assetRow(first.assetId))?.state).toBe("quarantined");
+    expect(await blockedCount(first.assetId)).toBeGreaterThan(0);
+    expect((await postRow(first.postId))?.state).toBe("quarantined");
+    // An Admin clears the group together.
+    await expectJson(await moderate(ADMIN, "post", second.postId, "restore"), 200);
+    expect(await postRow(first.postId)).toMatchObject({ state: "published", legal_hold: 0 });
+    expect(await postRow(second.postId)).toMatchObject({ state: "published", legal_hold: 0 });
+    expect((await assetRow(first.assetId))?.state).toBe("ready");
+  });
+
+  it("refuses to clear a Post whose image a Moderator archived on another Post", async () => {
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const first = await seedPost(author.agentId);
+    const second = await sharePost(author.agentId, first.assetId);
+    await expectJson(await report(first.postId, "id-document"), 201);
+    expect((await postRow(second.postId))?.state).toBe("quarantined");
+    await expectJson(await moderateWith(STAFF, first.postId, "remove", "id-document"), 200);
+    await expectError(await moderate(ADMIN, "post", second.postId, "restore"), 409, "state_conflict");
+    expect((await postRow(second.postId))?.state).toBe("quarantined");
+    expect((await assetRow(first.assetId))?.state).toBe("quarantined");
+    expect(await blockedCount(first.assetId)).toBeGreaterThan(0);
+  });
+});
+
+describe("AT-74 a Moderator reviews a quarantined image", () => {
+  it("serves the bytes to a Moderator, no-store, and to nobody else", async () => {
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const other = await enroll("Bystander", OPERATOR);
+    const seeded = await seedPost(author.agentId);
+    await env.MEDIA.put(derivativeKey(seeded.assetId, "display"), new Uint8Array([5, 5, 5, 5]));
+    await expectJson(await report(seeded.postId, "spam"), 201);
+    const path = `/v1/assets/${seeded.assetId}/content?variant=display`;
+    const moderator = await call(path, { email: STAFF });
+    expect(moderator.status).toBe(200);
+    expect(moderator.headers.get("cache-control")).toBe("no-store");
+    expect(new Uint8Array(await moderator.arrayBuffer())).toEqual(new Uint8Array([5, 5, 5, 5]));
+    await expectError(await call(path), 404, "not_found");
+    await expectError(await call(path, { bearer: other.credential }), 404, "not_found");
+    await expectError(await call(path, { bearer: author.credential }), 404, "not_found");
+    // The Quarantined section links that image.
+    expect(section(await page(STAFF), "queue-quarantined")).toContain(`/v1/assets/${seeded.assetId}/content?variant=thumb`);
+  });
+
+  it("keeps legal-hold material Admin only, through the evidence route", async () => {
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const seeded = await seedPost(author.agentId);
+    await env.MEDIA.put(derivativeKey(seeded.assetId, "display"), new Uint8Array([6, 6, 6, 6]));
+    await expectJson(await report(seeded.postId, "csam"), 201);
+    const path = `/v1/assets/${seeded.assetId}/content?variant=display`;
+    await expectError(await call(path, { email: STAFF }), 404, "not_found");
+    await expectError(await call(path, { email: ADMIN }), 404, "not_found");
+  });
+});
+
+describe("AT-73 a Session Operator reports from the browser", () => {
+  it("shows the report form to a signed-in Session Operator, and the report quarantines", async () => {
+    const sent: Sent[] = [];
+    const mailEnv = withMail(sent);
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const seeded = await seedPost(author.agentId);
+    const cookie = await signIn(mailEnv, sent);
+    const formPage = await call(`/reports?target_type=post&target_id=${seeded.postId}`, { headers: { cookie }, env: mailEnv });
+    expect(formPage.status).toBe(200);
+    const formHtml = await formPage.text();
+    expect(formHtml).toContain(`action="/reports"`);
+    expect(formHtml).not.toContain("Browser reports are for an Operator.");
+    // Without a Session the page still refuses.
+    expect(await (await call(`/reports?target_type=post&target_id=${seeded.postId}`, { env: mailEnv })).text())
+      .toContain("Browser reports are for an Operator.");
+    const filed = await call("/reports", {
+      method: "POST",
+      raw: new TextEncoder().encode(new URLSearchParams({
+        target_type: "post", target_id: seeded.postId, reason_code: "spam",
+      }).toString()),
+      headers: { cookie, origin: ORIGIN, "content-type": "application/x-www-form-urlencoded" },
+      env: mailEnv,
+    });
+    expect(filed.status).toBe(201);
+    expect(await postRow(seeded.postId)).toMatchObject({ state: "quarantined", quarantined_by: "report" });
+  });
+});
+
+describe("AT-74 the Quarantined section pages", () => {
+  it("pages quarantined Posts with quarantined_cursor and a next link", async () => {
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const ids: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      const seeded = await seedPost(author.agentId);
+      // Distinct creation times, so the page order is fixed.
+      await env.DB.prepare("UPDATE posts SET created_at = ? WHERE id = ?")
+        .bind(`2026-01-0${String(index + 1)}T00:00:00Z`, seeded.postId).run();
+      await expectJson(await report(seeded.postId, "spam"), 201);
+      ids.push(seeded.postId);
+    }
+    const first = await (await call("/moderation?limit=2", { email: STAFF })).text();
+    const firstSection = section(first, "queue-quarantined");
+    expect(firstSection).toContain(ids[0]!);
+    expect(firstSection).toContain(ids[1]!);
+    expect(firstSection).not.toContain(ids[2]!);
+    const link = first.match(/<nav aria-label="Quarantined"><a href="([^"]+)">Next quarantined<\/a><\/nav>/);
+    expect(link).not.toBeNull();
+    const href = link![1]!.replaceAll("&amp;", "&");
+    expect(href).toContain("quarantined_cursor=");
+    const second = await (await call(href, { email: STAFF })).text();
+    const secondSection = section(second, "queue-quarantined");
+    expect(secondSection).toContain(ids[2]!);
+    expect(secondSection).not.toContain(ids[0]!);
+    expect(second).not.toContain("Next quarantined");
+  });
+});
+
+describe("AT-75 Archive answers an open appeal", () => {
+  it("decides the open appeal as upheld when a Moderator archives the Post", async () => {
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const scanned = await seedPost(author.agentId);
+    await pendingScan(scanned.postId);
+    await runScan(scanEnv(stubAi({ response: "unsafe\nS1" })), scanned.postId);
+    expect((await appeal(author.credential, scanned.postId, "archive-appeal")).status).toBe(201);
+    await expectJson(await moderate(STAFF, "post", scanned.postId, "remove"), 200);
+    const row = await env.DB.prepare("SELECT outcome, decided_at, decided_by FROM post_appeals WHERE post_id = ?")
+      .bind(scanned.postId).first<{ outcome: string; decided_at: string | null; decided_by: string | null }>();
+    expect(row?.outcome).toBe("uphold");
+    expect(row?.decided_at).not.toBeNull();
+    expect(row?.decided_by).toBe(STAFF);
+  });
+});
+
+describe("AT-75 dismiss_report", () => {
   it("dismisses one report on its own, audited, and lists only open reports", async () => {
     const author = await enroll(AUTHOR_NAME, ADMIN2);
     const filed = await expectJson(await call("/v1/reports", {
@@ -283,7 +507,7 @@ describe("dismiss_report", () => {
   });
 });
 
-describe("appeals of automatic quarantines", () => {
+describe("AT-75 appeals of automatic quarantines", () => {
   it("lets the author appeal a scan quarantine once, and refuses an appeal of a report quarantine", async () => {
     const author = await enroll(AUTHOR_NAME, ADMIN2);
     const scanned = await seedPost(author.agentId);
@@ -313,7 +537,7 @@ describe("appeals of automatic quarantines", () => {
   });
 });
 
-describe("Moderator email", () => {
+describe("AT-76 Moderator email", () => {
   it("emails every Moderator once per window, with the link and no content", async () => {
     const sent: Sent[] = [];
     const mailEnv = withMail(sent);
@@ -349,13 +573,61 @@ describe("Moderator email", () => {
     const counted = await env.QUOTA.getByName("auth").peek([`emails:${utcSeconds().slice(0, 10)}`]);
     expect(Object.values(counted)).toEqual([3]);
 
-    // The daily run sends the same alert when Posts wait and none was sent in the last 24 hours.
-    await runRetention(mailEnv, Date.now());
+  });
+
+  it("AT-76 sends the daily repeat on its own key, once per 24 hours, even right after a 15-minute alert", async () => {
+    const sent: Sent[] = [];
+    const mailEnv = withMail(sent);
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const first = await seedPost(author.agentId);
+    const second = await seedPost(author.agentId);
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      env: mailEnv,
+      body: { target_type: "post", target_id: first.postId, reason_code: "spam" },
+    }), 201);
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      env: mailEnv,
+      body: { target_type: "post", target_id: second.postId, reason_code: "rules" },
+    }), 201);
     expect(sent).toHaveLength(3);
-    await clearNamedQuota(env, "moderator-alert");
-    await runRetention(mailEnv, Date.now());
+    // Round-2 P3-1: a 15-minute alert went out a moment ago, and the daily run still sends.
+    const start = Date.now();
+    await runRetention(mailEnv, start);
     expect(sent).toHaveLength(6);
     expect(sent.at(-1)?.text).toContain("2 quarantined Posts are waiting");
+    // A second run the same day sends nothing.
+    await runRetention(mailEnv, start + 60 * 60 * 1000);
+    expect(sent).toHaveLength(6);
+    // 24 hours later it sends again, with no Durable Object cleared.
+    await runRetention(mailEnv, start + 24 * 60 * 60 * 1000);
+    expect(sent).toHaveLength(9);
+    // With nothing waiting, the daily run sends nothing.
+    await expectJson(await moderate(STAFF, "post", first.postId, "restore"), 200);
+    await expectJson(await moderate(STAFF, "post", second.postId, "restore"), 200);
+    await runRetention(mailEnv, start + 48 * 60 * 60 * 1000);
+    expect(sent).toHaveLength(9);
+  });
+
+  it("AT-76 stops at auth.emails_per_day and still quarantines", async () => {
+    const sent: Sent[] = [];
+    const mailEnv = withMail(sent, true, { emails_per_day: 1 });
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const seeded = await seedPost(author.agentId);
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      env: mailEnv,
+      body: { target_type: "post", target_id: seeded.postId, reason_code: "spam" },
+    }), 201);
+    // Three Moderators, one email allowed today: one is sent and the rest are skipped.
+    expect(sent).toHaveLength(1);
+    expect((await postRow(seeded.postId))?.state).toBe("quarantined");
+    const counted = await env.QUOTA.getByName("auth").peek([`emails:${utcSeconds().slice(0, 10)}`]);
+    expect(Object.values(counted)).toEqual([1]);
+    // The daily run is capped by the same window.
+    await runRetention(mailEnv, Date.now());
+    expect(sent).toHaveLength(1);
   });
 
   it("sends nothing without the EMAIL binding, and still quarantines", async () => {
@@ -372,8 +644,8 @@ describe("Moderator email", () => {
   });
 });
 
-function withMail(sent: Sent[], mailer = true): Env {
-  const policy = JSON.stringify({ ...JSON.parse(env.POLICY as string), auth: AUTH });
+function withMail(sent: Sent[], mailer = true, auth: Partial<typeof AUTH> = {}): Env {
+  const policy = JSON.stringify({ ...JSON.parse(env.POLICY as string), auth: { ...AUTH, ...auth } });
   const binding = { send: async (message: Sent) => { sent.push(message); return { messageId: "test" }; } };
   return new Proxy(env, {
     get(target, property) {
@@ -440,6 +712,49 @@ async function seedPost(authorId: string): Promise<{ threadId: string; postId: s
     ).bind(postId, threadId, authorId, assetId, SECRET_TITLE, SECRET_CAPTION, stamp),
   ]);
   return { threadId, postId, assetId };
+}
+
+// A second Post of the same Agent on an existing Asset, as upload dedup produces.
+async function sharePost(authorId: string, assetId: string, state = "published"): Promise<{ threadId: string; postId: string }> {
+  const threadId = uuidv7();
+  const postId = uuidv7();
+  const stamp = utcSeconds();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)").bind(threadId, BOARD_ID, stamp),
+    env.DB.prepare(
+      `INSERT INTO posts (
+         id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
+         provenance_source, rights_attestation, license, state, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, 'alt', 'human', 'mine', 'cc0', ?, ?)`,
+    ).bind(postId, threadId, authorId, assetId, SECRET_TITLE, SECRET_CAPTION, state, stamp),
+  ]);
+  return { threadId, postId };
+}
+
+function moderateWith(email: string, postId: string, action: string, reason: string): Promise<Response> {
+  return call("/v1/moderation/actions", {
+    email,
+    body: { target_type: "post", target_id: postId, action, reason_code: reason },
+  });
+}
+
+async function signIn(bindings: Env, sent: Sent[], email = OPERATOR): Promise<string> {
+  await env.DB.batch([env.DB.prepare("DELETE FROM sessions"), env.DB.prepare("DELETE FROM signin_links")]);
+  await clearSignInQuota(email);
+  await call("/signin", {
+    method: "POST",
+    raw: new TextEncoder().encode(new URLSearchParams({ email }).toString()),
+    headers: { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN },
+    env: bindings,
+  });
+  const found = sent.at(-1)?.text.match(/https:\/\/[^\s]+\/signin\/(sl_[A-Za-z0-9_-]{43})/);
+  expect(found).not.toBeNull();
+  sent.length = 0;
+  const done = await call(`/signin/${found![1]!}`, { method: "POST", headers: { origin: ORIGIN }, env: bindings });
+  expect(done.status).toBe(303);
+  const cookie = (done.headers.get("set-cookie") ?? "").match(/__Host-jc_session=(ss_[A-Za-z0-9_-]{43})/);
+  expect(cookie).not.toBeNull();
+  return `__Host-jc_session=${cookie![1]!}`;
 }
 
 function seatFlag(postId: string, credential: string, reason: string, target?: Env): Promise<Response> {

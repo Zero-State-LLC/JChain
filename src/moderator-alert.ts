@@ -10,6 +10,9 @@ import { mailerOf, type MailMessage } from "./session";
 
 export const ALERT_OBJECT = "moderator-alert";
 export const ALERT_KEY = "alert:last";
+// Round-2 P3-1: the daily repeat has its own key, so a recent 15-minute alert never makes it skip
+// a day. It sends once per 24 hours while quarantined Posts are waiting.
+export const DAILY_ALERT_KEY = "alert:daily";
 export const ALERT_WINDOW_MS = 15 * 60 * 1000;
 export const DAILY_ALERT_MS = 24 * 60 * 60 * 1000;
 export const ALERT_SUBJECT = "j-chain.net: items quarantined for review";
@@ -26,7 +29,7 @@ const SOURCE_NAMES: Readonly<Record<string, string>> = {
 export async function alertModerators(
   env: AlertEnv,
   policy: Policy | null,
-  options: { gapMs?: number; now?: number } = {},
+  options: { gapMs?: number; now?: number; key?: string } = {},
 ): Promise<number> {
   try {
     const auth = policy?.auth;
@@ -44,7 +47,7 @@ export async function alertModerators(
     const count = Number(waiting?.n ?? 0);
     if (count === 0) return 0;
     const now = options.now ?? Date.now();
-    const claimed = await env.QUOTA.getByName(ALERT_OBJECT).claimAlert(ALERT_KEY, options.gapMs ?? ALERT_WINDOW_MS, now);
+    const claimed = await env.QUOTA.getByName(ALERT_OBJECT).claimAlert(options.key ?? ALERT_KEY, options.gapMs ?? ALERT_WINDOW_MS, now);
     if (!claimed) {
       console.log(JSON.stringify({ message: "moderator alert suppressed", waiting: count }));
       return 0;

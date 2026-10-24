@@ -117,7 +117,7 @@ async function report(c: Ctx, format: Format): Promise<Response> {
   if (quarantinePostId !== null) {
     const target = await c.env.DB.prepare("SELECT asset_id FROM posts WHERE id = ?").bind(quarantinePostId)
       .first<{ asset_id: string | null }>();
-    const plan = quarantineStatements(c.env.DB, {
+    const plan = await quarantineStatements(c.env.DB, {
       postId: quarantinePostId,
       assetId: target?.asset_id ?? null,
       source: "report",
