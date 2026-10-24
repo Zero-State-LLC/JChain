@@ -623,11 +623,14 @@ async function queueRows(
     SELECT posts.id AS id, posts.created_at AS created_at, posts.id AS post_id,
            posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
            posts.asset_id AS asset_id, assets.state AS asset_state, posts.legal_hold AS legal_hold,
-           CASE WHEN posts.state = 'quarantined' AND EXISTS (
-             SELECT 1 FROM moderation_actions
+           -- Named from the latest quarantine action only, so an earlier tool match that an Admin
+           -- cleared never labels a later quarantine.
+           CASE WHEN posts.state = 'quarantined' AND posts.quarantined_by = 'report' AND (
+             SELECT moderation_actions.actor_email FROM moderation_actions
               WHERE moderation_actions.target_type = 'post' AND moderation_actions.target_id = posts.id
-                AND moderation_actions.action = 'quarantine' AND moderation_actions.actor_email = '${MEDIA_MATCH_ACTOR}'
-           ) THEN 'csam_tool' ELSE posts.quarantined_by END AS quarantined_by,
+                AND moderation_actions.action = 'quarantine'
+              ORDER BY moderation_actions.created_at DESC, moderation_actions.id DESC LIMIT 1
+           ) = '${MEDIA_MATCH_ACTOR}' THEN 'csam_tool' ELSE posts.quarantined_by END AS quarantined_by,
            ${ownerDeleted("posts")} AS owner_deleted
       FROM posts
       LEFT JOIN assets ON assets.id = posts.asset_id
