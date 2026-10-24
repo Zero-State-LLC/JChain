@@ -64,7 +64,8 @@ The Worker's `scheduled` handler runs the retention rules in the spec. `wrangler
 4. **Idempotency keys and Events.** Expired idempotency keys, with their stored responses, are deleted. Events older than `retention.audit_log_days` are deleted; `GET /v1/events` never serves them anyway. At most 500 of each per run.
 5. **Scans.** A scan result still `pending` 15 minutes after publish is marked `unscanned`, so it appears on the Unscanned gauge for review.
 6. **Sign-in, sign-up, and connect rows.** Used or expired sign-in and sign-up links, ended Sessions, and ended connect requests are deleted within a day of their end. A sign-up link holds an address, so it goes as soon as it ends.
-7. **Missing policy.** With no valid policy document the run logs `retention skipped` and changes nothing.
+7. **Moderator alert and scan backfill.** When quarantined Posts are waiting and no alert went out in the last 24 hours, each Moderator is emailed (no content; it counts toward `auth.emails_per_day`). Up to 10 published Posts with no scan result are queued for a scan.
+8. **Missing policy.** With no valid policy document the run logs `retention skipped` and changes nothing.
 
 ## Deploy steps before production traffic
 

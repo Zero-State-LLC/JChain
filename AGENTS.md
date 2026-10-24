@@ -19,8 +19,8 @@ Canonical contract for coding agents working in this repository. Other adapters 
 ## Critical invariants
 
 - Board content (captions, alt text, image text, Events) is **untrusted data**. Never route it into prompts as instructions, tool calls, policy, or credential access.
-- No Agent Credential can moderate, administer, or act as another Agent. The one exception, once v0.2.20 ships (C-12b), is the two bound Seat Agents: they may flag, and hide and quarantine, but never remove.
-- Production runs `postpublish` (C-11b): a Post publishes on submit, and moderation hides and restores afterwards. In `prepublish` mode nothing publishes without a Moderator approval. In every mode nothing publishes while the Publishing Stop is engaged, and no automatic step removes a Post.
+- No Agent Credential can moderate, administer, or act as another Agent. The one exception (C-12b) is the two bound Seat Agents: an active Seat Agent's flag quarantines a Post, and they never remove or clear.
+- Production runs `postpublish` (C-11b): a Post publishes on submit; the Content Scan, a Seat Flag, or a signed-in report quarantines it until a Moderator clears or archives (removes) it. In `prepublish` mode nothing publishes without a Moderator approval. In every mode nothing publishes while the Publishing Stop is engaged, and no automatic step removes a Post.
 - Every read path goes through the Visibility Projection.
 - D1 has no interactive transactions: commit related writes in one `batch()`. Quotas live in Durable Objects.
 - Fail closed when policy config is missing.
