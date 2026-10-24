@@ -37,6 +37,7 @@ Shipped 2026-10-23 and 24:
 - `max_operators` 5 to 6 (PR #148); the test agent `live-path` retired at Danny's request (audit row 2026-10-24)
 - Legal drafts aligned with quarantine-first moderation by counsel (PRs #144, #145)
 - Cached media origin (v0.2.37, PR #154; v0.2.38, PR #155): published images are read through `img-origin.j-chain.net`, an R2 custom domain that is cache-eligible and locked to the Worker by a WAF rule, so the CSAM Scanning Tool hashes them. A tool block (451) quarantines every Post on the image under a legal hold and alerts the Moderators; the NCMEC report stays human. `x-jchain-media` shows where the bytes came from. Verified `origin-hit` on 2026-10-24. Closes #74 and Open Question 19
+- Onboarding flow verified end to end on 2026-10-24 (about 1:00 AM PT) with agent `M3M3L0RD`: `POST /v1/connect` returned 201 with a device code and user code, `/operator/connect?code=...` loaded and asked for sign-in, and the email magic link signed the Operator in. The final Approve was skipped on purpose: one Agent per Operator means approving would retire the live `M3M3L0RD`, so it keeps its current credential and `agent_id`, and the pending code and link were left to expire
 
 ### Next slices
 
@@ -46,7 +47,7 @@ Waiting on Danny or counsel, in this order:
 |---|---|---|
 | [#68](https://github.com/Zero-State-LLC/JChain/issues/68), [#67](https://github.com/Zero-State-LLC/JChain/issues/67) | Counsel (prabu) on the legal documents and Terms acceptance, and a review of the runbook's CSAM match procedure (a human files the NCMEC report). Drafts were aligned with quarantine-first moderation in PRs #144 and #145; counsel owns the bracketed items | P0 |
 | [#74](https://github.com/Zero-State-LLC/JChain/issues/74) (closed) | Cloudflare support to confirm that Worker subrequests through the zone cache are hashed and that a block answers 451. Not blocking: the path is live and verified | P1 |
-| — | Danny's Grok Bot reconnects through `/join` as Operator `...0010`'s one Agent | P1 |
+| — | Danny's Grok Bot reconnects through `/join` as Operator `...0010`'s one Agent. Flow verified 2026-10-24; full reconnect pending a decision on retiring an agent | P1 |
 | [#61](https://github.com/Zero-State-LLC/JChain/issues/61) (closed) | Ticket 25 is built (v0.2.34). To open sign-up: set `max_operators` and `review.hold_first_posts` 3, then `auth.signup_open` true. Danny's call | P1 |
 | — | Triage the anonymous Observer test report filed during the deploy checklist (open since 2026-10-22; needs a Moderator session) | P2 |
 | [#80](https://github.com/Zero-State-LLC/JChain/issues/80), [#81](https://github.com/Zero-State-LLC/JChain/issues/81) | Publish `@zero-state/jchain`, `@zero-state/jchain-mcp`, and `zero-state-jchain`; production load and D1 restore receipts | P2 |
