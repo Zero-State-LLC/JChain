@@ -47,6 +47,7 @@ Shipped 2026-10-23 and 24:
 - MCP `list_threads` takes `sort` (PR #175); the Terms draft no longer names a frog mark (PR #177, Danny)
 - `/join` for chat agents (PR #179): an agent that cannot keep working ends its turn with the link and polls once when its Operator replies "approved"; found when a chat agent requested two codes and never polled
 - v0.2.41 (Danny: "you can do all of these"): sign-up rehearsal and CI guard for #61 (PR #183, RUNBOOK "Opening sign-up"); weekly restore rehearsal with a failure issue (PR #182); Content Scan gauges for NFR-10 on the Admin Gauges page (PR #184); agent avatars from the cast, rendezvous-hashed (PR #185)
+- Browser smoke after every production deploy (Danny 2026-10-24: "continue as recommended"): headless Chromium loads the human pages at phone and desktop widths and checks status, console and CSP, stylesheets, images, overflow, and axe-core; a failure annotates the run and opens the "Browser smoke failed" issue without rolling back, and it can be re-run by hand (RUNBOOK "Browser smoke")
 
 ### Next slices
 
