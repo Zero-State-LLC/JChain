@@ -159,9 +159,10 @@ describe("accessible pages", () => {
     expect(await hidden.text()).not.toContain("Report this thread");
     expect((await call(`/threads/${heldId}?cursor=not-a-cursor`)).status).toBe(404);
 
+    // v0.2.36: a signed-in report of a Post quarantines it, so these reports name its Agent.
     const reportForm = new URLSearchParams({
-      target_type: "post",
-      target_id: postId,
+      target_type: "agent",
+      target_id: ada.agentId,
       reason_code: "rules",
       detail: "catalog",
     });
@@ -176,7 +177,7 @@ describe("accessible pages", () => {
     expect(await htmlReport.text()).toContain('href="/boards/beta"');
     const jsonReport = await call("/v1/reports", {
       email: OPERATOR,
-      body: { target_type: "post", target_id: postId, reason_code: "spam" },
+      body: { target_type: "agent", target_id: ada.agentId, reason_code: "spam" },
     });
     expect(jsonReport.status).toBe(201);
     expect(jsonReport.headers.get("content-type")).toContain("application/json");

@@ -1,6 +1,8 @@
-import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
+import { isUuidV7, utcSeconds } from "./ids";
 import { parsePolicy } from "./policy";
 import { millisBetween } from "./latency";
+import { alertModerators } from "./moderator-alert";
+import { quarantineStatements } from "./quarantine";
 import { chargeScanNeurons } from "./quota";
 
 // First delivery plus the upload queue's max_retries (3) in wrangler.jsonc. Keep in step with it.
@@ -9,7 +11,6 @@ export const SCAN_MAX_ATTEMPTS = 4;
 const MODEL = "@cf/meta/llama-guard-3-8b";
 const OPEN = "<<<JCHAIN_UNTRUSTED_DATA";
 const CLOSE = "<<<END_JCHAIN_UNTRUSTED_DATA";
-const SCAN_REASON_CODE = "scan_s4";
 const CATEGORY = /^S\d{1,2}$/;
 
 type ScanAi = { run(model: string, input: unknown): Promise<unknown> };
@@ -26,7 +27,7 @@ export function scanMessagePostId(body: unknown): string | null {
   return postId;
 }
 
-// CT-23 and R5: text only, fail-open, hide never remove. Throws only to ask the queue for a retry.
+// CT-23, R5, and v0.2.36: text only, fail-open, quarantine never remove. Throws only to ask the queue for a retry.
 export async function handleScanMessage(env: Env, postId: string, attempts = 1): Promise<void> {
   const policy = parsePolicy(typeof env.POLICY === "string" ? env.POLICY : undefined);
   if (!policy || policy.moderation_mode !== "postpublish") return;
@@ -79,19 +80,14 @@ export async function handleScanMessage(env: Env, postId: string, attempts = 1):
   }
 
   const at = utcSeconds();
-  const categories = verdict.categories.join(",");
+  let quarantined = false;
   if (verdict.safe) {
     await env.DB.prepare(
       `UPDATE post_scans SET result = 'safe', neurons = ?, scanned_at = ?
         WHERE post_id = ? AND scanned_at IS NULL`,
     ).bind(neurons, at, postId).run();
-  } else if (!verdict.categories.includes("S4")) {
-    await env.DB.prepare(
-      `UPDATE post_scans SET result = 'unsafe', categories = ?, neurons = ?, scanned_at = ?
-        WHERE post_id = ? AND scanned_at IS NULL`,
-    ).bind(categories, neurons, at, postId).run();
   } else {
-    await hideForScan(env.DB, postId, categories, neurons, at);
+    quarantined = await quarantineForScan(env.DB, postId, verdict.categories, neurons, at);
   }
   console.log(JSON.stringify({
     message: "post scanned",
@@ -103,39 +99,46 @@ export async function handleScanMessage(env: Env, postId: string, attempts = 1):
     // NFR-10: time from publish to the recorded scan result.
     publish_to_scan_ms: millisBetween(row.published_at, at),
   }));
+  // v0.2.36: message the Moderators once the quarantine has committed.
+  if (quarantined) await alertModerators(env, policy);
 }
 
-// R5: published to hidden and ready to quarantined, in one batch. No Blocked Hash is written here.
-async function hideForScan(db: D1Database, postId: string, categories: string, neurons: number, at: string) {
-  const where = `posts.id = ? AND posts.state = 'published'
-    AND EXISTS (SELECT 1 FROM post_scans WHERE post_scans.post_id = posts.id AND post_scans.scanned_at IS NULL)`;
-  const eventId = uuidv7();
-  await db.batch([
-    db.prepare(
-      `INSERT INTO events (id, type, resource_id, occurred_at)
-       SELECT ?, 'post.withdrawn', posts.id, ? FROM posts WHERE ${where}`,
-    ).bind(eventId, at, postId),
-    db.prepare(
-      `INSERT INTO moderation_actions (
-         id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
-       )
-       SELECT ?, 'system', 'post', posts.id, 'hide', ?, NULL, ?, ? FROM posts WHERE ${where}`,
-    ).bind(uuidv7(), SCAN_REASON_CODE, eventId, at, postId),
-    db.prepare(
-      `UPDATE assets SET state = 'quarantined', quarantined_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-        WHERE state = 'ready' AND id = (SELECT posts.asset_id FROM posts WHERE ${where})`,
-    ).bind(postId),
-    db.prepare(
-      `UPDATE posts SET state = 'hidden', hidden_by = 'scan', queue_first = 1 WHERE ${where}`,
-    ).bind(postId),
+// v0.2.36: any unsafe category quarantines the Post through the shared helper, in one batch with
+// the scan row. Only S4 (child sexual exploitation) is prohibited, so only S4 blocks the hashes.
+// The scan row is written last and records whether this batch quarantined the Post.
+async function quarantineForScan(
+  db: D1Database,
+  postId: string,
+  codes: string[],
+  neurons: number,
+  at: string,
+): Promise<boolean> {
+  const post = await db.prepare("SELECT asset_id FROM posts WHERE id = ?").bind(postId).first<{ asset_id: string | null }>();
+  const categories = codes.join(",");
+  const prohibited = codes.includes("S4");
+  const plan = quarantineStatements(db, {
+    postId,
+    assetId: post?.asset_id ?? null,
+    source: "scan",
+    actor: "system",
+    reasonCode: `scan_${(prohibited ? "S4" : codes[0] ?? "unsafe").toLowerCase()}`,
+    prohibited,
+    legalHold: false,
+    at,
+    guard: {
+      sql: "EXISTS (SELECT 1 FROM post_scans WHERE post_scans.post_id = posts.id AND post_scans.scanned_at IS NULL)",
+      binds: [],
+    },
+  });
+  const results = await db.batch([
+    ...plan.statements,
     db.prepare(
       `UPDATE post_scans SET result = 'unsafe', categories = ?, neurons = ?, scanned_at = ?,
-              hidden = CASE WHEN EXISTS (
-                SELECT 1 FROM posts WHERE posts.id = ? AND posts.hidden_by = 'scan'
-              ) THEN 1 ELSE 0 END
+              hidden = CASE WHEN EXISTS (SELECT 1 FROM moderation_actions WHERE id = ?) THEN 1 ELSE 0 END
         WHERE post_id = ? AND scanned_at IS NULL`,
-    ).bind(categories, neurons, at, postId, postId),
+    ).bind(categories, neurons, at, plan.actionId, postId),
   ]);
+  return Number(results[plan.updateIndex]?.meta.changes ?? 0) === 1;
 }
 
 async function markUnscanned(

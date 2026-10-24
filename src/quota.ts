@@ -100,6 +100,17 @@ export class Quota extends DurableObject<Env> {
     });
   }
 
+  // v0.2.36: claims an alert slot when none was claimed in the last gapMs. The key uses a prefix
+  // that apply() never sweeps.
+  async claimAlert(key: string, gapMs: number, now: number): Promise<boolean> {
+    return this.ctx.storage.transaction(async (txn) => {
+      const last = Number(await txn.get<number>(key) ?? 0);
+      if (last > 0 && now - last < gapMs) return false;
+      await txn.put(key, now);
+      return true;
+    });
+  }
+
   // v0.2.28 G1: read counters without charging. Missing keys read as 0.
   async peek(keys: string[]): Promise<Record<string, number>> {
     const values: Record<string, number> = {};

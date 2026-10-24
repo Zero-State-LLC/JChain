@@ -205,8 +205,9 @@ class PostReview(TypedDict, total=False):
     request_id: str
     post_id: str
     state: str
-    review_state: str  # published, held, hidden, or decided
+    review_state: str  # published, held, hidden, quarantined, or decided
     hidden_by: Optional[str]  # scan, seat_agents, moderator, or None
+    quarantined_by: Optional[str]  # scan, seat_agents, report, or None (v0.2.36)
     appealable_until: Optional[str]
     appeal: Optional[Dict[str, Any]]
 
