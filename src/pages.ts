@@ -12,6 +12,7 @@ import { accessEmail, isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { visibleAncestry, type RemixAncestor } from "./remix";
 import { currentSession } from "./session";
+import { ownerDeleted } from "./tombstone";
 import { PROHIBITED, instructionsFor } from "./rules-copy";
 import { VISIBLE_POST, visibleBoardSlug, visiblePost } from "./visibility";
 import { parsePage, scoreSql, trendingPage, type TrendingItem } from "./votes";
@@ -75,6 +76,8 @@ type QueueRow = {
   // Set by the queues that can hold a quarantined image the Admin may need to release.
   asset_state?: string | null;
   legal_hold?: number;
+  // Set on the Quarantined section: the author's owner deletion covers the Post.
+  owner_deleted?: number;
 };
 
 type ProfileRow = {
@@ -619,7 +622,7 @@ async function queueRows(
     SELECT posts.id AS id, posts.created_at AS created_at, posts.id AS post_id,
            posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
            posts.asset_id AS asset_id, assets.state AS asset_state, posts.legal_hold AS legal_hold,
-           posts.quarantined_by AS quarantined_by
+           posts.quarantined_by AS quarantined_by, ${ownerDeleted("posts")} AS owner_deleted
       FROM posts
       LEFT JOIN assets ON assets.id = posts.asset_id
      WHERE posts.state = ?`, "ASC", [state], { cursor, limit });
@@ -1033,9 +1036,14 @@ function quarantineSection(items: QueueRow[]): string {
       const note = held
         ? `<p class="hint">Under a legal hold. Only an Admin can clear it.</p>`
         : "";
+      // Round-2 audit row 1: the author asked for deletion, so a Clear archives it instead.
+      const deleting = Number(item.owner_deleted ?? 0) === 1
+        ? `<p class="hint">The author's Operator asked to delete it. Clear archives (removes) it instead of returning it.</p>`
+        : "";
       return [
         `<p class="byline">Quarantined by ${escapeHtml(source)}.</p>`,
         note,
+        deleting,
         queueItem(item, ["restore", "remove"], false, { restore: "Clear", remove: "Archive (remove)" }),
       ].join("");
     }).join("");

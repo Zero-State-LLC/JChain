@@ -1,9 +1,11 @@
 import { derivativeKey, originalKey, refundDerivatives } from "./asset-pipeline";
+import { continueDeletions } from "./deletion";
 import { utcSeconds } from "./ids";
 import { parsePolicy, type Policy } from "./policy";
 import { purgeConnections } from "./connect";
 import { alertModerators, DAILY_ALERT_KEY, DAILY_ALERT_MS } from "./moderator-alert";
 import { mailerOf, purgeEndedSignIns } from "./session";
+import { tombstoneStatements, UNSCRUBBED } from "./tombstone";
 
 // Retention sweep (SPEC Retention, Asset state machine). Runs from the Worker
 // `scheduled` handler. Every step is idempotent and bounded per run, so a cron
@@ -59,7 +61,10 @@ export async function runRetention(env: RetentionEnv, now: number): Promise<Rete
     return { ran: false, audit_redacted: 0, reports_redacted: 0, assets_deleted: 0, alerts: [] };
   }
   const audit = await redactAudit(env.DB, policy, now);
+  // Round-2 audit row 9: unfinished owner deletions continue here, before removals finish.
+  const deletions = await continueDeletions(env);
   const removals = await finishRemovals(env.DB);
+  const scrubbed = await scrubOldRemovals(env.DB);
   const assets = await deleteExpiredAssets(env, policy, now);
   const signIns = await purgeSignIns(env.DB, policy, now, mailerOf(env as Env) !== null && policy.auth !== undefined);
   const idempotency = await purgeExpiredIdempotency(env.DB, now);
@@ -75,7 +80,9 @@ export async function runRetention(env: RetentionEnv, now: number): Promise<Rete
     message: "retention run",
     ...result,
     sign_ins_deleted: signIns,
+    deletion_batches: deletions,
     removals_finished: removals,
+    removals_scrubbed: scrubbed,
     idempotency_deleted: idempotency,
     events_deleted: events,
     scans_swept: scans,
@@ -88,7 +95,8 @@ export async function runRetention(env: RetentionEnv, now: number): Promise<Rete
 // Ticket 45: a Moderator removal finishes here. The Post moves from removal_pending to removed,
 // and its Asset moves to deletion_pending, so deleteExpiredAssets deletes the bytes and refunds
 // r2_bytes in the same run. An Asset another live Post still uses, or one under legal hold, stays.
-// The Post's stored export copies are deleted in the same batch.
+// Round-2 audit row 8: the same batch leaves the minimal tombstone, deleting the Post's stored
+// export copies, reactions, and votes, and its appeal's words.
 async function finishRemovals(db: D1Database): Promise<number> {
   const listed = await db.prepare(
     `SELECT id, asset_id FROM posts
@@ -98,30 +106,29 @@ async function finishRemovals(db: D1Database): Promise<number> {
   ).bind(RETENTION_BATCH).all<{ id: string; asset_id: string | null }>();
   let finished = 0;
   for (const post of listed.results ?? []) {
-    const statements: D1PreparedStatement[] = [];
-    if (post.asset_id !== null) {
-      statements.push(db.prepare(
-        `UPDATE assets SET state = 'deletion_pending'
-          WHERE id = ? AND state IN ('ready', 'quarantined')
-            AND NOT EXISTS (
-              SELECT 1 FROM posts AS other
-               WHERE other.asset_id = assets.id AND other.id != ?
-                 AND (other.legal_hold = 1 OR other.state NOT IN ('removal_pending', 'removed', 'rejected')))`,
-      ).bind(post.asset_id, post.id));
-    }
-    // An export never keeps a removed Post: its stored copy goes with the removal.
-    statements.push(db.prepare(
-      `DELETE FROM export_posts
-        WHERE json_extract(document, '$.post_id') = ?
-          AND EXISTS (SELECT 1 FROM posts WHERE id = ? AND state = 'removal_pending' AND legal_hold = 0)`,
-    ).bind(post.id, post.id));
-    statements.push(db.prepare(
-      "UPDATE posts SET state = 'removed' WHERE id = ? AND state = 'removal_pending' AND legal_hold = 0",
-    ).bind(post.id));
-    const results = await db.batch(statements);
-    if (Number(results[results.length - 1]?.meta.changes ?? 0) === 1) finished += 1;
+    const plan = tombstoneStatements(db, post.id, post.asset_id, "removal_pending");
+    const results = await db.batch(plan.statements);
+    if (Number(results[plan.updateIndex]?.meta.changes ?? 0) === 1) finished += 1;
   }
   return finished;
+}
+
+// Round-2 audit row 8: a Post removed before the minimal tombstone existed keeps its text until
+// this step scrubs it, a bounded batch per run. A Post under a legal hold keeps everything.
+async function scrubOldRemovals(db: D1Database): Promise<number> {
+  const listed = await db.prepare(
+    `SELECT id, asset_id FROM posts
+      WHERE state = 'removed' AND legal_hold = 0 AND ${UNSCRUBBED}
+      ORDER BY created_at, id
+      LIMIT ?`,
+  ).bind(RETENTION_BATCH).all<{ id: string; asset_id: string | null }>();
+  let scrubbed = 0;
+  for (const post of listed.results ?? []) {
+    const plan = tombstoneStatements(db, post.id, post.asset_id, "removed");
+    const results = await db.batch(plan.statements);
+    if (Number(results[plan.updateIndex]?.meta.changes ?? 0) === 1) scrubbed += 1;
+  }
+  return scrubbed;
 }
 
 // Audit rows older than retention.audit_log_days keep their action, target,
