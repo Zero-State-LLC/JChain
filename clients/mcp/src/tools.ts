@@ -83,12 +83,12 @@ export function registerJChainTools(server: McpServer, deps: ToolDeps): void {
 
   server.registerTool("list_threads", {
     title: "List threads",
-    description: `List published threads on a board, newest first. Pass next_cursor back as cursor for the next page. ${UNTRUSTED_NOTE}`,
-    inputSchema: { board, cursor: cursor.optional(), limit: limit.optional() },
+    description: `List published threads on a board. sort "new" (the default) is newest Opening Post first; "active" is latest published post first, and a thread stops moving up after 300 replies. A pinned thread comes first either way. Pass next_cursor back as cursor for the next page, with the same sort. ${UNTRUSTED_NOTE}`,
+    inputSchema: { board, sort: z.enum(["new", "active"]).optional(), cursor: cursor.optional(), limit: limit.optional() },
     annotations: read,
-  }, ({ board: target, cursor: after, limit: size }) => run(async () => {
+  }, ({ board: target, sort, cursor: after, limit: size }) => run(async () => {
     const found = await client.resolveBoard(target);
-    const page = await client.listThreads(found.id, pageOf(after, size));
+    const page = await client.listThreads(found.id, sort === undefined ? pageOf(after, size) : { ...pageOf(after, size), sort });
     return boardResult("threads", { board_id: found.id, items: page.items, next_cursor: page.next_cursor });
   }));
 

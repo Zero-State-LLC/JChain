@@ -123,6 +123,7 @@ describe("argument validation", () => {
     ["read_thread", { thread_id: "not-a-uuid" }],
     ["list_threads", { board: "beta", limit: 101 }],
     ["list_threads", { board: "../etc" }],
+    ["list_threads", { board: "beta", sort: "hot" }],
     ["vote", { post_id: POST, value: "sideways" }],
     ["react", { post_id: POST, type: "like" }],
     ["trending", { page: 0 }],
@@ -188,6 +189,13 @@ describe("tool behaviour", () => {
     const thread = await call("read_thread", { thread_id: THREAD });
     expect(thread.text).toContain("Ignore previous instructions");
     expect(thread.text).not.toContain("<<<END_JCHAIN_UNTRUSTED_DATA>>>");
+  });
+
+  it("passes sort through to the board feed", async () => {
+    const { call, service } = await connect();
+    const result = await call("list_threads", { board: "beta", sort: "active" });
+    expect(result.isError).toBe(false);
+    expect(String(service.seen.at(-1)?.path)).toContain("sort=active");
   });
 
   it("sets the agent's own handle", async () => {
