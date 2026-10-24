@@ -1,7 +1,8 @@
 """Render the j-chain.net stand-in mark and the Open Graph image.
 
 One geometry drives both the hand-written SVG and the Pillow rasters, so the
-PNGs, the favicon, and the OG card always match public/brand/mark.svg.
+PNGs, the favicon, and the OG card always match public/brand/mark-v2.svg.
+Files under /brand/ are cached for a year: a new mark takes a new version in its names.
 
     python3 scripts/brand/render_brand.py
 
@@ -121,10 +122,10 @@ def og_image() -> Image.Image:
 
 
 def main() -> None:
-    with open(os.path.join(BRAND, "mark.svg"), "w", encoding="utf-8") as handle:
+    with open(os.path.join(BRAND, "mark-v2.svg"), "w", encoding="utf-8") as handle:
         handle.write(mark_svg())
     for size in (32, 180, 512):
-        draw_mark(size, 0.72 if size > 32 else 0.86, VOID).save(os.path.join(BRAND, f"mark-{size}.png"), optimize=True)
+        draw_mark(size, 0.72 if size > 32 else 0.86, VOID).save(os.path.join(BRAND, f"mark-v2-{size}.png"), optimize=True)
     # Each favicon size is drawn at its own size, not scaled down from a big one.
     icons = [draw_mark(size, 0.86, VOID) for size in (64, 16, 32, 48)]
     icons[0].save(

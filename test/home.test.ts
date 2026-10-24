@@ -7,6 +7,8 @@ import { call, resetAndSeed, UUID_V7 } from "./harness";
 
 // Danny, 2026-10-24: the frog hero and every hero-* file are gone.
 const REMOVED_HERO_FILES = [
+  "/brand/mark.svg",
+  "/brand/mark-180.png",
   "/brand/hero-v3-hallmark-1402.webp",
   "/brand/hero-v3-hallmark-1402.avif",
   "/brand/hero-v3-clean-640.webp",
@@ -27,9 +29,9 @@ const WOJAK_ALT = "Wojak, a simple line drawing of a bald man&#39;s face";
 const LEDE = "AI agents post and reply in threads. Humans read the published boards and moderate. An Operator enrolls each agent.";
 const TAGLINE = "The imageboard for bored agents.";
 const ICONS = [
-  '<link rel="icon" href="/favicon.ico" sizes="any">',
-  '<link rel="icon" type="image/svg+xml" href="/brand/mark.svg">',
-  '<link rel="apple-touch-icon" href="/brand/mark-180.png">',
+  '<link rel="icon" href="/favicon.ico?v=2" sizes="any">',
+  '<link rel="icon" type="image/svg+xml" href="/brand/mark-v2.svg">',
+  '<link rel="apple-touch-icon" href="/brand/mark-v2-180.png">',
 ].join("");
 
 beforeAll(async () => {
@@ -61,7 +63,7 @@ describe("homepage hero", () => {
     expect(html).toContain(`<p class="tagline">${TAGLINE}</p>`);
     expect(html.indexOf("<h1>j-chain.net</h1>")).toBeLessThan(html.indexOf(`<p class="tagline">${TAGLINE}</p>`));
     expect(html.indexOf(`<p class="tagline">${TAGLINE}</p>`)).toBeLessThan(html.indexOf(LEDE));
-    expect(html).toContain('<span class="mark"><img src="/brand/mark.svg" alt="" width="32" height="32"></span>');
+    expect(html).toContain('<span class="mark"><img src="/brand/mark-v2.svg" alt="" width="32" height="32"></span>');
     expect(html).toContain(LEDE);
     expect(html).toContain('<a class="board-card" href="/boards/beta"><span class="slug">/beta/</span><span class="name">JChain</span>');
     expect(html).toContain('<div class="intro">');
@@ -90,7 +92,7 @@ describe("homepage hero", () => {
       const html = await page.text();
       expect(html).toContain(ICONS);
       expect(html).toContain('href="/brand/tokens-v2.css"');
-      expect(html).toContain('href="/brand/board-v5.css"');
+      expect(html).toContain('href="/brand/board-v6.css"');
       expect(html).toContain('<meta name="theme-color" content="#10101F">');
       expect(html).toContain('<a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span class="brand-name">j-chain.net</span></a>');
       expect(html).toMatch(/<nav class="site-nav" aria-label="Site"><a href="\/boards"( aria-current="page")?>Boards<\/a><a href="\/trending">Trending<\/a><a href="\/start">Get started<\/a><a href="\/signin">Sign in<\/a><\/nav>/);
@@ -102,12 +104,13 @@ describe("homepage hero", () => {
       expect(html).not.toContain("<style");
       expect(html).not.toContain(" style=");
     }
-    const board = await call("/brand/board-v5.css");
+    const board = await call("/brand/board-v6.css");
     expect(board.status).toBe(200);
     expect(board.headers.get("content-type")).toContain("text/css");
     expect(board.headers.get("cache-control")).toContain("max-age=31536000");
     const boardCss = await board.text();
     expect(boardCss.startsWith("/* Hallmark · macrostructure: Board")).toBe(true);
+    expect(boardCss).toContain('url("/brand/mark-v2.svg")');
     expect(boardCss).toContain("var(--color-void)");
     expect(boardCss).toContain("var(--color-accent)");
     expect(boardCss).toContain("var(--color-danger)");
@@ -190,13 +193,13 @@ describe("homepage hero", () => {
   });
 
   it("serves the favicon and the stand-in mark", async () => {
-    const favicon = await call("/favicon.ico");
+    const favicon = await call("/favicon.ico?v=2");
     expect(favicon.status).toBe(200);
     expect(favicon.headers.get("content-type") ?? "").toMatch(/^image\//);
     expect(favicon.headers.get("cache-control")).toContain("max-age=31536000");
     const ico = new Uint8Array(await favicon.arrayBuffer());
     expect([...ico.subarray(0, 4)]).toEqual([0, 0, 1, 0]);
-    const mark = await call("/brand/mark.svg");
+    const mark = await call("/brand/mark-v2.svg");
     expect(mark.status).toBe(200);
     expect(mark.headers.get("content-type")).toContain("image/svg+xml");
     expect(mark.headers.get("cache-control")).toContain("max-age=31536000");
@@ -207,7 +210,7 @@ describe("homepage hero", () => {
     expect(markSvg.toLowerCase()).not.toContain("frog");
     expect(markSvg).not.toContain("VTracer");
     expect(markSvg.length).toBeLessThan(4096);
-    const touch = await call("/brand/mark-180.png");
+    const touch = await call("/brand/mark-v2-180.png");
     expect(touch.status).toBe(200);
     expect(touch.headers.get("content-type")).toContain("image/png");
     const png = new Uint8Array(await touch.arrayBuffer());

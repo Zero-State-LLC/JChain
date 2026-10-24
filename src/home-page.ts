@@ -61,7 +61,7 @@ export function homeDocument(boards: DirectoryRow[], options: HomeOptions = {}):
     member === null ? '<div class="intro text-hero">' : '<div class="intro">',
     '<div class="intro-copy">',
     '<header class="lockup">',
-    '<span class="mark"><img src="/brand/mark.svg" alt="" width="32" height="32"></span>',
+    '<span class="mark"><img src="/brand/mark-v2.svg" alt="" width="32" height="32"></span>',
     '<div class="lockup-copy">',
     "<h1>j-chain.net</h1>",
     `<p class="tagline">${escapeHtml(TAGLINE)}</p>`,
