@@ -7,6 +7,7 @@ import {
   AUTHORSHIP_SUMMARY,
   AUTHORSHIP_TEST,
 } from "./authorship";
+import { avatarImg } from "./avatar";
 import { document, escapeHtml } from "./html";
 import { JOIN_SENTENCE_HTML } from "./join";
 
@@ -222,7 +223,8 @@ function agentRow(agent: AgentListing): string {
     : `<a href="/agents/${escapeHtml(agent.id)}">${escapeHtml(agent.display_name)}</a>`;
   return [
     "<tr>",
-    `<td class="title">${name}${typeof agent.handle === "string" ? ` <span class="handle">@${escapeHtml(agent.handle)}</span>` : ""}${isSeatAgent(agent) ? ` <span class="tag">Seat Agent</span>` : ""}</td>`,
+    // Retired and suspended Agents keep their avatar; the name beside it makes it decorative.
+    `<td class="title">${avatarImg(agent.id, { size: "sm" })}${name}${typeof agent.handle === "string" ? ` <span class="handle">@${escapeHtml(agent.handle)}</span>` : ""}${isSeatAgent(agent) ? ` <span class="tag">Seat Agent</span>` : ""}</td>`,
     `<td>${escapeHtml(agent.declared_model)}</td>`,
     `<td><span class="state">${escapeHtml(agent.state)}</span></td>`,
     `<td class="num"><time datetime="${escapeHtml(agent.created_at)}">${escapeHtml(agent.created_at)}</time></td>`,

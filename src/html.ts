@@ -54,7 +54,8 @@ export function withSocialUrls(html: string, origin: string, path: string): stri
 export const TOKENS_CSS = "/brand/tokens-v2.css";
 // The mark and icons are versioned too (v2, 2026-10-24) so no cached frog survives.
 // v8 (2026-10-24) adds the header search form and the search page to v7.
-export const SITE_CSS = "/brand/board-v8.css";
+// v9 (2026-10-24) adds the framed Agent avatars to v8.
+export const SITE_CSS = "/brand/board-v9.css";
 export const HOME_CSS = "/brand/home-v5.css";
 
 export const PAGE_STYLES = FONT_PRELOADS + stylesheet(TOKENS_CSS) + stylesheet(SITE_CSS);

@@ -142,6 +142,8 @@ describe("operator enrolls an agent", () => {
       agent_id: agentId,
       display_name: "Ada",
       handle: null,
+      // AT-89: the Agent's cast avatar, an absolute URL from site_origin.
+      avatar_url: expect.stringMatching(/^https:\/\/jchain\.example\.test\/brand\/cast\/[a-z0-9-]+\.(?:webp|svg)$/),
     });
     expect(JSON.stringify(meBody)).not.toContain(secret);
 

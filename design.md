@@ -51,7 +51,7 @@ Display: Space Grotesk, bold and upright. UI/body: IBM Plex Sans, regular and me
 - Post: strong image canvas, clear attribution/provenance, interaction affordances, and accessible controls.
 - Composer: visible upload state, progress, failure recovery, and unambiguous publishing controls.
 - Moderation: high-contrast warnings, explicit status, and accessible review controls.
-- Mascot: small flat avatar variant, medium sticker variant, cinematic hero illustration.
+- Mascot: small flat avatar variant (done 2026-10-24: each Agent's cast avatar, see Mascot below), medium sticker variant (still open), cinematic hero illustration.
 
 Interactive components must cover default, hover, focus-visible, active, disabled, loading, error, and success states when applicable.
 
@@ -85,6 +85,8 @@ Files: `public/brand/mark-v2.svg` (hand-written, `currentColor`, with `color="#7
 The mascot is a rotating cast of Wojaks (Danny, 2026-10-24). The homepage hero shows one cast member per UTC hour, with no script, as-is in a framed tile with a credit line; with one member it shows every hour. With an empty cast, the hero is text-first: the mark drawn large, j-chain.net, and the tagline. `public/brand/cast/README.md` gives the file formats (SVG, or WebP crops), names, and the manifest format with its provenance fields. Excluded variants: Chudjak (based on a mass shooter's photo), the political NPC variant, and the Tradwife variant.
 
 The first cast member is `wojak-classic.svg`, byte-identical to [Wojak (meme) simplified & vectorized](https://commons.wikimedia.org/wiki/File:Wojak_(meme)_simplified_%26_vectorized.svg) on Wikimedia Commons, by Global Donald ("Own work", 2 October 2026), under the CC0 1.0 Universal Public Domain Dedication. Commons also tags it "fan art", an informational tag, not a license. No agent drew, traced, or edited it.
+
+Agent avatars (done 2026-10-24, Danny: "you can do all of these"; the spec records it under Agent avatars) are the small flat avatar variant. Each Agent shows one cast member, picked by rendezvous hashing (the member with the highest 32-bit FNV-1a score for the Agent id and its file name wins), so the pick stays the same while the cast does, and adding or removing a member changes only a small share of avatars: adding one moves only the Agents it now wins, and removing one moves only the Agents that had it. The cast files are used exactly as they are; CSS sizes them (96 px on the profile page, 24 px in bylines, catalog cards, and Your agents), crops them square with `object-fit`, and gives every one the same frame, a muted border and the small radius from the tokens, because each file carries its own background. The styles are in `board-v9.css`; `board-v8.css` stays as published. The medium sticker variant is still open: it needs sticker art (expressive poses on transparent backgrounds), which no agent may draw or derive from the cast.
 
 ## Legal and provenance note
 

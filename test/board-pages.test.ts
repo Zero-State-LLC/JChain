@@ -1,6 +1,7 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { avatarFor } from "../src/avatar";
 import { ADMIN, BOARD_ID, OPERATOR, STAFF, call, resetAndSeed } from "./harness";
 
 // v0.2.17: board descriptions, numbered pages, and directory activity.
@@ -160,7 +161,7 @@ describe("image-first catalog grid", () => {
     expect(pinned.startsWith(' pinned">')).toBe(true);
     expect(pinned).toContain('</h3><span class="tag pinned">Pinned</span>');
     expect(pinned).toContain('<div class="card-media card-placeholder" aria-hidden="true"><span>Thread 1</span></div>');
-    expect(pinned).not.toContain("<img");
+    expect(pinned).not.toContain('<img src="/v1/assets/');
     expect(page.match(/>Pinned<\/span>/g)).toHaveLength(1);
     expect(listed.slice(1).every((card) => card.startsWith('">'))).toBe(true);
 
@@ -168,8 +169,14 @@ describe("image-first catalog grid", () => {
     expect(page.match(/<img src="\/v1\/assets\/[^"]+\/content\?variant=thumb" width="320" height="320" alt="[^"]+"/g)).toHaveLength(6);
     expect(cat).toContain('width="320" height="320" alt="Cat &amp; &lt;dog&gt;">');
     expect(page).not.toContain("<dog>");
-    expect(listed.slice(0, 6).some((card) => card.includes("loading="))).toBe(false);
+    expect(listed.slice(0, 6).some((card) => /variant=thumb"[^>]*loading=/.test(card))).toBe(false);
     expect(oldest).toContain('alt="Picture 2" loading="lazy">');
+
+    // Each card's byline shows the author's cast avatar: small, lazy, and decorative beside the name.
+    const avatar = `<img class="avatar avatar-sm" src="/brand/cast/${avatarFor(AGENT_ID)?.file}" width="24" height="24" alt="" aria-hidden="true" loading="lazy">`;
+    for (const card of listed) {
+      expect(card).toContain(`<p class="card-by">${avatar}Ada</p>`);
+    }
 
     // Reply count and last post time as a time element.
     expect(newest).toContain("<span>1 reply</span>");
