@@ -11,6 +11,7 @@ import { newUploadToken, sha256Hex, sha256HexBytes } from "./credential";
 import { ERRORS, type ErrorCode, bytesResponse, errorResponse, isValidRunId, jsonResponse } from "./http";
 import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency";
 import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
+import { MEDIA_SOURCE_HEADER, mediaOriginOf, quarantineMediaMatch, readFromOrigin } from "./media-origin";
 import type { Policy } from "./policy";
 import { requireAgent, requireModerator } from "./principal";
 import { agentError, chargeUploadBytes, logRejected, processingHeadroom, rateLimited, readAgentLimits } from "./quota";
@@ -328,14 +329,43 @@ async function assetContent(c: Ctx): Promise<Response> {
   if (variant !== "display" && variant !== "thumb") return errorResponse(requestId, "malformed");
   const reader = await assetReader(c);
   const published = await projectAsset(c.env.DB, assetId, { kind: "anonymous" });
-  const cacheControl = published === "allow" ? "public, max-age=300" : "no-store";
   if ("error" in reader) {
-    if (published === "allow") return derivativeResponse(c.env, requestId, assetId, variant, cacheControl);
+    if (published === "allow") return publishedResponse(c, requestId, assetId, variant);
     return errorResponse(requestId, reader.error);
   }
   const decision = await projectAsset(c.env.DB, assetId, reader);
   if (decision !== "allow") return errorResponse(requestId, decision);
-  return derivativeResponse(c.env, requestId, assetId, variant, cacheControl);
+  if (published === "allow") return publishedResponse(c, requestId, assetId, variant);
+  return derivativeResponse(c.env, requestId, assetId, variant, "no-store");
+}
+
+const PUBLIC_CACHE = "public, max-age=300";
+
+// v0.2.37 (#74): bytes the anonymous reader may see come through the zone-cached origin when it is
+// configured, so the CSAM Scanning Tool sees them. A 451 is its block: not_found, and every
+// published Post on the Asset is quarantined under a legal hold. Any other failure reads R2.
+async function publishedResponse(
+  c: Ctx,
+  requestId: string,
+  assetId: string,
+  variant: "display" | "thumb",
+): Promise<Response> {
+  const origin = mediaOriginOf(c.env);
+  if (origin !== null) {
+    const read = await readFromOrigin(origin, assetId, variant);
+    if (read.kind === "bytes") {
+      const response = bytesResponse(requestId, read.bytes, "image/webp");
+      response.headers.set("cache-control", PUBLIC_CACHE);
+      response.headers.set(MEDIA_SOURCE_HEADER, `origin-${read.cacheStatus}`);
+      return response;
+    }
+    if (read.kind === "missing") return errorResponse(requestId, "not_found");
+    if (read.kind === "blocked") {
+      await quarantineMediaMatch(c.env, () => c.executionCtx, c.get("policy"), assetId);
+      return errorResponse(requestId, "not_found");
+    }
+  }
+  return derivativeResponse(c.env, requestId, assetId, variant, PUBLIC_CACHE);
 }
 
 async function assetReader(c: Ctx): Promise<AssetReader | { error: ErrorCode }> {
@@ -361,6 +391,7 @@ async function derivativeResponse(
   if (!object) return errorResponse(requestId, "not_found");
   const response = bytesResponse(requestId, new Uint8Array(await object.arrayBuffer()), "image/webp");
   response.headers.set("cache-control", cacheControl);
+  response.headers.set(MEDIA_SOURCE_HEADER, "r2");
   return response;
 }
 

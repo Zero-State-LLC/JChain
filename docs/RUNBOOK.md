@@ -90,15 +90,37 @@ OD-07, before a second Operator: two weeks, the live path in step 4, a queue sti
 
 ## CSAM Scanning Tool edge cache
 
-Published image bytes are a backstop for the CSAM Scanning Tool. `GET /v1/assets/:id/content?variant=display` and `variant=thumb` send `Cache-Control: public, max-age=300` only when the Visibility Projection allows an anonymous reader, which means a Post on that Asset is `published`. Anything else, including an owner preview of a Post still in review, stays `Cache-Control: no-store`.
+Cloudflare's CSAM Scanning Tool hashes images as they enter the Cloudflare cache. Until v0.2.37 the Worker read image bytes from R2 itself, so nothing entered the cache and production responses carried no `cf-cache-status` (observed 2026-10-23, #74). From v0.2.37 (Danny, 2026-10-23 11:34 PM PT: "ok handle your work") a published derivative is read through a zone-cached origin host locked to the Worker. Gated reads (owner preview, Moderator review, anything `no-store`) still read R2 directly and never touch the origin.
 
-After a production deploy, check one published image and one unpublished preview:
+`GET /v1/assets/:id/content?variant=display` and `variant=thumb` send `Cache-Control: public, max-age=300` only when the Visibility Projection allows an anonymous reader, which means a Post on that Asset is `published`. Only those reads go through the origin, and only when the production var `MEDIA_ORIGIN` and the secret `MEDIA_ORIGIN_KEY` are both set. Each response says where its bytes came from in `x-jchain-media`: `origin-hit`, `origin-miss`, or another lowercased `cf-cache-status` (`origin-none` when the origin sent none), or `r2`.
 
-1. `curl -sI "https://j-chain.net/v1/assets/<published-asset-id>/content?variant=display"` and confirm `cache-control: public, max-age=300`.
-2. Repeat with an Asset that has no published Post. The response is `404` or `401`, and `cache-control` is `no-store`.
-3. In the Cloudflare dashboard, Caching, Cache Rules, confirm the zone is not overriding that header with a longer edge TTL for `/v1/assets/`. The 300 second max-age is the edge lifetime for a published derivative. A hide, quarantine, or legal hold must not keep serving the previous public bytes past that window. Purge the URL by hand if a prohibited image was cached before the Post left `published`.
+### Dashboard pieces
 
-The header check is the code receipt. Turning the CSAM Scanning Tool on in the dashboard stays human work.
+Danny's Grok bot does these in the Cloudflare dashboard. They are not in the repository.
+
+1. **R2 custom domain.** Connect the production R2 bucket `jchain-media` to the custom domain `img-origin.j-chain.net` (R2 > `jchain-media` > Settings > Custom Domains). Leave the bucket's `r2.dev` public URL off.
+2. **Cache Rule.** Caching > Cache Rules: a rule for hostname equals `img-origin.j-chain.net` that makes the request eligible for cache. The Worker also asks for a one-day edge TTL on each origin read.
+3. **WAF custom rule.** Security > WAF > Custom rules: block when hostname equals `img-origin.j-chain.net` and the request header `x-jchain-origin` does not equal the secret. The secret is a long random value kept only in the dashboard rule and the Worker secret.
+4. **Worker secret.** `wrangler secret put MEDIA_ORIGIN_KEY --env production` with that same value. `MEDIA_ORIGIN` (`https://img-origin.j-chain.net`) is already a production var in the Wrangler config. The admin Policy section shows both as Present once they are set. With either missing the Worker reads R2 as before.
+
+Rotating the secret: change the WAF rule and the Worker secret together. In between, origin reads get `403` and fall back to R2 (one `media_origin_fallback` warning each), so images keep working but the tool sees nothing.
+
+### Verification after a deploy
+
+1. `curl -sI "https://j-chain.net/v1/assets/<published-asset-id>/content?variant=display"` twice. Both show `cache-control: public, max-age=300`. The second shows `x-jchain-media: origin-hit` (the first may be `origin-miss`). `x-jchain-media: r2` means the origin is not configured or failed: search Workers Logs for `media_origin_fallback`, which names the status.
+2. `curl -sI "https://img-origin.j-chain.net/derivatives/<asset-id>/display"` without the header gets `403` from the WAF rule. Anything else means the origin is open to the public: fix the WAF rule first.
+3. Repeat step 1 with an Asset that has no published Post. The response is `404` or `401` with `cache-control: no-store`, and no `x-jchain-media` header.
+4. Confirm no Cache Rule gives `j-chain.net/v1/assets/` a longer edge TTL than the 300 second max-age. The one-day TTL applies only to `img-origin.j-chain.net`, which the public cannot read. Purge a `j-chain.net` image URL by hand if a prohibited image was cached there before the Post left `published`.
+
+### CSAM match
+
+Counsel (prabu) reviews this path. Do not change it without counsel.
+
+1. **The signal arrives.** Either Cloudflare's daily CSAM Scanning Tool email, or a Moderator alert followed by a legal-hold quarantine on `/moderation`. When the tool blocks an image, the origin answers `451`, the Worker answers `not_found`, and every published Post on that Asset is quarantined with a legal hold, reason `csam`, audit actor `system`, and the image's hashes blocked. The author cannot appeal it.
+2. **An Admin confirms the hold.** The Post is listed under First in line as a legal hold. Do not delete it, Archive it, or Clear it. A Moderator without a seat cannot release it; an Admin must not.
+3. **Preserve per counsel.** Retention never deletes an Asset under a legal hold. Use the Admin evidence route to view the material only as counsel directs, and record what was preserved and when.
+4. **A human files the NCMEC report.** File a CyberTipline report at <https://report.cybertip.org/>. Cloudflare does not file it for us, and the service files nothing automatically.
+5. **A false positive.** Appeal the match in the Cloudflare dashboard under Security Center > Blocked Content. Only after Cloudflare lifts the block may an Admin Clear the hold on `/moderation`, which releases the Post and its image and removes the Blocked Hashes.
 
 ## 10,000-post D1 index
 
