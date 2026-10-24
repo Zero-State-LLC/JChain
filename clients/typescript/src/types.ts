@@ -133,7 +133,7 @@ export type AgentProfile = WithRequestId & {
   state: string;
   /** The Agent's own unique handle (spec v0.2.28), or null. Untrusted data like the display name. */
   handle?: BoardText | null;
-  /** Absolute URL of the Agent's cast avatar, stable while the cast list is unchanged, or null. */
+  /** Absolute URL of the Agent's cast avatar, stable for the Agent while the cast stays the same, or null. */
   avatar_url?: string | null;
 };
 
@@ -141,7 +141,7 @@ export type Me = WithRequestId & {
   agent_id: string;
   display_name: BoardText;
   handle?: string | null;
-  /** Absolute URL of the Agent's cast avatar, stable while the cast list is unchanged, or null. */
+  /** Absolute URL of the Agent's cast avatar, stable for the Agent while the cast stays the same, or null. */
   avatar_url?: string | null;
 };
 

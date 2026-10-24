@@ -2,26 +2,60 @@ import { CAST, type CastMember } from "./cast";
 import { escapeHtml } from "./html";
 
 // Agent avatars (Danny, 2026-10-24): each Agent shows one member of the homepage cast,
-// picked by a stable hash of its id. The pick never changes for that Agent unless the
-// cast list changes. The cast files are shown as they are; only CSS sizes and frames them.
-// Agents have no profile image of their own, so the cast is the only source.
+// picked by rendezvous (highest-random-weight) hashing: every cast entry scores
+// FNV-1a(agent id + "\n" + entry file), and the highest score wins, ties going to the
+// smaller file name. The pick depends only on the id and the set of cast files, not on
+// their order. Adding a member moves only the Agents it now wins (about 1 in n+1);
+// removing one moves only the Agents that had it. The cast files are shown as they are;
+// only CSS sizes and frames them. Agents have no profile image of their own.
 
 const FNV_OFFSET = 0x811c9dc5;
 const FNV_PRIME = 0x01000193;
+const ENCODER = new TextEncoder();
+
+function fnvUpdate(hash: number, bytes: Uint8Array): number {
+  let next = hash;
+  for (const byte of bytes) {
+    next ^= byte;
+    next = Math.imul(next, FNV_PRIME) >>> 0;
+  }
+  return next;
+}
 
 // 32-bit FNV-1a over the UTF-8 bytes of the text.
 export function fnv1a32(text: string): number {
-  let hash = FNV_OFFSET;
-  for (const byte of new TextEncoder().encode(text)) {
-    hash ^= byte;
-    hash = Math.imul(hash, FNV_PRIME) >>> 0;
-  }
-  return hash >>> 0;
+  return fnvUpdate(FNV_OFFSET, ENCODER.encode(text)) >>> 0;
 }
+
+// FNV-1a is a byte stream, so the "<id>\n" prefix is hashed once and continued per file.
+function rendezvous(agentId: string, cast: readonly CastMember[]): CastMember | null {
+  const prefix = fnvUpdate(FNV_OFFSET, ENCODER.encode(`${agentId}\n`));
+  let best: CastMember | null = null;
+  let bestScore = -1;
+  for (const member of cast) {
+    const score = fnvUpdate(prefix, ENCODER.encode(member.file)) >>> 0;
+    if (score > bestScore || (score === bestScore && best !== null && member.file < best.file)) {
+      best = member;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+// The bundled cast never changes while the Worker runs, so a pick for it is the same in
+// every request; a small bounded cache saves repeat bylines the 49 hashes.
+const CACHE_LIMIT = 1024;
+const cache = new Map<string, CastMember | null>();
 
 export function avatarFor(agentId: string, cast: readonly CastMember[] = CAST): CastMember | null {
   if (cast.length === 0) return null;
-  return cast[fnv1a32(agentId) % cast.length] ?? null;
+  if (cast !== CAST) return rendezvous(agentId, cast);
+  const known = cache.get(agentId);
+  if (known !== undefined) return known;
+  const picked = rendezvous(agentId, cast);
+  if (cache.size >= CACHE_LIMIT) cache.clear();
+  cache.set(agentId, picked);
+  return picked;
 }
 
 export function avatarPath(member: CastMember): string {

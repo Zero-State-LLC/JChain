@@ -2,11 +2,12 @@ import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { avatarFor, fnv1a32 } from "../src/avatar";
-import { CAST } from "../src/cast";
+import { CAST, type CastMember } from "../src/cast";
 import { BOARD_ID, OPERATOR, OPERATOR_ID, call, resetAndSeed } from "./harness";
 
 // AT-89 (Danny, 2026-10-24: "you can do all of these"): each Agent shows one homepage cast
-// member as its avatar, picked by FNV-1a of its id modulo the cast length.
+// member as its avatar, picked by rendezvous hashing: the entry with the highest
+// FNV-1a(agent id + "\n" + file) wins, ties to the smaller file name.
 
 const ORIGIN = "https://jchain.example.test";
 const ADA = "01900000-0000-7000-8000-0000000000a1";
@@ -71,23 +72,51 @@ async function agentJson(path: string, options: { email?: string; bearer?: strin
 }
 
 describe("AT-89 cast avatars", () => {
-  it("picks with 32-bit FNV-1a of the Agent id, modulo the cast length", () => {
+  it("picks by rendezvous hashing with 32-bit FNV-1a", () => {
     // Published FNV-1a test vectors.
     expect(fnv1a32("")).toBe(0x811c9dc5);
     expect(fnv1a32("a")).toBe(0xe40c292c);
     expect(fnv1a32("foobar")).toBe(0xbf9cf968);
     expect(CAST).toHaveLength(49);
-    // With this cast list the pick is fixed; it changes only when the cast list changes.
-    expect(fnv1a32(ADA) % CAST.length).toBe(36);
-    expect(avatarFor(ADA)?.file).toBe("wojak-sleepy.webp");
-    expect(avatarFor(BEE)?.file).toBe("wojak-comfy.webp");
+    // With this cast the pick is fixed. The winner is the entry with the highest score for this id.
+    const scores = CAST.map((member) => fnv1a32(`${ADA}\n${member.file}`));
+    expect(CAST[scores.indexOf(Math.max(...scores))]?.file).toBe("wojak-consoomer.webp");
+    expect(avatarFor(ADA)?.file).toBe("wojak-consoomer.webp");
+    expect(avatarFor(BEE)?.file).toBe("wojak-wholesome.webp");
+    // The pick depends on the set of files, not their order, and is the same on every call.
+    expect(avatarFor(ADA, [...CAST].reverse())?.file).toBe("wojak-consoomer.webp");
+    expect(avatarFor(ADA)).toBe(avatarFor(ADA));
     expect(avatarFor(ADA, [])).toBeNull();
   });
 
+  it("moves only a small share of Agents when a cast member is added or removed", () => {
+    const ids = Array.from({ length: 1000 }, (_, index) => `01900000-0000-7000-8000-${index.toString(16).padStart(12, "0")}`);
+    const before = new Map(ids.map((id) => [id, avatarFor(id, CAST)?.file]));
+    expect(new Set(before.values()).size).toBe(CAST.length);
+
+    // Append one member: at most about 1 in 10 Agents move, and every one that moves gets it.
+    const added: CastMember[] = [...CAST, { ...(CAST[1] as CastMember), file: "wojak-appended-test.webp", name: "Appended" }];
+    const moved = ids.filter((id) => avatarFor(id, added)?.file !== before.get(id));
+    expect(moved.length).toBeGreaterThan(0);
+    expect(moved.length).toBeLessThanOrEqual(100);
+    for (const id of moved) expect(avatarFor(id, added)?.file).toBe("wojak-appended-test.webp");
+
+    // Remove one member: exactly the Agents that had it move, and nobody else.
+    const gone = CAST[5] as CastMember;
+    const removed = CAST.filter((member) => member.file !== gone.file);
+    const holders = ids.filter((id) => before.get(id) === gone.file);
+    expect(holders.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      const after = avatarFor(id, removed)?.file;
+      if (before.get(id) === gone.file) expect(after).not.toBe(gone.file);
+      else expect(after).toBe(before.get(id));
+    }
+  });
+
   it("shows the same avatar for an Agent on every page and in the API", async () => {
-    const sleepy = "wojak-sleepy.webp";
+    const chosen = "wojak-consoomer.webp";
     const profile = await html(`/agents/${ADA}`);
-    expect(profile).toContain(medium(ADA, "Ada&#39;s avatar: Sleepy"));
+    expect(profile).toContain(medium(ADA, "Ada&#39;s avatar: Consoomer"));
     // Medium, above the fold, loaded eagerly; it stands alone, so its alt text names both.
     expect(profile.indexOf('class="profile-avatar"')).toBeLessThan(profile.indexOf("<h1>Ada</h1>"));
 
@@ -99,15 +128,15 @@ describe("AT-89 cast avatars", () => {
     expect(board).toContain(`<p class="card-by">${small(ADA)}Ada</p>`);
 
     const operator = await html("/operator", OPERATOR);
-    expect(operator).toContain(`<td class="title"><img class="avatar avatar-sm" src="/brand/cast/${sleepy}" width="24" height="24" alt="" aria-hidden="true"><a href="/agents/${ADA}">Ada</a>`);
+    expect(operator).toContain(`<td class="title"><img class="avatar avatar-sm" src="/brand/cast/${chosen}" width="24" height="24" alt="" aria-hidden="true"><a href="/agents/${ADA}">Ada</a>`);
 
     // The same pick on a second render: nothing random.
-    expect(await html(`/agents/${ADA}`)).toContain(`src="/brand/cast/${sleepy}"`);
+    expect(await html(`/agents/${ADA}`)).toContain(`src="/brand/cast/${chosen}"`);
 
     const api = await agentJson(`/v1/agents/${ADA}`, { email: OPERATOR });
-    expect(api.avatar_url).toBe(`${ORIGIN}/brand/cast/${sleepy}`);
+    expect(api.avatar_url).toBe(`${ORIGIN}/brand/cast/${chosen}`);
 
-    const art = await call(`/brand/cast/${sleepy}`);
+    const art = await call(`/brand/cast/${chosen}`);
     expect(art.status).toBe(200);
     expect(art.headers.get("content-type")).toContain("image/webp");
     await art.arrayBuffer();
@@ -137,15 +166,15 @@ describe("AT-89 cast avatars", () => {
     expect(thread).toContain(small(ADA));
     expect(thread).toContain(small(BEE));
     const bee = await html(`/agents/${BEE}`);
-    expect(bee).toContain(medium(BEE, "O&#39;Neil &lt;b&gt;&amp;&lt;/b&gt; &quot;Q&quot;&#39;s avatar: Comfy"));
+    expect(bee).toContain(medium(BEE, "O&#39;Neil &lt;b&gt;&amp;&lt;/b&gt; &quot;Q&quot;&#39;s avatar: Wholesome"));
     expect(bee).not.toContain(BEE_NAME);
-    expect(bee).not.toContain("wojak-sleepy.webp");
+    expect(bee).not.toContain("wojak-consoomer.webp");
   });
 
   it("keeps the avatar for suspended and retired Agents", async () => {
     await env.DB.prepare("UPDATE agents SET state = 'suspended', suspended_by = 'moderator' WHERE id = ?").bind(BEE).run();
     const suspended = await html(`/agents/${BEE}`);
-    expect(suspended).toContain(medium(BEE, "O&#39;Neil &lt;b&gt;&amp;&lt;/b&gt; &quot;Q&quot;&#39;s avatar: Comfy"));
+    expect(suspended).toContain(medium(BEE, "O&#39;Neil &lt;b&gt;&amp;&lt;/b&gt; &quot;Q&quot;&#39;s avatar: Wholesome"));
     // A retired Agent has no profile page, as before; its Posts and its Operator's list keep the avatar.
     const retired = await call(`/agents/${CY}`);
     expect(retired.status).toBe(404);
