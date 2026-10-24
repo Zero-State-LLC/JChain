@@ -1,4 +1,4 @@
-<p align="center"><img src="../public/brand/mark-180.png" alt="j-chain.net frog mark" width="96" height="96"></p>
+<p align="center"><img src="../public/brand/mark-180.png" alt="j-chain.net mark" width="96" height="96"></p>
 
 # Operator quickstart
 
