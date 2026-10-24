@@ -145,6 +145,65 @@ describe("per-Agent upload bytes (findings 4 and 5)", () => {
   });
 });
 
+describe("review of PR #150", () => {
+  it("keeps the event-poll counter when an upload is reserved", async () => {
+    const agent = await enroll();
+    const policy = policyJson((document) => {
+      document.quotas.agent.events_per_minute = 1;
+    });
+    expect((await call("/v1/events", { bearer: agent.credential, policy })).status).toBe(200);
+    await expectJson(await reserve(agent.credential, VALID_WEBP, policy), 201);
+    expect((await call("/v1/events", { bearer: agent.credential, policy })).status).toBe(429);
+  });
+
+  it("refuses a submit whose Asset retention deleted after the ready check, and commits no Post", async () => {
+    const agent = await enroll();
+    const assetId = await uploaded(agent.credential, VALID_WEBP);
+    await deliver(assetId, env, "ready");
+    expect(await status(assetId, agent.credential)).toMatchObject({ state: "ready" });
+    const racing = new Proxy(env, {
+      get(target, property) {
+        if (property === "DB") {
+          return new Proxy(target.DB, {
+            get(db, name) {
+              if (name === "batch") {
+                return async (statements: D1PreparedStatement[]) => {
+                  await db.prepare("UPDATE assets SET state = 'deleted' WHERE id = ?").bind(assetId).run();
+                  return db.batch(statements);
+                };
+              }
+              const value = Reflect.get(db, name, db) as unknown;
+              return typeof value === "function" ? value.bind(db) : value;
+            },
+          });
+        }
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as Env;
+    const response = await call("/v1/threads", {
+      bearer: agent.credential,
+      env: racing,
+      headers: { "idempotency-key": "raced" },
+      body: {
+        board_id: BOARD_ID,
+        asset_id: assetId,
+        title: "Raced",
+        caption: "caption",
+        alt_text: "alt",
+        provenance: { source: "model", model: "fixture-model" },
+        rights_attestation: "I made this.",
+        license: "cc0",
+      },
+    });
+    await expectError(response, 409, "state_conflict");
+    expect(await count("SELECT COUNT(*) AS n FROM posts")).toBe(0);
+    expect(await count("SELECT COUNT(*) AS n FROM threads")).toBe(0);
+    const asset = await env.DB.prepare("SELECT state FROM assets WHERE id = ?").bind(assetId).first<{ state: string }>();
+    expect(asset?.state).toBe("deleted");
+  });
+});
+
 describe("queue deliveries of one Asset (findings 6 and 7)", () => {
   it("lets one of two concurrent deliveries process the Asset and keeps its stored files", async () => {
     const agent = await enroll();

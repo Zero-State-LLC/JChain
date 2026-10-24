@@ -130,6 +130,7 @@ async function openThread(c: Ctx): Promise<Response> {
   const state = await submitState(c.env, policy, principal.agentId);
   body.state = state;
   const statements: D1PreparedStatement[] = [
+    assetStillReady(c.env.DB, input.assetId),
     c.env.DB.prepare(
       "INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)",
     ).bind(threadId, input.boardId, createdAt),
@@ -159,7 +160,7 @@ async function openThread(c: Ctx): Promise<Response> {
   if (published) body.event_id = publishOnSubmit(c.env.DB, statements, postId, createdAt);
   return commit(
     c.env, requestId, policy, principal.agentId, input.boardId, ROUTE, key, bodyHash, "thread", body, published, statements,
-    c.req.header("user-agent") ?? null,
+    c.req.header("user-agent") ?? null, input.assetId,
   );
 }
 
@@ -253,7 +254,8 @@ async function replyToThread(c: Ctx): Promise<Response> {
   const body = replyBody(threadId, postId, input);
   const state = await submitState(c.env, policy, principal.agentId);
   body.state = state;
-  const statements: D1PreparedStatement[] = [
+  const statements: D1PreparedStatement[] = input.assetId === null ? [] : [assetStillReady(c.env.DB, input.assetId)];
+  statements.push(
     c.env.DB.prepare(
       `INSERT INTO posts (
          id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
@@ -274,12 +276,12 @@ async function replyToThread(c: Ctx): Promise<Response> {
       state,
       createdAt,
     ),
-  ];
+  );
   const published = state === "published";
   if (published) body.event_id = publishOnSubmit(c.env.DB, statements, postId, createdAt);
   return commit(
     c.env, requestId, policy, principal.agentId, thread.board_id, route, key, bodyHash, "reply", body, published, statements,
-    c.req.header("user-agent") ?? null,
+    c.req.header("user-agent") ?? null, input.assetId,
   );
 }
 
@@ -545,6 +547,7 @@ async function commit(
   published: boolean,
   statements: D1PreparedStatement[],
   userAgent: string | null,
+  assetId: string | null,
 ): Promise<Response> {
   const charged = await chargePublish(env, policy, agentId, boardId, kind);
   if (!charged.ok) {
@@ -570,6 +573,10 @@ async function commit(
     stored = await store(env, requestId, policy, agentId, route, key, bodyHash, { status: 201, body }, statements);
   } catch (error) {
     await charged.refund();
+    // The Asset left ready after the submit checked it: the guard aborted the batch, nothing committed.
+    if (assetId !== null && await assetGone(env.DB, assetId)) {
+      return agentError(env, policy, requestId, agentId, "state_conflict");
+    }
     throw error;
   }
   // A concurrent request with the same key won: nothing of ours committed, so refund and replay.
@@ -637,6 +644,21 @@ async function store(
     throw error;
   }
   return { response: jsonResponse(requestId, outcome.body, outcome.status), raced: false };
+}
+
+// Round-2 review (PR #150): the submit checks the Asset is ready, then awaits other steps before
+// its batch, and the daily run deletes a ready Asset that no Post references. This statement runs
+// first in the submit batch and, when the Asset is no longer ready, breaks the assets.state CHECK
+// so the whole batch aborts. When the batch commits first, retention sees the Post and keeps it.
+function assetStillReady(db: D1Database, assetId: string): D1PreparedStatement {
+  return db.prepare(
+    "UPDATE assets SET state = 'not_ready' WHERE id = ? AND state != 'ready'",
+  ).bind(assetId);
+}
+
+async function assetGone(db: D1Database, assetId: string): Promise<boolean> {
+  const row = await db.prepare("SELECT state FROM assets WHERE id = ?").bind(assetId).first<{ state: string }>();
+  return row?.state !== "ready";
 }
 
 async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {

@@ -329,17 +329,22 @@ export async function chargeUploadBytes(
   bytes: number,
 ): Promise<{ ok: true; refund: () => Promise<void> } | { ok: false; retryAfter: number }> {
   const day = dayWindow();
-  const charges = [{
-    key: `upload_bytes:${day.key}`,
-    amount: bytes,
-    limit: policy.quotas.agent.upload_bytes_per_day,
-    reset_at: day.resetAt,
-    counter: "upload_bytes",
-  }];
+  const charges: Charge[] = [
+    {
+      key: `upload_bytes:${day.key}`,
+      amount: bytes,
+      limit: policy.quotas.agent.upload_bytes_per_day,
+      reset_at: day.resetAt,
+      counter: "upload_bytes",
+    },
+    // apply() sweeps every events: and reactions: key it is not given, so the current minute's
+    // counters ride along at zero and survive the charge.
+    ...minuteCharges(policy.quotas.agent, minuteWindow(), null),
+  ];
   const stub = env.QUOTA.getByName(`agent:${agentId}`);
   const result = await stub.apply(charges);
   if (!result.ok) return { ok: false, retryAfter: result.retry_after };
-  return { ok: true, refund: () => stub.refund(charges) };
+  return { ok: true, refund: () => stub.refund(charges.filter((charge) => charge.amount > 0)) };
 }
 
 // CT-23: neurons for one scan call, in the `ai` object on a UTC day window.
