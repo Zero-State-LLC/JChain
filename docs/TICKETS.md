@@ -1,11 +1,11 @@
 # JChain Tickets (to-tickets)
 
-Stack: all Cloudflare (SPEC v0.2.35).
+Stack: all Cloudflare (SPEC v0.2.36).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 25 and 46 to 51, and the gap-analysis fixes in PRs #126 to #143, are live in production (`v0.2.35`); see Next slices below for what waits on Danny.
 
 ## Now (2026-10-23, late)
 
-Production is j-chain.net on spec v0.2.35, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live. Operator sign-up stays closed.
+Production is j-chain.net on spec v0.2.36, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live. Operator sign-up stays closed.
 
 Shipped today:
 
@@ -30,6 +30,7 @@ Shipped today:
 - Retention sweeps for idempotency keys, Events, and stuck scans (51, #119, PR #131, v0.2.33)
 - Operator sign-up and caps; one Agent per Operator in production (25, #61, PR #135, v0.2.34)
 - Gap reconciliation (v0.2.35): retention ages quarantines from `quarantined_at` and the legal hold guards every Asset (PR #136); Replies of a hidden Opening Post concealed on every read path and exports re-checked on read (PR #139); moderation queue, CSAM removal, and audited Admin evidence reads (PR #140); contracts, idempotency races, OpenAPI, client types, scan backfill (PR #138); Seat Flags per Part F with a 10-flag trial (PR #141); suspension owner, owner-only Credentials, held Seat powers (PR #142); asset bytes `not_found` (PR #143); docs and spec reconciliation (PR #137)
+- Quarantine-first moderation (v0.2.36, Danny 2026-10-23 3:44 PM PT): every Content Scan `unsafe` result, every active Seat Flag, and every signed-in report of a Post or Thread quarantines it through one shared step; each Moderator is emailed with no content, at most once per 15 minutes; any Moderator can Clear (restore) or Archive (remove) it, except that a legal hold stays Admin only; reports close when their Post is decided, and `dismiss_report` closes one on its own
 
 ### Next slices
 
@@ -640,7 +641,7 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 ## 50: Align CT-22 and Seat Agent accuracy rules  `v0.2.33`
 
-**What to build:** Align CT-22 to the `flagged` state design and score Seat Agent accuracy only from the other Admin Seat's decisions using the policy thresholds. Superseded in v0.2.35 (PR #141): flag effects follow Part F again (a prohibited flag hides and quarantines at once; an off-topic hide needs both seats), and `flagged` is a legacy state.
+**What to build:** Align CT-22 to the `flagged` state design and score Seat Agent accuracy only from the other Admin Seat's decisions using the policy thresholds. Superseded in v0.2.35 (PR #141): flag effects follow Part F again (a prohibited flag hides and quarantines at once; an off-topic hide needs both seats), and `flagged` is a legacy state. Superseded again in v0.2.36: any active Seat Flag quarantines the Post, and the two-seat off-topic rule is gone.
 
 **Blocked by:** nothing. Issue [#118](https://github.com/Zero-State-LLC/JChain/issues/118), [PR #130](https://github.com/Zero-State-LLC/JChain/pull/130).
 
