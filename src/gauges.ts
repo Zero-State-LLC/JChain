@@ -376,15 +376,26 @@ export type ScanGauges = {
 // Which automatic path wrote a 'quarantine' audit row, from its actor: 'system' is the Content
 // Scan, 'seat_agent' a Seat Flag, and a report quarantine shares its actor and time with the
 // 'report' row of the same request (the CSAM Scanning Tool's source is also 'report').
-// NULL is a Moderator quarantine, which is not automatic.
-const QUARANTINE_SOURCE = `CASE
-    WHEN q.actor_email = 'system' THEN 'scan'
-    WHEN q.actor_email = 'seat_agent' THEN 'seat_agents'
-    WHEN q.actor_email = '${MEDIA_MATCH_ACTOR}' OR EXISTS (
-      SELECT 1 FROM moderation_actions AS r
-       WHERE r.action = 'report' AND r.actor_email = q.actor_email AND r.created_at = q.created_at
-    ) THEN 'report'
-    ELSE NULL END`;
+// NULL is a Moderator quarantine, which is not automatic. Every read below is one pass over the
+// audit rows with window functions, never a lookup per row, because the audit table has no index
+// on its target or actor.
+const CLASSIFIED = `tagged AS (
+     SELECT id, target_type, target_id, action, created_at, actor_email,
+            MAX(action = 'report') OVER (PARTITION BY actor_email, created_at) AS with_report
+       FROM moderation_actions
+      WHERE action IN ('quarantine', 'restore', 'remove', 'report')
+   ), classified AS (
+     SELECT id, target_id, action, created_at,
+            CASE
+              WHEN action != 'quarantine' THEN NULL
+              WHEN actor_email = 'system' THEN 'scan'
+              WHEN actor_email = 'seat_agent' THEN 'seat_agents'
+              WHEN actor_email = '${MEDIA_MATCH_ACTOR}' OR with_report = 1 THEN 'report'
+              ELSE NULL
+            END AS source
+       FROM tagged
+      WHERE target_type = 'post' AND action IN ('quarantine', 'restore', 'remove')
+   )`;
 
 function secondsBetween(from: string, to: string): string {
   return `CAST(MAX(0, ROUND((julianday(${to}) - julianday(${from})) * 86400)) AS INTEGER)`;
@@ -398,44 +409,35 @@ const PUBLISH_TO_SCAN_SQL = `SELECT ${secondsBetween("published_at", "scanned_at
   ORDER BY scanned_at DESC LIMIT ${SAMPLE_LIMIT}`;
 const NEURONS_SQL = `SELECT COALESCE(SUM(neurons), 0) AS total, COUNT(*) AS scans
    FROM post_scans WHERE result IN ('safe', 'unsafe') AND scanned_at >= ?`;
-const SOURCES_SQL = `SELECT source, COUNT(*) AS n FROM (
-     SELECT ${QUARANTINE_SOURCE} AS source FROM moderation_actions AS q
-      WHERE q.target_type = 'post' AND q.action = 'quarantine' AND q.created_at >= ?
-   ) WHERE source IS NOT NULL GROUP BY source`;
-// The pairing of the hide-to-decision log line, read back from the audit log: each Clear (restore)
-// or Archive (remove) of a Post made in the window is paired with that Post's latest quarantine at
-// or before it. The pair counts when that quarantine was automatic and no other Clear or Archive
-// of the Post came between them.
-const QUARANTINE_TO_DECISION_SQL = `WITH d AS (
-     SELECT id, target_id, created_at FROM moderation_actions
-      WHERE target_type = 'post' AND action IN ('restore', 'remove') AND created_at >= ?
-      ORDER BY created_at DESC, id DESC LIMIT ${SAMPLE_LIMIT}
-   ), paired AS (
-     SELECT d.id AS decision_id, d.created_at AS decided_at, (
-       SELECT latest.id FROM moderation_actions AS latest
-        WHERE latest.target_type = 'post' AND latest.target_id = d.target_id
-          AND latest.action = 'quarantine' AND latest.created_at <= d.created_at
-        ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1
-     ) AS quarantine_id
-     FROM d
+const SOURCES_SQL = `WITH ${CLASSIFIED}
+   SELECT source, COUNT(*) AS n FROM classified
+    WHERE action = 'quarantine' AND source IS NOT NULL AND created_at >= ?
+    GROUP BY source`;
+// The pairing of the hide-to-decision log line, read back from the audit log. A Post's quarantine,
+// Clear (restore), and Archive (remove) rows are put in audit order (time, then id, which is time
+// ordered within a second). A Clear or Archive made in the window is a sample when the row just
+// before it is an automatic quarantine, so only the first decision closes a quarantine.
+const QUARANTINE_TO_DECISION_SQL = `WITH ${CLASSIFIED}, ordered AS (
+     SELECT id, action, created_at,
+            LAG(action) OVER by_post AS prev_action,
+            LAG(created_at) OVER by_post AS prev_at,
+            LAG(source) OVER by_post AS prev_source
+       FROM classified
+     WINDOW by_post AS (PARTITION BY target_id ORDER BY created_at, id)
    )
-   SELECT ${secondsBetween("q.created_at", "paired.decided_at")} AS s
-     FROM paired JOIN moderation_actions AS q ON q.id = paired.quarantine_id
-    WHERE (${QUARANTINE_SOURCE}) IS NOT NULL
-      AND NOT EXISTS (
-        SELECT 1 FROM moderation_actions AS other
-         WHERE other.target_type = 'post' AND other.target_id = q.target_id
-           AND other.action IN ('restore', 'remove') AND other.id != paired.decision_id
-           AND other.created_at >= q.created_at AND other.created_at < paired.decided_at
-      )`;
+   SELECT ${secondsBetween("prev_at", "created_at")} AS s FROM ordered
+    WHERE action IN ('restore', 'remove') AND prev_action = 'quarantine' AND prev_source IS NOT NULL
+      AND created_at >= ?
+    ORDER BY created_at DESC, id DESC LIMIT ${SAMPLE_LIMIT}`;
 // The Quarantined queue is every quarantined Post. A Post waits from its latest quarantine.
-const OLDEST_QUARANTINED_SQL = `SELECT MIN(since) AS since, COUNT(*) AS waiting FROM (
-     SELECT COALESCE((
-       SELECT MAX(q.created_at) FROM moderation_actions AS q
-        WHERE q.target_type = 'post' AND q.target_id = posts.id AND q.action = 'quarantine'
-     ), posts.created_at) AS since
-       FROM posts WHERE posts.state = 'quarantined'
-   )`;
+const OLDEST_QUARANTINED_SQL = `SELECT MIN(COALESCE(latest.at, posts.created_at)) AS since, COUNT(*) AS waiting
+   FROM posts
+   LEFT JOIN (
+     SELECT target_id, MAX(created_at) AS at FROM moderation_actions
+      WHERE target_type = 'post' AND action = 'quarantine'
+      GROUP BY target_id
+   ) AS latest ON latest.target_id = posts.id
+  WHERE posts.state = 'quarantined'`;
 
 function rowsOf(result: D1Result | undefined): Array<Record<string, unknown>> {
   return (result?.results ?? []).filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null);

@@ -45,6 +45,12 @@ describe("AT-88 the Content Scan gauges", () => {
     await audit("system", cleared, "quarantine", ago(2 * DAY));
     await audit(ADMIN, cleared, "restore", ago(2 * DAY - 100));
     await audit(ADMIN, cleared, "remove", ago(2 * DAY - 5000));
+    // Cleared and archived in the same second, after 200 seconds: the audit order (time, then the
+    // time-ordered id) puts the Clear first, so only the Clear is paired.
+    const sameSecond = uuidv7();
+    await audit("system", sameSecond, "quarantine", ago(2 * DAY), "post", uuidv7(now));
+    await audit(ADMIN, sameSecond, "restore", ago(2 * DAY - 200), "post", uuidv7(now + 1));
+    await audit(ADMIN, sameSecond, "remove", ago(2 * DAY - 200), "post", uuidv7(now + 2));
     // A Moderator's own quarantine is not automatic: neither counted nor paired.
     const manual = uuidv7();
     await audit(STAFF, manual, "quarantine", ago(DAY));
@@ -76,7 +82,7 @@ describe("AT-88 the Content Scan gauges", () => {
       '<tr><th scope="row">Publish to scan result</th><td>median 13 s, p95 24 s (n = 25)</td><td>median 15 s, p95 100 s (n = 30)</td></tr>',
     );
     expect(html).toContain(
-      '<tr><th scope="row">Quarantine to Moderator decision</th><td>median 600 s, p95 1,140 s (n = 21)</td><td>median 600 s, p95 1,200 s (n = 22)</td></tr>',
+      '<tr><th scope="row">Quarantine to Moderator decision</th><td>median 540 s, p95 1,140 s (n = 22)</td><td>median 600 s, p95 1,200 s (n = 23)</td></tr>',
     );
 
     expect(html).toContain('<li><span class="num">100</span><span class="num"> of 10,000 (1%)</span> Neurons recorded on scans today</li>');
@@ -85,7 +91,7 @@ describe("AT-88 the Content Scan gauges", () => {
     expect(html).toContain("Neurons per scan, all time: average 19.3 over 30 scans, next to the planning estimate of about 27.");
     expect(html).toContain("(30 of 100)");
 
-    expect(html).toContain('<li><span class="num">21</span> Quarantined by the Content Scan, last 7 days</li>');
+    expect(html).toContain('<li><span class="num">22</span> Quarantined by the Content Scan, last 7 days</li>');
     expect(html).toContain('<li><span class="num">1</span> Quarantined by the Seat Agents, last 7 days</li>');
     expect(html).toContain('<li><span class="num">1</span> Quarantined by a signed-in report, last 7 days</li>');
     expect(html).toContain('<li><span class="num">5 h 0 min</span><span class="num"> since ');
@@ -137,11 +143,18 @@ async function seedScan(result: string, publishedAt: string, scannedAt: string |
   ).bind(uuidv7(), result, neurons, publishedAt, scannedAt).run();
 }
 
-async function audit(actor: string, targetId: string, action: string, at: string, targetType = "post"): Promise<void> {
+async function audit(
+  actor: string,
+  targetId: string,
+  action: string,
+  at: string,
+  targetType = "post",
+  id = uuidv7(),
+): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO moderation_actions (id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at)
      VALUES (?, ?, ?, ?, ?, 'rules', NULL, NULL, ?)`,
-  ).bind(uuidv7(), actor, targetType, targetId, action, at).run();
+  ).bind(id, actor, targetType, targetId, action, at).run();
 }
 
 async function enroll(name: string, email: string): Promise<string> {
