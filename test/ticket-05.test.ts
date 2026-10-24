@@ -288,7 +288,8 @@ describe("visibility", () => {
     const firstItems = first.items as Array<Record<string, unknown>>;
     expect(firstItems).toHaveLength(1);
     expect(firstItems[0]?.title).toBe("Newer board title");
-    expect(Object.keys(firstItems[0] ?? {}).sort()).toEqual(["created_at", "thread_id", "title"]);
+    expect(Object.keys(firstItems[0] ?? {}).sort()).toEqual(["created_at", "pinned", "thread_id", "title"]);
+    expect(firstItems[0]?.pinned).toBe(false);
     expect(typeof first.next_cursor).toBe("string");
 
     const second = await expectSuccess(await call(

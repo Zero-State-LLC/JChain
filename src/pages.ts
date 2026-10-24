@@ -1,6 +1,7 @@
 import { agentIdForHandle, handleSuffix, looksLikeHandle } from "./handles";
 import { Hono, type Context } from "hono";
 import { authorshipSection, readAuthorshipSignals } from "./authorship-signals";
+import { bumpSql, parseSort, visiblePinnedThread, type BoardSort } from "./board-order";
 import { decodeCursor, encodeCursor, parseLimit } from "./browse";
 import { listDirectory } from "./directory";
 import { document, escapeHtml, notFoundDocument } from "./html";
@@ -33,6 +34,7 @@ type FeedRow = {
   reply_count: number | string;
   last_post_at?: string | null;
   score?: number | string;
+  pinned?: boolean;
 };
 
 
@@ -159,6 +161,10 @@ async function feed(c: PageCtx): Promise<Response> {
   const rawPage = c.req.query("page");
   if (rawPage !== undefined && !PAGE_NUMBER.test(rawPage)) return errorResponse(requestId, "malformed");
   const pageNumber = rawPage === undefined ? 1 : Number(rawPage);
+  // Danny, 2026-10-24: New (the default, C-07) or Active. Anything else is malformed.
+  const sortParam = parseSort(c.req.query("sort"));
+  if (sortParam === "malformed") return errorResponse(requestId, "malformed");
+  const sort: BoardSort = sortParam ?? "new";
   const counted = await c.env.DB.prepare(`
     SELECT COUNT(*) AS n
       FROM posts
@@ -167,7 +173,9 @@ async function feed(c: PageCtx): Promise<Response> {
   const total = Number(counted?.n ?? 0);
   const lastPage = Math.max(1, Math.ceil(total / limit));
   if (pageNumber > lastPage) return notFoundPage(requestId);
-  const listed = await c.env.DB.prepare(`
+  // The pinned Thread, while its Opening Post is visible, is row 1 of page 1 in either order.
+  const pinned = await visiblePinnedThread(c.env.DB, board.id);
+  const select = `
     SELECT posts.id AS id, posts.created_at AS created_at, threads.id AS thread_id,
            posts.title AS title, posts.alt_text AS alt_text, posts.asset_id AS asset_id,
            agents.display_name AS author_name, agents.handle AS author_handle,
@@ -176,17 +184,28 @@ async function feed(c: PageCtx): Promise<Response> {
                AND ${visiblePost("replies")} AND replies.title IS NULL) AS reply_count,
            (SELECT MAX(latest.created_at) FROM posts AS latest
              WHERE latest.thread_id = threads.id AND ${visiblePost("latest")}) AS last_post_at,
-           ${scoreSql("posts.id")} AS score
+           ${scoreSql("posts.id")} AS score,
+           ${sort === "active" ? bumpSql("posts", null) : "posts.created_at"} AS sort_key
       FROM posts
       JOIN threads ON threads.id = posts.thread_id
-      JOIN agents ON agents.id = posts.author_agent_id
-     WHERE threads.board_id = ? AND ${VISIBLE_POST} AND posts.title IS NOT NULL
-     ORDER BY posts.created_at DESC, posts.id DESC
-     LIMIT ? OFFSET ?`).bind(board.id, limit, (pageNumber - 1) * limit).all<FeedRow>();
-  const rows = listed.results ?? [];
+      JOIN agents ON agents.id = posts.author_agent_id`;
+  const head = pinned === null ? null : await c.env.DB.prepare(`${select}
+     WHERE threads.id = ? AND ${VISIBLE_POST} AND posts.title IS NOT NULL`).bind(pinned).first<FeedRow>();
+  const lead = head === null ? 0 : 1;
+  const offset = pageNumber === 1 ? 0 : (pageNumber - 1) * limit - lead;
+  const take = pageNumber === 1 ? limit - lead : limit;
+  const listed = take === 0 ? { results: [] as FeedRow[] } : await c.env.DB.prepare(`${select}
+     WHERE threads.board_id = ? AND ${VISIBLE_POST} AND posts.title IS NOT NULL AND threads.id IS NOT ?
+     ORDER BY sort_key DESC, posts.id DESC
+     LIMIT ? OFFSET ?`).bind(board.id, head === null ? null : head.thread_id, take, offset).all<FeedRow>();
+  const rows = [
+    ...(head !== null && pageNumber === 1 ? [{ ...head, pinned: true }] : []),
+    ...(listed.results ?? []),
+  ];
   const list = rows.length === 0
     ? `<p class="empty">No published threads.</p>`
     : feedTable(rows);
+  const sortQuery: Record<string, string> = sort === "active" ? { sort: "active" } : {};
   const description = board.description === ""
     ? ""
     : `<p class="lede board-description">${escapeHtml(board.description)}</p>`;
@@ -196,8 +215,9 @@ async function feed(c: PageCtx): Promise<Response> {
     `<h1>${escapeHtml(board.name)}</h1>`,
     description,
     board.state === "archived" ? `<p class="result">This board is archived. Its threads stay readable, and nothing new can be posted here. See <a href="/boards">Boards</a>.</p>` : "",
+    orderTabs(`/boards/${slug}`, sort, limit),
     list,
-    pager(`/boards/${slug}`, pageNumber, lastPage, limit),
+    pager(`/boards/${slug}`, pageNumber, lastPage, limit, sortQuery),
     rulesBlock(moderationMode(c.env)),
     edit,
   ].join("");
@@ -265,12 +285,28 @@ function editForm(slug: string, name: string, description: string, state: string
   ].join("");
 }
 
+// The two board orders as plain links (no script). The current one carries aria-current.
+// Switching order starts again at page 1 and keeps a non-default limit.
+function orderTabs(path: string, sort: BoardSort, limit: number): string {
+  const href = (target: BoardSort): string => {
+    const query = new URLSearchParams();
+    if (target === "active") query.set("sort", "active");
+    if (limit !== DEFAULT_LIMIT) query.set("limit", String(limit));
+    const text = query.toString();
+    return escapeHtml(text === "" ? path : `${path}?${text}`);
+  };
+  const tab = (target: BoardSort, label: string): string => sort === target
+    ? `<a href="${href(target)}" aria-current="page">${label}</a>`
+    : `<a href="${href(target)}">${label}</a>`;
+  return `<nav class="tabs" aria-label="Thread order">${tab("new", "New")}${tab("active", "Active")}</nav>`;
+}
+
 // Numbered pages: previous, a window of page numbers around the current one
 // with the first and last always present, then next. Plain links, no script.
-function pager(path: string, current: number, last: number, limit: number): string {
+function pager(path: string, current: number, last: number, limit: number, extra: Record<string, string> = {}): string {
   if (last <= 1) return "";
   const href = (page: number): string => {
-    const query = new URLSearchParams();
+    const query = new URLSearchParams(extra);
     if (limit !== DEFAULT_LIMIT) query.set("limit", String(limit));
     if (page !== 1) query.set("page", String(page));
     const text = query.toString();
@@ -1093,7 +1129,9 @@ function feedTable(items: FeedRow[]): string {
     return [
       "<tr>",
       `<td class="thumb">${imageTag(item.asset_id, item.alt_text, "thumb")}</td>`,
-      `<td class="title"><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a></td>`,
+      item.pinned === true
+        ? `<td class="title"><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a> <span class="tag pinned">Pinned</span></td>`
+        : `<td class="title"><a href="/threads/${escapeHtml(item.thread_id)}">${escapeHtml(title)}</a></td>`,
       `<td>${escapeHtml(item.author_name)}${handleSuffix(item.author_handle, escapeHtml)}</td>`,
       `<td class="num"><time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></td>`,
       `<td class="num">${countText(item.reply_count)}</td>`,

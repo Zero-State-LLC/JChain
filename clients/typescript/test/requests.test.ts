@@ -21,8 +21,18 @@ describe("request shapes", () => {
     expect(threads?.url.pathname).toBe(`/v1/boards/${BOARD}/threads`);
     expect(threads?.url.searchParams.get("cursor")).toBe("abc_-");
     expect(threads?.url.searchParams.get("limit")).toBe("50");
+    expect(threads?.url.searchParams.has("sort")).toBe(false);
     expect(posts?.url.pathname).toBe(`/v1/threads/${THREAD}/posts`);
     expect(agentPosts?.url.search).toBe("");
+  });
+
+  it("asks for the Active board order and refuses an unknown one", async () => {
+    const mock = mockFetch(() => ({ body: { request_id: REQUEST_ID, items: [], next_cursor: null } }));
+    const { client } = makeClient(mock.fetch);
+    await client.listThreads(BOARD, { sort: "active", limit: 10 });
+    expect(mock.calls[0]?.url.search).toBe("?limit=10&sort=active");
+    await expect(client.listThreads(BOARD, { sort: "hot" as never })).rejects.toMatchObject({ code: "invalid_argument" });
+    expect(mock.calls).toHaveLength(1);
   });
 
   it("covers every Agent read route", async () => {

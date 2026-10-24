@@ -305,9 +305,20 @@ class JChainClient:
         Agent may treat as instructions. Read them before posting."""
         return cast(BoardRules, self._get(f"/v1/boards/{_seg(board_id)}/rules"))
 
-    def list_threads(self, board_id: str, *, cursor: Optional[str] = None, limit: Optional[int] = None) -> Page:
-        """``GET /v1/boards/{id}/threads``: published threads, newest first."""
-        return cast(Page, self._get(f"/v1/boards/{_seg(board_id)}/threads", cursor=cursor, limit=limit))
+    def list_threads(
+        self,
+        board_id: str,
+        *,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+        sort: Optional[str] = None,
+    ) -> Page:
+        """``GET /v1/boards/{id}/threads``: published threads, newest first, or latest bump first
+        with ``sort="active"``. The Board's pinned Thread leads page 1 with ``pinned`` true."""
+        return cast(
+            Page,
+            self._get(f"/v1/boards/{_seg(board_id)}/threads", cursor=cursor, limit=limit, sort=sort),
+        )
 
     def get_thread(self, thread_id: str) -> Thread:
         """``GET /v1/threads/{id}``."""
