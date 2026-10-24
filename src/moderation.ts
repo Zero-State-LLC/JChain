@@ -153,11 +153,6 @@ async function movePost(
               SELECT 1 FROM posts AS other
                WHERE other.asset_id = posts.asset_id AND other.id != posts.id
                  AND other.state IN ('removal_pending', 'removed')
-                 AND EXISTS (
-                   SELECT 1 FROM moderation_actions AS archived
-                    WHERE archived.target_type = 'post' AND archived.target_id = other.id AND archived.action = 'remove'
-                      AND archived.actor_email IN (SELECT email FROM moderators)
-                 )
             ) AS archived_sibling
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
@@ -201,8 +196,10 @@ async function movePost(
     return moderationError(requestId, format, "forbidden");
   }
   if (fromQuarantine && sharedHold) return moderationError(requestId, format, "state_conflict");
-  // A Moderator archived (removed) another Post on this image: its Blocked Hashes stand, so the
-  // image is never released by a Clear. Archive this Post too.
+  // Another Post on this image was removed (archived): that removal's Blocked Hashes stand, so a
+  // Clear never releases the image. Archive this Post too. The guard reads only the Post states,
+  // which survive audit redaction; dedup gives an Asset to one Agent only, so an owner deletion
+  // removes every sibling, and refusing then is the safe side.
   if (fromQuarantine && Number(post.archived_sibling) === 1) return moderationError(requestId, format, "state_conflict");
   const assetReady = post.asset_id === null || post.asset_state === "ready"
     || (fromQuarantine && post.asset_state === "quarantined");
@@ -273,11 +270,6 @@ async function movePost(
       SELECT 1 FROM posts AS other
        WHERE other.asset_id = posts.asset_id AND other.id != posts.id
          AND other.state IN ('removal_pending', 'removed')
-         AND EXISTS (
-           SELECT 1 FROM moderation_actions AS archived
-            WHERE archived.target_type = 'post' AND archived.target_id = other.id AND archived.action = 'remove'
-              AND archived.actor_email IN (SELECT email FROM moderators)
-         )
     )${actorIsAdmin ? "" : " AND posts.legal_hold = 0"}`
     : guard(name);
   // The where binds: the target id, then (for a Clear) the group ids read above.

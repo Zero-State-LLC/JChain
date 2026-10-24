@@ -365,6 +365,9 @@ describe("AT-73 and AT-74 a shared image is one item", () => {
     expect((await postRow(second.postId))?.state).toBe("quarantined");
     await expectJson(await moderateWith(STAFF, first.postId, "remove", "id-document"), 200);
     await expectError(await moderate(ADMIN, "post", second.postId, "restore"), 409, "state_conflict");
+    // The guard survives audit redaction, which rewrites the removal's actor email.
+    await env.DB.prepare("UPDATE moderation_actions SET actor_email = 'redacted' WHERE target_id = ?").bind(first.postId).run();
+    await expectError(await moderate(ADMIN, "post", second.postId, "restore"), 409, "state_conflict");
     expect((await postRow(second.postId))?.state).toBe("quarantined");
     expect((await assetRow(first.assetId))?.state).toBe("quarantined");
     expect(await blockedCount(first.assetId)).toBeGreaterThan(0);
