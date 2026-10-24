@@ -142,7 +142,11 @@ async function movePost(
   const post = await c.env.DB.prepare(
     `SELECT posts.state AS state, posts.legal_hold AS legal_hold, threads.state AS thread_state,
             posts.asset_id AS asset_id, assets.state AS asset_state, posts.hidden_by AS hidden_by,
-            posts.quarantined_by AS quarantined_by
+            posts.quarantined_by AS quarantined_by,
+            EXISTS (
+              SELECT 1 FROM posts AS other
+               WHERE other.asset_id = posts.asset_id AND other.id != posts.id AND other.legal_hold = 1
+            ) AS shared_hold
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
        LEFT JOIN assets ON assets.id = posts.asset_id
@@ -151,6 +155,7 @@ async function movePost(
     state: string;
     hidden_by: string | null;
     quarantined_by: string | null;
+    shared_hold: number;
     legal_hold: number;
     thread_state: string;
     asset_id: string | null;
@@ -160,10 +165,17 @@ async function movePost(
   // v0.2.36 (quarantine-first): any Moderator may Clear (restore) a quarantined Post, which
   // releases its quarantined Asset and its Blocked Hashes in the same batch, or Archive (remove) it.
   // Releasing a Post under a legal hold stays Admin only (#116).
+  // Review 4365291514: a Post whose Asset another held Post shares counts as held, and a Clear
+  // never releases an Asset another Post still holds; the batch guard below re-checks both.
   const fromQuarantine = name === "restore" && post.state === "quarantined";
-  if (name === "restore" && post.legal_hold === 1) {
-    if (!(await isAdminEmail(c.env, actorEmail))) return moderationError(requestId, format, "forbidden");
+  const sharedHold = Number(post.shared_hold) === 1;
+  const actorIsAdmin = name === "restore" && (post.legal_hold === 1 || sharedHold)
+    ? await isAdminEmail(c.env, actorEmail)
+    : false;
+  if (name === "restore" && (post.legal_hold === 1 || sharedHold) && !actorIsAdmin) {
+    return moderationError(requestId, format, "forbidden");
   }
+  if (fromQuarantine && sharedHold) return moderationError(requestId, format, "state_conflict");
   const assetReady = post.asset_id === null || post.asset_state === "ready"
     || (fromQuarantine && post.asset_state === "quarantined");
   if (!legal(name, post.state, post.thread_state, assetReady)) {
@@ -218,7 +230,11 @@ async function movePost(
     ? `posts.id = ? AND posts.state = 'quarantined'
     AND (posts.asset_id IS NULL OR EXISTS (
       SELECT 1 FROM assets WHERE assets.id = posts.asset_id AND assets.state IN ('ready', 'quarantined')
-    ))`
+    ))
+    AND NOT EXISTS (
+      SELECT 1 FROM posts AS other
+       WHERE other.asset_id = posts.asset_id AND other.id != posts.id AND other.legal_hold = 1
+    )${actorIsAdmin ? "" : " AND posts.legal_hold = 0"}`
     : guard(name);
   const statements: D1PreparedStatement[] = [];
   let writtenIndex: number | null = null;

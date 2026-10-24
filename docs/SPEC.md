@@ -1378,7 +1378,7 @@ Blocked Hashes are added, as prohibited, only for a prohibited reason: `id-docum
 
 ### Q3: Moderator decisions
 
-- **Clear** is `restore` from `quarantined` to `published`. Any Moderator may Clear, except a Post under a legal hold, which stays Admin only. In the same batch the Asset returns to `ready` and leaves the Blocked Hash list, `quarantined_by`, the legal hold, and the queue-first mark clear, an open appeal is answered, and `post.restored` is written. The Publishing Stop must be off.
+- **Clear** is `restore` from `quarantined` to `published`. Any Moderator may Clear, except a Post under a legal hold, which stays Admin only. In the same batch the Asset returns to `ready` and leaves the Blocked Hash list, `quarantined_by`, the legal hold, and the queue-first mark clear, an open appeal is answered, and `post.restored` is written. The Publishing Stop must be off. A Post whose Asset another Post under a legal hold shares counts as held: a Moderator without a seat gets `forbidden`, and a Clear that would release that Asset is `state_conflict` for everyone, guarded in the batch as well.
 - **Archive** is `remove`, for any Moderator, with the Blocked Hashes and legal-hold rules of CT-21 and Part D.
 - On the Quarantined section of `/moderation` the buttons read "Clear" and "Archive (remove)", and each row names its source.
 - Seat Flag accuracy settles as before: a Clear overturns, an Archive or an `uphold` confirms. The per-seat-per-Post unique flag, the trial, and the held-powers rules are unchanged.

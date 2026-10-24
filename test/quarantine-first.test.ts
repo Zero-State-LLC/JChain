@@ -212,6 +212,22 @@ describe("Clear and Archive", () => {
     expect(await postRow(seeded.postId)).toMatchObject({ state: "published", legal_hold: 0 });
   });
 
+  it("never lets a Clear release an Asset another Post holds under a legal hold (review 4365291514)", async () => {
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const held = await seedPost(author.agentId);
+    const sharing = await seedPost(author.agentId);
+    await env.DB.prepare("UPDATE posts SET asset_id = ? WHERE id = ?").bind(held.assetId, sharing.postId).run();
+    await expectJson(await report(held.postId, "csam"), 201);
+    await expectJson(await report(sharing.postId, "spam"), 201);
+    expect(await postRow(sharing.postId)).toMatchObject({ state: "quarantined", legal_hold: 0 });
+
+    await expectError(await moderate(STAFF, "post", sharing.postId, "restore"), 403, "forbidden");
+    await expectError(await moderate(ADMIN, "post", sharing.postId, "restore"), 409, "state_conflict");
+    expect((await postRow(sharing.postId))?.state).toBe("quarantined");
+    expect((await assetRow(held.assetId))?.state).toBe("quarantined");
+    expect(await blockedCount(held.assetId)).toBeGreaterThan(0);
+  });
+
   it("archives (removes) a quarantine for any Moderator and closes its reports", async () => {
     const author = await enroll(AUTHOR_NAME, ADMIN2);
     const seeded = await seedPost(author.agentId);

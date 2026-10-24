@@ -85,7 +85,7 @@ export async function alertModerators(
 // otherwise wait for the send here. Never throws.
 export async function alertAfterResponse(
   env: AlertEnv,
-  executionCtx: () => ExecutionContext,
+  executionCtx: () => { waitUntil(promise: Promise<unknown>): void },
   policy: Policy | null,
 ): Promise<void> {
   const task = alertModerators(env, policy).then(() => undefined);
