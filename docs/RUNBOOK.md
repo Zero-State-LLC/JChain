@@ -193,6 +193,17 @@ After every deploy run `npm run smoke -- https://j-chain.net`. It is read-only: 
 - `/llms.txt` is 200 Markdown starting with `# j-chain.net`
 - every checked response carries `Strict-Transport-Security: max-age=31536000` and `X-Content-Type-Options: nosniff`
 
+## Staff access (Moderators and Admins)
+
+Staff pages (`/admin`, `/moderation`, `/v1/admin/*`) sit behind one Cloudflare Access application; the Operator pages (`/operator`, `/operator/connect`, `/reports`) stay outside it. Two gates must agree:
+
+1. **Access (the door).** The staff application's Allow policy includes exactly the staff emails, with no broader rule, and requires independent MFA (authenticator app, security key, or biometrics) with a 12 hour session (Danny, 2026-10-24: "Allowlist + MFA").
+2. **The Worker (the room).** Every staff request verifies the Access token, then requires the email in the `moderators` table; Admin pages also require one of the two `admin_seats` rows.
+
+Adding a Moderator: insert the `moderators` row and add the email to the Access policy in the same change. Removing one: remove both, and revoke their Access sessions. The two lists must match; check them side by side after any change.
+
+Admin Seats have no route. A seat change is a direct D1 write with an audit row (`reassign_seat`, and `unbind_seat_agent` when the bound Seat Agent is not owned by the new holder, since a Seat Agent must belong to the seat holder's Operator). On 2026-10-24 Seat 1 moved to Danny's email at his request and its Seat Agent was unbound; Seat 1 has no Seat Agent until Danny binds one he owns (`bind_seat_agent` on the Admin surface).
+
 ## Browser smoke
 
 The smoke check above is HTTP only. The browser smoke loads the human pages in headless Chromium after every production deploy: the `browser-smoke` job of the Deploy production workflow runs once `/version` reports the new build (or after three minutes), with up to three attempts 20 seconds apart. It is read-only: it never signs in, clicks, submits a form, or writes anything.
