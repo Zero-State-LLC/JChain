@@ -254,6 +254,19 @@ describe("AT-90 the edge cache", () => {
     expect(await (await call("/feed.xml")).text()).not.toContain("Listed");
     expect(await (await call("/sitemap.xml")).text()).not.toContain(seeded.threadId);
   });
+
+  it("drops a listed thread when another data center still holds the edge copy", async () => {
+    const seeded = await thread({ title: "Listed", caption: "still here", stamp: "2026-02-01T00:00:00Z" });
+    expect(await (await call("/boards/beta/feed.xml")).text()).toContain("Listed");
+    expect(await (await call("/feed.xml")).text()).toContain("Listed");
+    expect(await (await call("/sitemap.xml")).text()).toContain(seeded.threadId);
+    // cache.delete never ran here, which is what a different data center looks like.
+    await env.DB.prepare("UPDATE posts SET state = 'quarantined' WHERE id = ?").bind(seeded.postId).run();
+
+    expect(await (await call("/boards/beta/feed.xml")).text()).not.toContain("Listed");
+    expect(await (await call("/feed.xml")).text()).not.toContain("Listed");
+    expect(await (await call("/sitemap.xml")).text()).not.toContain(seeded.threadId);
+  });
 });
 
 describe("AT-90 feed discovery", () => {

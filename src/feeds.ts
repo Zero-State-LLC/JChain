@@ -27,11 +27,16 @@ const SITEMAP_CACHE = "public, max-age=3600";
 // The tag: authority stays fixed, so an entry id never changes even if the site origin does.
 const TAG_AUTHORITY = "j-chain.net,2026";
 
-// The feeds and the sitemap are kept at the edge (the Workers Cache API) for this many seconds, so
-// a burst of readers or crawlers costs one D1 read per URL per window. Only a 200 is kept.
+// The feeds and the sitemap are kept at the edge (the Workers Cache API) for this many seconds.
+// A hit still checks that every listed Thread is visible, which is one small read, not a rebuild.
+// Only a 200 is kept.
 export const EDGE_CACHE_SECONDS = 300;
 // Carries the client's Cache-Control through the edge copy, whose own header sets the edge lifetime.
 const CLIENT_CACHE_HEADER = "x-jchain-client-cache-control";
+// Kept on the edge copy only, so a large sitemap can tell that a withdrawal happened after it was stored.
+const CACHED_AT_HEADER = "x-jchain-cached-at";
+// One bound query. A feed lists at most FEED_ENTRIES Threads, so every feed is checked Thread by Thread.
+const VISIBILITY_CHECK_LIMIT = FEED_ENTRIES;
 
 // Pages a crawler should not walk, besides the ones the agent guide's robots rules already name.
 const EXTRA_DISALLOW = ["/admin", "/search"];
@@ -107,10 +112,11 @@ async function edgeCached(
   const key = new Request(keyUrl.toString(), { method: "GET" });
   if (cache !== null) {
     const hit = await cache.match(key).catch(() => undefined);
-    if (hit !== undefined) {
+    if (hit !== undefined && await cachedCopyIsCurrent(c.env.DB, hit)) {
       const headers = new Headers(hit.headers);
       const client = headers.get(CLIENT_CACHE_HEADER);
       headers.delete(CLIENT_CACHE_HEADER);
+      headers.delete(CACHED_AT_HEADER);
       if (client !== null) headers.set("cache-control", client);
       headers.set("x-request-id", requestId);
       return new Response(hit.body, { status: hit.status, headers });
@@ -122,6 +128,7 @@ async function edgeCached(
     const client = headers.get("cache-control");
     if (client !== null) headers.set(CLIENT_CACHE_HEADER, client);
     headers.set("cache-control", `public, max-age=${EDGE_CACHE_SECONDS}`);
+    headers.set(CACHED_AT_HEADER, utcSeconds());
     const stored = new Response(response.clone().body, { status: 200, headers });
     c.executionCtx.waitUntil(cache.put(key, stored).catch((error: unknown) => {
       console.error(JSON.stringify({ message: "edge cache put failed", request_id: requestId, error: String(error) }));
@@ -138,9 +145,47 @@ function edgeCache(): Cache | null {
   }
 }
 
-// A Post that leaves published is taken out of the edge copies in that request. A new Post is not:
-// it can stay out of a feed until the 300 second window ends. The key matches edgeCached: the
-// policy origin, method GET, no query. Browsers that already hold a copy keep it until max-age.
+// cache.delete only removes the copy in the data center that handled the withdrawal. A hit in any
+// other data center is served only while every Thread it lists is still visible. A feed lists at
+// most FEED_ENTRIES, so that check is one query. A larger sitemap looks for a post.withdrawn event
+// after the copy was stored. A failed check rebuilds. A Thread that becomes visible again can wait
+// for the rest of the window, the same as a new Post.
+async function cachedCopyIsCurrent(db: D1Database, hit: Response): Promise<boolean> {
+  try {
+    const body = await hit.clone().text();
+    const ids = threadIdsIn(body);
+    if (ids.length === 0) return true;
+    if (ids.length > VISIBILITY_CHECK_LIMIT) return noWithdrawalSince(db, hit.headers.get(CACHED_AT_HEADER));
+    const placeholders = ids.map(() => "?").join(", ");
+    const found = await db.prepare(
+      `SELECT COUNT(DISTINCT posts.thread_id) AS n
+         FROM posts
+        WHERE posts.title IS NOT NULL AND posts.thread_id IN (${placeholders}) AND ${VISIBLE_POST}`,
+    ).bind(...ids).first<{ n: number }>();
+    return Number(found?.n ?? 0) === ids.length;
+  } catch (error) {
+    console.error(JSON.stringify({ message: "edge cache check failed", error: String(error) }));
+    return false;
+  }
+}
+
+function threadIdsIn(body: string): string[] {
+  const pattern = /\/threads\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
+  return [...new Set([...body.matchAll(pattern)].map((match) => match[1].toLowerCase()))];
+}
+
+async function noWithdrawalSince(db: D1Database, cachedAt: string | null): Promise<boolean> {
+  if (cachedAt === null || cachedAt === "") return false;
+  const row = await db.prepare(
+    "SELECT 1 AS one FROM events WHERE type = 'post.withdrawn' AND occurred_at > ? LIMIT 1",
+  ).bind(cachedAt).first<{ one: number }>();
+  return row === null;
+}
+
+// cache.delete reaches only the data center that is running this request. Other data centers drop a
+// withdrawn Thread on the next read, in cachedCopyIsCurrent. A new Post is not deleted: it can stay
+// out of a feed until the 300 second window ends. The key matches edgeCached: the policy origin,
+// method GET, no query. Browsers that already hold a copy keep it until max-age.
 export async function dropPublishedCopies(
   env: { DB: D1Database; POLICY?: unknown },
   postIds: readonly string[],
