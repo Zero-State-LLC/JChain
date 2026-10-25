@@ -28,15 +28,14 @@ const SITEMAP_CACHE = "public, max-age=3600";
 const TAG_AUTHORITY = "j-chain.net,2026";
 
 // The feeds and the sitemap are kept at the edge (the Workers Cache API) for this many seconds.
-// A hit still checks that every listed Thread is visible, which is one small read, not a rebuild.
-// Only a 200 is kept.
+// A hit still checks that every listed Thread is visible. Only a 200 is kept.
 export const EDGE_CACHE_SECONDS = 300;
 // Carries the client's Cache-Control through the edge copy, whose own header sets the edge lifetime.
 const CLIENT_CACHE_HEADER = "x-jchain-client-cache-control";
-// Kept on the edge copy only, so a large sitemap can tell that a withdrawal happened after it was stored.
+// Left on copies stored before the visibility check stopped reading a timestamp. Never sent to clients.
 const CACHED_AT_HEADER = "x-jchain-cached-at";
-// One bound query. A feed lists at most FEED_ENTRIES Threads, so every feed is checked Thread by Thread.
-const VISIBILITY_CHECK_LIMIT = FEED_ENTRIES;
+// D1 allows 100 bound parameters. Each chunk is one read, and a feed fits in one.
+const VISIBILITY_CHUNK = 100;
 
 // Pages a crawler should not walk, besides the ones the agent guide's robots rules already name.
 const EXTRA_DISALLOW = ["/admin", "/search"];
@@ -128,7 +127,6 @@ async function edgeCached(
     const client = headers.get("cache-control");
     if (client !== null) headers.set(CLIENT_CACHE_HEADER, client);
     headers.set("cache-control", `public, max-age=${EDGE_CACHE_SECONDS}`);
-    headers.set(CACHED_AT_HEADER, utcSeconds());
     const stored = new Response(response.clone().body, { status: 200, headers });
     c.executionCtx.waitUntil(cache.put(key, stored).catch((error: unknown) => {
       console.error(JSON.stringify({ message: "edge cache put failed", request_id: requestId, error: String(error) }));
@@ -146,23 +144,24 @@ function edgeCache(): Cache | null {
 }
 
 // cache.delete only removes the copy in the data center that handled the withdrawal. A hit in any
-// other data center is served only while every Thread it lists is still visible. A feed lists at
-// most FEED_ENTRIES, so that check is one query. A larger sitemap looks for a post.withdrawn event
-// after the copy was stored. A failed check rebuilds. A Thread that becomes visible again can wait
-// for the rest of the window, the same as a new Post.
+// other data center is served only while every Thread URL in it is still visible. The URLs come
+// from link and sitemap locations, not from caption text. A failed check rebuilds. A Thread that
+// becomes visible again can wait for the rest of the window, the same as a new Post.
 async function cachedCopyIsCurrent(db: D1Database, hit: Response): Promise<boolean> {
   try {
     const body = await hit.clone().text();
     const ids = threadIdsIn(body);
-    if (ids.length === 0) return true;
-    if (ids.length > VISIBILITY_CHECK_LIMIT) return noWithdrawalSince(db, hit.headers.get(CACHED_AT_HEADER));
-    const placeholders = ids.map(() => "?").join(", ");
-    const found = await db.prepare(
-      `SELECT COUNT(DISTINCT posts.thread_id) AS n
-         FROM posts
-        WHERE posts.title IS NOT NULL AND posts.thread_id IN (${placeholders}) AND ${VISIBLE_POST}`,
-    ).bind(...ids).first<{ n: number }>();
-    return Number(found?.n ?? 0) === ids.length;
+    for (let start = 0; start < ids.length; start += VISIBILITY_CHUNK) {
+      const chunk = ids.slice(start, start + VISIBILITY_CHUNK);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const found = await db.prepare(
+        `SELECT COUNT(DISTINCT posts.thread_id) AS n
+           FROM posts
+          WHERE posts.title IS NOT NULL AND posts.thread_id IN (${placeholders}) AND ${VISIBLE_POST}`,
+      ).bind(...chunk).first<{ n: number }>();
+      if (Number(found?.n ?? 0) !== chunk.length) return false;
+    }
+    return true;
   } catch (error) {
     console.error(JSON.stringify({ message: "edge cache check failed", error: String(error) }));
     return false;
@@ -170,16 +169,8 @@ async function cachedCopyIsCurrent(db: D1Database, hit: Response): Promise<boole
 }
 
 function threadIdsIn(body: string): string[] {
-  const pattern = /\/threads\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
+  const pattern = /(?:href="[^"]*|loc>)[^"<]*\/threads\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
   return [...new Set([...body.matchAll(pattern)].map((match) => match[1].toLowerCase()))];
-}
-
-async function noWithdrawalSince(db: D1Database, cachedAt: string | null): Promise<boolean> {
-  if (cachedAt === null || cachedAt === "") return false;
-  const row = await db.prepare(
-    "SELECT 1 AS one FROM events WHERE type = 'post.withdrawn' AND occurred_at > ? LIMIT 1",
-  ).bind(cachedAt).first<{ one: number }>();
-  return row === null;
 }
 
 // cache.delete reaches only the data center that is running this request. Other data centers drop a

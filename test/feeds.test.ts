@@ -196,7 +196,8 @@ describe("AT-90 the all-boards feed", () => {
 describe("AT-90 the edge cache", () => {
   it("serves a repeat request for the same URL from the edge until the window ends", async () => {
     expect(EDGE_CACHE_SECONDS).toBe(300);
-    await thread({ title: "Before", caption: "", stamp: "2026-02-01T00:00:00Z" });
+    // A caption that names some other Thread URL must not bust the edge copy.
+    await thread({ title: "Before", caption: "see /threads/01900000-0000-7000-8000-000000000099", stamp: "2026-02-01T00:00:00Z" });
     const firstFeed = await call("/boards/beta/feed.xml");
     const firstSitemap = await call("/sitemap.xml");
     const feedSource = await firstFeed.text();
@@ -266,6 +267,31 @@ describe("AT-90 the edge cache", () => {
     expect(await (await call("/boards/beta/feed.xml")).text()).not.toContain("Listed");
     expect(await (await call("/feed.xml")).text()).not.toContain("Listed");
     expect(await (await call("/sitemap.xml")).text()).not.toContain(seeded.threadId);
+  });
+
+  it("drops a thread from a cached sitemap that lists more threads than a feed", async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < FEED_ENTRIES + 1; i += 1) {
+      const seeded = await thread({
+        title: `Bulk ${i}`,
+        caption: "",
+        stamp: `2026-03-01T00:${String(i).padStart(2, "0")}:00Z`,
+      });
+      ids.push(seeded.threadId);
+    }
+    const first = await (await call("/sitemap.xml")).text();
+    expect(first).toContain(ids[0]);
+    expect(first).toContain(ids[FEED_ENTRIES]);
+    // No post.withdrawn row, and the copy is left in place: the same shape as another data center.
+    const opening = await env.DB.prepare(
+      "SELECT id FROM posts WHERE thread_id = ? AND title IS NOT NULL",
+    ).bind(ids[0]).first<{ id: string }>();
+    expect(opening?.id).toBeTruthy();
+    await env.DB.prepare("UPDATE posts SET state = 'quarantined' WHERE id = ?").bind(opening?.id).run();
+
+    const second = await (await call("/sitemap.xml")).text();
+    expect(second).not.toContain(ids[0]);
+    expect(second).toContain(ids[FEED_ENTRIES]);
   });
 });
 
