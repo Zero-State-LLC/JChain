@@ -1,8 +1,12 @@
 name: Release clients
-# Tests, packs, and publishes the three clients.
-# workflow_dispatch packs only. A tag clients-v* also publishes
-# @zero-state/jchain, @zero-state/jchain-mcp, and zero-state-jchain.
-# Publishing needs the NPM_TOKEN and PYPI_API_TOKEN repository secrets.
+# Tests and packs the three clients. workflow_dispatch packs only and keeps the files as a
+# workflow artifact. A tag clients-v<version> also attaches them to a GitHub release:
+#   zero-state-jchain-<version>.tgz             @zero-state/jchain (npm tarball)
+#   zero-state-jchain-mcp-<version>.tgz         @zero-state/jchain-mcp (npm tarball)
+#   zero_state_jchain-<version>-py3-none-any.whl  zero-state-jchain (wheel)
+#   zero_state_jchain-<version>.tar.gz          zero-state-jchain (sdist)
+#   SHA256SUMS                                  sha256sum of every file above
+# Nothing is published to npm or PyPI: that waits on issue #80.
 on:
   workflow_dispatch:
   push:
@@ -10,7 +14,27 @@ on:
 permissions:
   contents: read
 jobs:
+  versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check every client version matches the tag and the pages
+        run: |
+          ts="$(node -p "require('./clients/typescript/package.json').version")"
+          mcp="$(node -p "require('./clients/mcp/package.json').version")"
+          py="$(python3 -c "import tomllib; print(tomllib.load(open('clients/python/pyproject.toml', 'rb'))['project']['version'])")"
+          pages="$(sed -n 's/^export const CLIENTS_VERSION = "\(.*\)";$/\1/p' src/clients-release.ts)"
+          echo "typescript=$ts mcp=$mcp python=$py pages=$pages"
+          if [ "$ts" != "$mcp" ] || [ "$ts" != "$py" ] || [ "$ts" != "$pages" ]; then
+            echo "::error::Client versions differ: typescript $ts, mcp $mcp, python $py, pages $pages"
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "${GITHUB_REF_NAME#clients-v}" != "$ts" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match client version $ts"
+            exit 1
+          fi
   typescript:
+    needs: versions
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -20,26 +44,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
-      - name: Check the tag matches the package version
-        if: github.event_name == 'push'
-        run: |
-          tag="${GITHUB_REF_NAME#clients-v}"
-          version="$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$version" ]; then
-            echo "::error::Tag clients-v$tag does not match package version $version"
-            exit 1
-          fi
       - run: npm ci
       - run: npm test
       - run: npm run build && npm pack
-      - name: Publish @zero-state/jchain
-        if: github.event_name == 'push'
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-typescript
+          path: clients/typescript/zero-state-jchain-*.tgz
+          if-no-files-found: error
   mcp:
-    needs: typescript
+    needs: versions
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -49,28 +63,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
-      - name: Check the tag matches the package version
-        if: github.event_name == 'push'
-        run: |
-          tag="${GITHUB_REF_NAME#clients-v}"
-          version="$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$version" ]; then
-            echo "::error::Tag clients-v$tag does not match package version $version"
-            exit 1
-          fi
       - name: Install the local TypeScript client
         run: npm ci
         working-directory: clients/typescript
       - run: npm ci
       - run: npm test
-      - run: npm run build && npm pack
-      - name: Publish @zero-state/jchain-mcp
-        if: github.event_name == 'push'
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm run build
+      # @zero-state/jchain is not on npm (issue #80), so the packed server depends on the client
+      # tarball from the same release. The repository's package.json is unchanged.
+      - name: Point the client dependency at the release tarball
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/clients-v${version}/zero-state-jchain-${version}.tgz"
+          npm pkg set "dependencies.@zero-state/jchain=${url}"
+          node -p "require('./package.json').dependencies['@zero-state/jchain']"
+      - run: npm pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-mcp
+          path: clients/mcp/zero-state-jchain-mcp-*.tgz
+          if-no-files-found: error
   python:
+    needs: versions
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -80,22 +94,69 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Check the tag matches the package version
-        if: github.event_name == 'push'
-        run: |
-          tag="${GITHUB_REF_NAME#clients-v}"
-          version="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")"
-          if [ "$tag" != "$version" ]; then
-            echo "::error::Tag clients-v$tag does not match package version $version"
-            exit 1
-          fi
-      - run: python -m pip install -e '.[test]' mypy build twine
+      - run: python -m pip install -e '.[test]' mypy build
       - run: python -m pytest -q
       - run: python -m mypy --strict src
       - run: python -m build
-      - name: Publish zero-state-jchain
-        if: github.event_name == 'push'
-        run: python -m twine upload dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-python
+          path: |
+            clients/python/dist/*.whl
+            clients/python/dist/*.tar.gz
+          if-no-files-found: error
+  release:
+    if: github.event_name == 'push'
+    needs: [typescript, mcp, python]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: client-*
+          path: assets
+          merge-multiple: true
+      - name: Write the checksums and the release notes
+        run: |
+          cd assets
+          ls -l
+          sha256sum -- * > ../SHA256SUMS
+          mv ../SHA256SUMS .
+          cat SHA256SUMS
+          version="${GITHUB_REF_NAME#clients-v}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          {
+            echo "The j-chain.net clients at version ${version}, built from \`${GITHUB_SHA}\`. They are not on npm or PyPI yet (issue #80), so install them from these files."
+            echo
+            echo "Joining j-chain.net needs none of them: an agent follows https://j-chain.net/join with plain HTTPS requests."
+            echo
+            echo "## Check, then install"
+            echo
+            echo '```sh'
+            echo "BASE=${base}"
+            echo 'curl -fsSLO "$BASE/SHA256SUMS"'
+            echo "curl -fsSLO \"\$BASE/zero-state-jchain-${version}.tgz\""
+            echo 'sha256sum --check --ignore-missing SHA256SUMS'
+            echo "npm install ./zero-state-jchain-${version}.tgz"
+            echo '```'
+            echo
+            echo "The same works for \`zero-state-jchain-mcp-${version}.tgz\` (its \`@zero-state/jchain\` dependency is the client tarball on this release) and for \`pip install ./zero_state_jchain-${version}-py3-none-any.whl\`. See each client's README."
+            echo
+            echo "## SHA-256"
+            echo
+            echo '```text'
+            cat SHA256SUMS
+            echo '```'
+          } > ../notes.md
+          cat ../notes.md
+      - name: Create or update the release
         env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" assets/* --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" assets/* --verify-tag --title "Clients ${GITHUB_REF_NAME#clients-v}" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          fi
