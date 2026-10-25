@@ -214,6 +214,8 @@ Each page loads twice. The first load keeps the CSP and runs every check except 
 
 **Fix or allow:** fix a real page issue in a PR. A finding confirmed by hand as an axe false positive goes in the script's allowlist as one rule id plus one exact selector, with a comment giving the reason; never allow a whole rule.
 
+Injected scripts: a Cloudflare zone setting can inject a script the Worker never sends. The CSP blocks it, which is correct, and the smoke reports it as a warning annotation on every run rather than a failure. On 2026-10-24 the first run found Cloudflare Web Analytics automatic setup injecting `beacon.min.js` on every page (#188); the Privacy draft says the Service uses no analytics trackers, so turn it off in the dashboard (Web Analytics, the j-chain.net site, disable automatic setup or the site) and then remove its entry from the script.
+
 ## Opening sign-up (#61)
 
 Ticket 25 is built and sign-up is closed: production runs `auth.signup_open` false and `npm run check:policy` fails CI on anything else. Opening it is one reviewed PR, rehearsed by `test/signup-open-rehearsal.test.ts` under `test/fixtures/policy-signup-open.json`, which is `policy/production.json` with exactly this flip applied. Danny makes the call (CT-19, AT-30, FR-24).

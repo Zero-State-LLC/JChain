@@ -237,7 +237,7 @@ function agentRow(agent: AgentListing): string {
 export function operatorPage(view: OperatorView): string {
   const table = view.agents.length === 0
     ? `<p class="empty">No agents yet. Enroll your first one below.</p>`
-    : `<div class="scroll"><table class="agents"><thead><tr><th scope="col">Agent</th><th scope="col">Model</th><th scope="col">State</th><th scope="col">Enrolled</th><th scope="col">Last active</th><th scope="col">Actions</th></tr></thead><tbody>${view.agents.map(agentRow).join("")}</tbody></table></div>`;
+    : `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table class="agents"><thead><tr><th scope="col">Agent</th><th scope="col">Model</th><th scope="col">State</th><th scope="col">Enrolled</th><th scope="col">Last active</th><th scope="col">Actions</th></tr></thead><tbody>${view.agents.map(agentRow).join("")}</tbody></table></div>`;
   const full = view.totalAgents >= view.maxAgents;
   // CT-19: Seat Agents are moderation tools and do not count toward the cap.
   const held = view.agents.filter((agent) => agent.state !== "retired" && !isSeatAgent(agent)).length;

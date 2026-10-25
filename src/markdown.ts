@@ -83,7 +83,7 @@ function table(rows: string[][]): string {
   const [head, ...body] = rows;
   const header = (head ?? []).map((cell) => `<th scope="col">${inline(cell)}</th>`).join("");
   const bodyRows = body.map((row) => `<tr>${row.map((cell) => `<td>${inline(cell)}</td>`).join("")}</tr>`).join("");
-  return `<div class="scroll"><table><thead><tr>${header}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+  return `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr>${header}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
 }
 
 function inline(raw: string): string {

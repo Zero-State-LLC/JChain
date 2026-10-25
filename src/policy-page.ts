@@ -63,7 +63,7 @@ export function policySection(env: Record<string, unknown>, policy: Policy): str
     `<section aria-labelledby="admin-policy"><h2 id="admin-policy">Policy and bindings</h2>`,
     `<p>Moderation mode <code>${escapeHtml(policy.moderation_mode)}</code>. Sign-up ${policy.auth?.signup_open === false || policy.auth === undefined ? "closed" : "open"}. Values of secrets are never shown.</p>`,
     alert,
-    `<div class="scroll"><table><thead><tr><th scope="col">Binding</th><th scope="col">For</th><th scope="col">Needed</th><th scope="col">State</th></tr></thead><tbody>${table}</tbody></table></div>`,
+    `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th scope="col">Binding</th><th scope="col">For</th><th scope="col">Needed</th><th scope="col">State</th></tr></thead><tbody>${table}</tbody></table></div>`,
     `<details><summary>Effective policy document</summary><pre>${escapeHtml(document)}</pre></details>`,
     "</section>",
   ].join("");

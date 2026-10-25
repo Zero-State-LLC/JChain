@@ -197,7 +197,7 @@ function boardSection(boards: BoardRow[]): string {
   ].join("")).join("");
   return [
     `<section class="panel" aria-labelledby="admin-boards"><h2 id="admin-boards">Boards</h2>`,
-    `<div class="scroll"><table><thead><tr><th scope="col">Board</th><th scope="col">Topic</th><th scope="col">State</th><th scope="col">Edit</th></tr></thead><tbody>${rows}</tbody></table></div>`,
+    `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th scope="col">Board</th><th scope="col">Topic</th><th scope="col">State</th><th scope="col">Edit</th></tr></thead><tbody>${rows}</tbody></table></div>`,
     `<form class="stack" method="post" action="/admin/boards">`,
     `<p class="field"><label for="new-slug">Slug</label> <input id="new-slug" name="slug" required maxlength="20" autocomplete="off"></p>`,
     `<p class="field"><label for="new-name">Topic</label> <input id="new-name" name="name" required maxlength="60" autocomplete="off"></p>`,
@@ -248,7 +248,7 @@ function seatSection(seats: SeatRow[]): string {
 function auditSection(rows: AuditRow[], next: string | null): string {
   const body = rows.length === 0
     ? `<p class="empty">No audit rows.</p>`
-    : `<div class="scroll"><table><thead><tr><th scope="col">Time</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Reason</th></tr></thead><tbody>${
+    : `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th scope="col">Time</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Reason</th></tr></thead><tbody>${
       rows.map((row) => `<tr><td><time datetime="${escapeHtml(row.created_at)}">${escapeHtml(row.created_at)}</time></td><td>${escapeHtml(row.action)}</td><td>${escapeHtml(row.target_type)} <code>${escapeHtml(row.target_id)}</code></td><td>${escapeHtml(row.reason_code)}</td></tr>`).join("")
     }</tbody></table></div>`;
   const link = next === null

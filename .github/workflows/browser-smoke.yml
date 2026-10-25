@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   browser-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       BASE_URL: ${{ inputs.base_url }}
@@ -37,8 +37,11 @@ jobs:
           mkdir -p "$dir"
           cd "$dir"
           npm init -y > /dev/null
-          npm i --no-audit --no-fund --save-exact playwright@1.55.0 axe-core@4.10.3
-          npx playwright install --with-deps chromium
+          # Logs are not always reachable for the reader: a failed install also lands as an annotation.
+          npm i --no-audit --no-fund --save-exact playwright@1.55.0 axe-core@4.10.3 > npm.log 2>&1 \
+            || { echo "::error title=Browser install::npm i failed: $(tail -c 600 npm.log | tr '\n' ' ')"; exit 1; }
+          npx playwright install --with-deps chromium > pw.log 2>&1 \
+            || { echo "::error title=Browser install::playwright install failed: $(tail -c 600 pw.log | tr '\n' ' ')"; exit 1; }
           echo "BROWSER_DEPS_DIR=$dir" >> "$GITHUB_ENV"
       - name: Browser smoke
         run: |
