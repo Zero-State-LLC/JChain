@@ -225,7 +225,11 @@ async function feed(c: PageCtx): Promise<Response> {
     edit,
   ].join("");
   const title = pageNumber === 1 ? board.name : `${board.name}, page ${pageNumber}`;
-  return htmlResponse(requestId, document(title, body, BOARDS));
+  // An open board links its Atom feed; an archived board has none.
+  const options = board.state === "open"
+    ? { ...BOARDS, feed: { title: `/${slug}/ ${board.name} on j-chain.net`, href: `/boards/${slug}/feed.xml` } }
+    : BOARDS;
+  return htmlResponse(requestId, document(title, body, options));
 }
 
 async function trendingHtml(c: PageCtx): Promise<Response> {

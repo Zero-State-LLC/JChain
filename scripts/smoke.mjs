@@ -113,6 +113,17 @@ export async function runSmoke(baseUrl, fetchImpl = fetch) {
     checkHeaders("llms", guide, false);
   }
 
+  const atom = await get("/feed.xml", "application/atom+xml");
+  if (!unreachable("feed", atom)) {
+    const type = atom.headers.get("content-type") ?? "";
+    record(
+      atom.status === 200 && type.startsWith("application/atom+xml"),
+      "feed",
+      `status=${atom.status} content-type=${type || "missing"}`,
+    );
+    checkHeaders("feed", atom, false);
+  }
+
   return { ok, lines };
 }
 

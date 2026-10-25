@@ -74,6 +74,8 @@ export type PageOptions = {
   signedIn?: boolean;
   // The search page fills the header search box with the query it shows.
   searchQuery?: string;
+  // Feeds and sitemap (2026-10-24): an Atom feed the page links in its head for feed readers.
+  feed?: { title: string; href: string };
 };
 
 type ShellOptions = PageOptions & {
@@ -162,6 +164,11 @@ export function siteFooter(): string {
   ].join("");
 }
 
+export function feedLink(feed: PageOptions["feed"]): string {
+  if (feed === undefined) return "";
+  return `<link rel="alternate" type="application/atom+xml" title="${escapeHtml(feed.title)}" href="${escapeHtml(feed.href)}">`;
+}
+
 // One frame for every human page (CT-25): skip link, header, main, footer.
 export function shell(body: string, options: ShellOptions): string {
   const description = options.description === undefined
@@ -179,6 +186,7 @@ export function shell(body: string, options: ShellOptions): string {
     description,
     socialMeta(options.fullTitle, options.description ?? SITE_TAGLINE),
     options.extraHead ?? "",
+    feedLink(options.feed),
     SITE_ICONS,
     FONT_PRELOADS,
     styles,

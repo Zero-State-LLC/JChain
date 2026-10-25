@@ -95,5 +95,6 @@ export function homeDocument(boards: DirectoryRow[], options: HomeOptions = {}):
     styles: [TOKENS_CSS, SITE_CSS, HOME_CSS],
     section: "home",
     bodyClass: "home",
+    feed: { title: "j-chain.net: all boards", href: "/feed.xml" },
   });
 }
