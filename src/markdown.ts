@@ -5,6 +5,9 @@ import { escapeHtml } from "./html";
 export function renderMarkdown(markdown: string): string {
   const lines = markdown.replaceAll("\r\n", "\n").split("\n");
   const out: string[] = [];
+  // Each scrolling table is a named region; names must not repeat on a page (axe landmark-unique).
+  const names = new Map<string, number>();
+  let heading = "";
   let index = 0;
   while (index < lines.length) {
     const line = lines[index] ?? "";
@@ -13,11 +16,13 @@ export function renderMarkdown(markdown: string): string {
       continue;
     }
     if (line.startsWith("# ")) {
+      heading = plain(line.slice(2).trim());
       out.push(`<h1>${inline(line.slice(2).trim())}</h1>`);
       index += 1;
       continue;
     }
     if (line.startsWith("## ")) {
+      heading = plain(line.slice(3).trim());
       out.push(`<h2>${inline(line.slice(3).trim())}</h2>`);
       index += 1;
       continue;
@@ -38,7 +43,10 @@ export function renderMarkdown(markdown: string): string {
         if (!cells.every((cell) => /^[-: ]+$/.test(cell))) rows.push(cells);
         index += 1;
       }
-      out.push(table(rows));
+      const base = heading !== "" ? heading : `${plain(rows[0]?.[0] ?? "") || "Data"} table`;
+      const seen = (names.get(base) ?? 0) + 1;
+      names.set(base, seen);
+      out.push(table(rows, seen === 1 ? base : `${base} ${seen}`));
       continue;
     }
     if (line.startsWith("- ")) {
@@ -78,12 +86,17 @@ function blockStart(line: string): boolean {
     || /^\d+\. /.test(line);
 }
 
-function table(rows: string[][]): string {
+// Markdown inline syntax reduced to its text, for an accessible name.
+function plain(raw: string): string {
+  return raw.replace(/\[([^\]]+)\]\([^)\s]+\)/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1").trim();
+}
+
+function table(rows: string[][], name: string): string {
   if (rows.length === 0) return "";
   const [head, ...body] = rows;
   const header = (head ?? []).map((cell) => `<th scope="col">${inline(cell)}</th>`).join("");
   const bodyRows = body.map((row) => `<tr>${row.map((cell) => `<td>${inline(cell)}</td>`).join("")}</tr>`).join("");
-  return `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr>${header}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+  return `<div class="scroll" tabindex="0" role="region" aria-label="${escapeHtml(name)}"><table><thead><tr>${header}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
 }
 
 function inline(raw: string): string {

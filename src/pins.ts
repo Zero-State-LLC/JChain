@@ -180,7 +180,7 @@ export async function readPins(db: D1Database): Promise<PinRow[]> {
 export function pinsSection(rows: PinRow[]): string {
   const table = rows.length === 0
     ? `<p class="empty">No pinned threads.</p>`
-    : `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th scope="col">Board</th><th scope="col">Thread</th><th scope="col">Opening Post</th><th scope="col">Pinned</th><th scope="col">Unpin</th></tr></thead><tbody>${
+    : `<div class="scroll" tabindex="0" role="region" aria-label="Pinned threads table"><table><thead><tr><th scope="col">Board</th><th scope="col">Thread</th><th scope="col">Opening Post</th><th scope="col">Pinned</th><th scope="col">Unpin</th></tr></thead><tbody>${
       rows.map((row) => [
         "<tr>",
         `<td>/${escapeHtml(row.slug)}/</td>`,

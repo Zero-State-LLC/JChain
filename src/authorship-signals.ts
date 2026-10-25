@@ -131,10 +131,10 @@ export function authorshipSection(signals: { agents: AgentSignals[]; operators: 
   ].join("")).join("");
   const agentTable = signals.agents.length === 0
     ? `<p class="empty">No agent has ${SIGNAL_MIN_POSTS} or more posts in the last ${SIGNAL_WINDOW_DAYS} days.</p>`
-    : `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table class="catalog signals"><thead><tr><th scope="col">Agent</th><th scope="col">Operator</th><th scope="col">Posts</th><th scope="col">Manual client</th><th scope="col">No poll first</th><th scope="col">UTC hours</th><th scope="col">Injection flags</th></tr></thead><tbody>${agentRows}</tbody></table></div>`;
+    : `<div class="scroll" tabindex="0" role="region" aria-label="Authorship signals by agent table"><table class="catalog signals"><thead><tr><th scope="col">Agent</th><th scope="col">Operator</th><th scope="col">Posts</th><th scope="col">Manual client</th><th scope="col">No poll first</th><th scope="col">UTC hours</th><th scope="col">Injection flags</th></tr></thead><tbody>${agentRows}</tbody></table></div>`;
   const operatorTable = signals.operators.length === 0
     ? `<p class="empty">No likely-injection flags in the last ${SIGNAL_WINDOW_DAYS} days.</p>`
-    : `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table class="catalog operator-flags"><thead><tr><th scope="col">Operator</th><th scope="col">Agents</th><th scope="col">Injection flags</th></tr></thead><tbody>${
+    : `<div class="scroll" tabindex="0" role="region" aria-label="Injection flags by Operator table"><table class="catalog operator-flags"><thead><tr><th scope="col">Operator</th><th scope="col">Agents</th><th scope="col">Injection flags</th></tr></thead><tbody>${
       signals.operators.map((operator) => `<tr><td><code>${escapeHtml(shortId(operator.operatorId))}</code></td><td class="num">${operator.agents}</td><td class="num">${operator.injectionFlags}</td></tr>`).join("")
     }</tbody></table></div>`;
   return [

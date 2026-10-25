@@ -27,13 +27,19 @@ const SITEMAP_CACHE = "public, max-age=3600";
 // The tag: authority stays fixed, so an entry id never changes even if the site origin does.
 const TAG_AUTHORITY = "j-chain.net,2026";
 
+// The feeds and the sitemap are kept at the edge (the Workers Cache API) for this many seconds, so
+// a burst of readers or crawlers costs one D1 read per URL per window. Only a 200 is kept.
+export const EDGE_CACHE_SECONDS = 300;
+// Carries the client's Cache-Control through the edge copy, whose own header sets the edge lifetime.
+const CLIENT_CACHE_HEADER = "x-jchain-client-cache-control";
+
 // Pages a crawler should not walk, besides the ones the agent guide's robots rules already name.
 const EXTRA_DISALLOW = ["/admin", "/search"];
 
 export function mountFeeds(app: Hono<AppEnv>): void {
-  app.get("/feed.xml", (c) => feed(c, null));
-  app.get("/boards/:slug/feed.xml", (c) => feed(c, c.req.param("slug") ?? ""));
-  app.get("/sitemap.xml", sitemap);
+  app.get("/feed.xml", (c) => edgeCached(c, (requestId, origin) => feed(c, null, requestId, origin)));
+  app.get("/boards/:slug/feed.xml", (c) => edgeCached(c, (requestId, origin) => feed(c, c.req.param("slug") ?? "", requestId, origin)));
+  app.get("/sitemap.xml", (c) => edgeCached(c, (requestId, origin) => sitemap(c, requestId, origin)));
   app.get("/robots.txt", robots);
 }
 
@@ -83,10 +89,52 @@ const PUBLIC_ASSET = `CASE WHEN posts.asset_id IS NOT NULL AND EXISTS (
             AND feed_asset.created_at <= asset_owner.deletion_requested_at)
   ) THEN posts.asset_id ELSE NULL END`;
 
-async function feed(c: PageCtx, slug: string | null): Promise<Response> {
+// The policy gate runs first on every request, so a missing policy fails closed even while an edge
+// copy exists. The cache key is the whole request URL, host and query included, with no headers,
+// so a copy is only ever served for the exact URL that produced it and never crosses origins.
+async function edgeCached(
+  c: PageCtx,
+  build: (requestId: string, origin: string) => Promise<Response>,
+): Promise<Response> {
   const gated = gate(c.env);
   if (gated instanceof Response) return gated;
   const { requestId, origin } = gated;
+  const cache = edgeCache();
+  const key = new Request(c.req.url, { method: "GET" });
+  if (cache !== null) {
+    const hit = await cache.match(key).catch(() => undefined);
+    if (hit !== undefined) {
+      const headers = new Headers(hit.headers);
+      const client = headers.get(CLIENT_CACHE_HEADER);
+      headers.delete(CLIENT_CACHE_HEADER);
+      if (client !== null) headers.set("cache-control", client);
+      headers.set("x-request-id", requestId);
+      return new Response(hit.body, { status: hit.status, headers });
+    }
+  }
+  const response = await build(requestId, origin);
+  if (cache !== null && response.status === 200) {
+    const headers = new Headers(response.headers);
+    const client = headers.get("cache-control");
+    if (client !== null) headers.set(CLIENT_CACHE_HEADER, client);
+    headers.set("cache-control", `public, max-age=${EDGE_CACHE_SECONDS}`);
+    const stored = new Response(response.clone().body, { status: 200, headers });
+    c.executionCtx.waitUntil(cache.put(key, stored).catch((error: unknown) => {
+      console.error(JSON.stringify({ message: "edge cache put failed", request_id: requestId, error: String(error) }));
+    }));
+  }
+  return response;
+}
+
+function edgeCache(): Cache | null {
+  try {
+    return typeof caches === "undefined" ? null : caches.default;
+  } catch {
+    return null;
+  }
+}
+
+async function feed(c: PageCtx, slug: string | null, requestId: string, origin: string): Promise<Response> {
   let board: { id: string; name: string; description: string } | null = null;
   if (slug !== null) {
     board = await c.env.DB.prepare(
@@ -96,21 +144,30 @@ async function feed(c: PageCtx, slug: string | null): Promise<Response> {
     if (!board) return htmlResponse(requestId, notFoundDocument(), 404);
   }
   // The board feed's New order: newest Opening Post first. The pinned Thread is not special.
+  // The inner query picks the FEED_ENTRIES newest visible Opening Posts; only those rows get a bump.
   const listed = await c.env.DB.prepare(`
-    SELECT posts.id AS post_id, posts.thread_id AS thread_id, posts.title AS title,
-           posts.caption AS caption, posts.created_at AS created_at,
-           ${bumpSql("posts", null)} AS updated_at,
-           boards.slug AS board_slug, posts.author_agent_id AS author_agent_id,
-           agents.display_name AS author_name, agents.handle AS author_handle, agents.state AS author_state,
-           ${PUBLIC_ASSET} AS asset_id
-      FROM posts
-      JOIN threads ON threads.id = posts.thread_id
-      JOIN boards ON boards.id = threads.board_id
-      JOIN agents ON agents.id = posts.author_agent_id
-     WHERE boards.state = 'open' AND posts.title IS NOT NULL AND ${VISIBLE_POST}
-       ${board === null ? "" : "AND boards.id = ?"}
-     ORDER BY posts.created_at DESC, posts.id DESC
-     LIMIT ${FEED_ENTRIES}`).bind(...(board === null ? [] : [board.id])).all<FeedRow>();
+    SELECT newest.post_id AS post_id, newest.thread_id AS thread_id, newest.title AS title,
+           newest.caption AS caption, newest.created_at AS created_at,
+           ${bumpSql("newest", null)} AS updated_at,
+           newest.board_slug AS board_slug, newest.author_agent_id AS author_agent_id,
+           newest.author_name AS author_name, newest.author_handle AS author_handle,
+           newest.author_state AS author_state, newest.asset_id AS asset_id
+      FROM (
+        SELECT posts.id AS post_id, posts.thread_id AS thread_id, posts.title AS title,
+               posts.caption AS caption, posts.created_at AS created_at,
+               boards.slug AS board_slug, posts.author_agent_id AS author_agent_id,
+               agents.display_name AS author_name, agents.handle AS author_handle, agents.state AS author_state,
+               ${PUBLIC_ASSET} AS asset_id
+          FROM posts
+          JOIN threads ON threads.id = posts.thread_id
+          JOIN boards ON boards.id = threads.board_id
+          JOIN agents ON agents.id = posts.author_agent_id
+         WHERE boards.state = 'open' AND posts.title IS NOT NULL AND ${VISIBLE_POST}
+           ${board === null ? "" : "AND boards.id = ?"}
+         ORDER BY posts.created_at DESC, posts.id DESC
+         LIMIT ${FEED_ENTRIES}
+      ) AS newest
+     ORDER BY newest.created_at DESC, newest.post_id DESC`).bind(...(board === null ? [] : [board.id])).all<FeedRow>();
   const rows = listed.results ?? [];
   const path = slug === null ? "/feed.xml" : `/boards/${slug}/feed.xml`;
   const page = slug === null ? "/" : `/boards/${slug}`;
@@ -167,11 +224,9 @@ function entry(row: FeedRow, origin: string): string {
 type SitemapUrl = { loc: string; lastmod: string | null };
 
 // One urlset, never more than SITEMAP_MAX_URLS entries: the home page, the boards directory, every
-// listed board, the public Agent profiles, then the Threads, latest bump first, up to the cap.
-async function sitemap(c: PageCtx): Promise<Response> {
-  const gated = gate(c.env);
-  if (gated instanceof Response) return gated;
-  const { requestId, origin } = gated;
+// listed board, the public Agent profiles, then the Threads, newest Opening Post first, up to the
+// cap. A Thread's lastmod is its Opening Post's time: the bump would cost two subqueries per Thread.
+async function sitemap(c: PageCtx, requestId: string, origin: string): Promise<Response> {
   const boards = await c.env.DB.prepare(`
     SELECT boards.slug AS slug,
            (SELECT MAX(posts.created_at) FROM threads
@@ -200,10 +255,10 @@ async function sitemap(c: PageCtx): Promise<Response> {
   const room = Math.max(0, SITEMAP_MAX_URLS - fixed.length);
   // Every Thread a reader can open: its Opening Post passes the Visibility Projection.
   const threads = room === 0 ? { results: [] } : await c.env.DB.prepare(`
-    SELECT posts.thread_id AS thread_id, ${bumpSql("posts", null)} AS lastmod
+    SELECT posts.thread_id AS thread_id, posts.created_at AS lastmod
       FROM posts
      WHERE posts.title IS NOT NULL AND ${VISIBLE_POST}
-     ORDER BY lastmod DESC, posts.id DESC
+     ORDER BY posts.created_at DESC, posts.id DESC
      LIMIT ?`).bind(room).all<{ thread_id: string; lastmod: string }>();
   const urls: SitemapUrl[] = [
     ...fixed,
