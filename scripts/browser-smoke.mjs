@@ -41,6 +41,35 @@ const BLOCKING_IMPACTS = new Set(["critical", "serious"]);
 // Example: { id: "color-contrast", selector: ".card-media > img", reason: "..." }
 export const AXE_ALLOWLIST = [];
 
+// Scripts injected into our pages by a Cloudflare zone setting, outside the Worker. The site's CSP
+// blocks them, which is correct, so they are reported as a warning on every run instead of failing
+// it. Remove an entry as soon as the setting is off. Keep this list short and dated.
+export const INJECTED_HOSTS = [
+  {
+    host: "static.cloudflareinsights.com",
+    reason: "Cloudflare Web Analytics automatic setup injects beacon.min.js; turn it off in the dashboard (#188, 2026-10-24). The Privacy draft says the Service uses no analytics trackers.",
+  },
+];
+
+// Warnings collected across the run: injected-script blocks, reported but not failing.
+const WARNINGS = new Map();
+
+function injectedHost(text) {
+  return INJECTED_HOSTS.find((entry) => text.includes(entry.host)) ?? null;
+}
+
+// Adds a reason, unless it is about an injected host, which becomes a warning instead.
+function addReason(reasons, text, where) {
+  const host = injectedHost(text);
+  if (host === null) {
+    reasons.add(text);
+    return;
+  }
+  const key = `${host.host}: ${host.reason}`;
+  if (!WARNINGS.has(key)) WARNINGS.set(key, new Set());
+  WARNINGS.get(key).add(where);
+}
+
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
 // ---------------------------------------------------------------------------------------------
@@ -185,6 +214,9 @@ export function annotations(summary) {
   if (list.length > shown.length) {
     lines.push(`::error title=${escapeProperty("Browser smoke")}::${escapeData(`${list.length - shown.length} more findings; see the Browser smoke summary notice`)}`);
   }
+  for (const warning of summary.warnings ?? []) {
+    lines.push(`::warning title=${escapeProperty("Browser smoke: injected script")}::${escapeData(`${warning.message} [${warning.where.join(", ")}]`)}`);
+  }
   const compact = {
     ok: summary.ok,
     base: summary.base,
@@ -304,7 +336,7 @@ async function strictChecks(context, base, target, expectedBackground) {
     const failure = request.failure()?.errorText ?? "failed";
     if (failure.includes("ERR_ABORTED")) return;
     broken.add(shortUrl(base, request.url()));
-    reasons.add(`request failed: ${request.resourceType()} ${shortUrl(base, request.url())} ${failure}`);
+    addReason(reasons, `request failed: ${request.resourceType()} ${shortUrl(base, request.url())} ${failure}`, target.name);
   });
   page.on("response", (response) => {
     const request = response.request();
@@ -374,7 +406,7 @@ async function strictChecks(context, base, target, expectedBackground) {
     for (const v of state.csp ?? []) {
       const source = v.source ? shortUrl(base, v.source) : "";
       const from = source === "" ? "" : source === target.path ? ` at line ${v.line}` : ` from ${source}:${v.line}`;
-      reasons.add(`CSP violation: ${v.directive} blocked ${v.blocked || "inline"}${from}`);
+      addReason(reasons, `CSP violation: ${v.directive} blocked ${v.blocked || "inline"}${from}`, target.name);
     }
     if (state.styleSheets === 0) reasons.add("no stylesheets applied");
     for (const sheet of state.sheets) {
@@ -476,6 +508,7 @@ export async function runBrowserSmoke(baseUrl, depsDir) {
     discoveryErrors: errors,
     results,
     findings: findings(results, errors),
+    warnings: [...WARNINGS].map(([message, where]) => ({ message, where: [...where] })),
   };
   return { summary, lines };
 }
