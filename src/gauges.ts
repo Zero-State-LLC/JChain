@@ -338,7 +338,7 @@ export function gaugesSection(data: Gauges, analytics: AnalyticsResult, policy: 
 export function usageSection(rows: UsageRow[]): string {
   const body = rows.length === 0
     ? `<p class="empty">No posts in the last 7 days.</p>`
-    : `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table class="usage"><thead><tr><th scope="col">Agent</th><th scope="col">Operator's agents</th><th scope="col">Threads</th><th scope="col">Replies</th><th scope="col">Votes</th><th scope="col">Reactions</th><th scope="col">Last active</th></tr></thead><tbody>${
+    : `<div class="scroll" tabindex="0" role="region" aria-label="Agent usage table"><table class="usage"><thead><tr><th scope="col">Agent</th><th scope="col">Operator's agents</th><th scope="col">Threads</th><th scope="col">Replies</th><th scope="col">Votes</th><th scope="col">Reactions</th><th scope="col">Last active</th></tr></thead><tbody>${
       rows.map((row) => {
         const handle = row.handle === null ? "" : ` <span class="handle">@${escapeHtml(row.handle)}</span>`;
         const seen = row.last_seen_at === null
@@ -361,6 +361,13 @@ const PLANNING_NEURONS_PER_SCAN = 27;
 const ESTIMATE_REVIEW_SCANS = 100;
 // Every stored time is ISO 8601 UTC, so `>= ''` keeps every row.
 const ALL_TIME = "";
+// Spec constants. A Moderator decision is paired with the automatic quarantine just before it only
+// when that quarantine is at most MAX_PAIRING_GAP_DAYS older, so each audit read starts that far
+// before its window and never walks the whole table. The longer window for that pairing is the
+// last DECISION_LONG_WINDOW_DAYS days, not all time.
+export const MAX_PAIRING_GAP_DAYS = 30;
+export const DECISION_LONG_WINDOW_DAYS = 365;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type Percentiles = { n: number; median: number | null; p95: number | null };
 export type ScanCounts = { safe: number; unsafe: number; unscanned: number; pending: number };
@@ -377,13 +384,16 @@ export type ScanGauges = {
 // Scan, 'seat_agent' a Seat Flag, and a report quarantine shares its actor and time with the
 // 'report' row of the same request (the CSAM Scanning Tool's source is also 'report').
 // NULL is a Moderator quarantine, which is not automatic. Every read below is one pass over the
-// audit rows with window functions, never a lookup per row, because the audit table has no index
-// on its target or actor.
+// audit rows with window functions. ?1 is the lower time bound, applied before the window
+// functions so the read is an index range (by target type, action, and time; reports by action
+// and time). A report row and its quarantine share one time, so the bound never splits them, and
+// rows of other target types or actions never set with_report.
 const CLASSIFIED = `tagged AS (
      SELECT id, target_type, target_id, action, created_at, actor_email,
             MAX(action = 'report') OVER (PARTITION BY actor_email, created_at) AS with_report
        FROM moderation_actions
-      WHERE action IN ('quarantine', 'restore', 'remove', 'report')
+      WHERE (target_type = 'post' AND action IN ('quarantine', 'restore', 'remove') AND created_at >= ?1)
+         OR (action = 'report' AND created_at >= ?1)
    ), classified AS (
      SELECT id, target_id, action, created_at,
             CASE
@@ -409,14 +419,17 @@ const PUBLISH_TO_SCAN_SQL = `SELECT ${secondsBetween("published_at", "scanned_at
   ORDER BY scanned_at DESC LIMIT ${SAMPLE_LIMIT}`;
 const NEURONS_SQL = `SELECT COALESCE(SUM(neurons), 0) AS total, COUNT(*) AS scans
    FROM post_scans WHERE result IN ('safe', 'unsafe') AND scanned_at >= ?`;
+// No pairing here, so the bound is the window start itself (?1 = ?2).
 const SOURCES_SQL = `WITH ${CLASSIFIED}
    SELECT source, COUNT(*) AS n FROM classified
-    WHERE action = 'quarantine' AND source IS NOT NULL AND created_at >= ?
+    WHERE action = 'quarantine' AND source IS NOT NULL AND created_at >= ?2
     GROUP BY source`;
 // The pairing of the hide-to-decision log line, read back from the audit log. A Post's quarantine,
 // Clear (restore), and Archive (remove) rows are put in audit order (time, then id, which is time
 // ordered within a second). A Clear or Archive made in the window is a sample when the row just
-// before it is an automatic quarantine, so only the first decision closes a quarantine.
+// before it is an automatic quarantine, so only the first decision closes a quarantine. Rows from
+// MAX_PAIRING_GAP_DAYS before the window start (?1) are read, so a decision in the window (?2)
+// whose quarantine is older than that has no row before it and is not a sample.
 const QUARANTINE_TO_DECISION_SQL = `WITH ${CLASSIFIED}, ordered AS (
      SELECT id, action, created_at,
             LAG(action) OVER by_post AS prev_action,
@@ -427,16 +440,15 @@ const QUARANTINE_TO_DECISION_SQL = `WITH ${CLASSIFIED}, ordered AS (
    )
    SELECT ${secondsBetween("prev_at", "created_at")} AS s FROM ordered
     WHERE action IN ('restore', 'remove') AND prev_action = 'quarantine' AND prev_source IS NOT NULL
-      AND created_at >= ?
+      AND created_at >= ?2
     ORDER BY created_at DESC, id DESC LIMIT ${SAMPLE_LIMIT}`;
-// The Quarantined queue is every quarantined Post. A Post waits from its latest quarantine.
-const OLDEST_QUARANTINED_SQL = `SELECT MIN(COALESCE(latest.at, posts.created_at)) AS since, COUNT(*) AS waiting
+// The Quarantined queue is every quarantined Post. A Post waits from its latest quarantine, looked
+// up per queued Post through the audit index by target, so the read grows with the queue only.
+const OLDEST_QUARANTINED_SQL = `SELECT MIN(COALESCE((
+       SELECT MAX(latest.created_at) FROM moderation_actions AS latest
+        WHERE latest.target_type = 'post' AND latest.target_id = posts.id AND latest.action = 'quarantine'
+     ), posts.created_at)) AS since, COUNT(*) AS waiting
    FROM posts
-   LEFT JOIN (
-     SELECT target_id, MAX(created_at) AS at FROM moderation_actions
-      WHERE target_type = 'post' AND action = 'quarantine'
-      GROUP BY target_id
-   ) AS latest ON latest.target_id = posts.id
   WHERE posts.state = 'quarantined'`;
 
 function rowsOf(result: D1Result | undefined): Array<Record<string, unknown>> {
@@ -471,7 +483,10 @@ function samples(result: D1Result | undefined): number[] {
 
 export async function readScanGauges(db: D1Database, now = new Date()): Promise<ScanGauges> {
   const today = utcSeconds(dayStart(now));
-  const week = utcSeconds(new Date(now.getTime() - WEEK_DAYS * 24 * 60 * 60 * 1000));
+  const week = utcSeconds(new Date(now.getTime() - WEEK_DAYS * DAY_MS));
+  const pairedFrom = (windowDays: number): string =>
+    utcSeconds(new Date(now.getTime() - (windowDays + MAX_PAIRING_GAP_DAYS) * DAY_MS));
+  const longWindow = utcSeconds(new Date(now.getTime() - DECISION_LONG_WINDOW_DAYS * DAY_MS));
   const [
     countsWeek, countsAll, scanWeek, scanAll, neuronsToday, neuronsWeek, neuronsAll, sources,
     decisionWeek, decisionAll, oldest,
@@ -483,9 +498,9 @@ export async function readScanGauges(db: D1Database, now = new Date()): Promise<
     db.prepare(NEURONS_SQL).bind(today),
     db.prepare(NEURONS_SQL).bind(week),
     db.prepare(NEURONS_SQL).bind(ALL_TIME),
-    db.prepare(SOURCES_SQL).bind(week),
-    db.prepare(QUARANTINE_TO_DECISION_SQL).bind(week),
-    db.prepare(QUARANTINE_TO_DECISION_SQL).bind(ALL_TIME),
+    db.prepare(SOURCES_SQL).bind(week, week),
+    db.prepare(QUARANTINE_TO_DECISION_SQL).bind(pairedFrom(WEEK_DAYS), week),
+    db.prepare(QUARANTINE_TO_DECISION_SQL).bind(pairedFrom(DECISION_LONG_WINDOW_DAYS), longWindow),
     db.prepare(OLDEST_QUARANTINED_SQL),
   ]);
   const quarantines = { scan: 0, seat_agents: 0, report: 0 };
@@ -568,11 +583,11 @@ export function scanSection(data: ScanGauges, policy: Policy): string {
     : `average ${(data.neurons.allTotal / data.neurons.allScans).toLocaleString("en-US", { maximumFractionDigits: 1 })} over ${formatNumber(data.neurons.allScans)} scans`;
   return [
     `<section class="gauges" aria-labelledby="admin-scan"><h2 id="admin-scan">Content Scan (NFR-10)</h2>`,
-    `<p class="hint">Read on each load. Last 7 days is rolling, and each time reads at most the ${formatNumber(SAMPLE_LIMIT)} most recent samples. A median and p95 need ${MIN_SAMPLES} samples; n is the sample size. Times are whole seconds; today is UTC.</p>`,
+    `<p class="hint">Read on each load. Last 7 days is rolling, and each time reads at most the ${formatNumber(SAMPLE_LIMIT)} most recent samples. A median and p95 need ${MIN_SAMPLES} samples; n is the sample size. Times are whole seconds; today is UTC. For Quarantine to Moderator decision, All time means the last ${DECISION_LONG_WINDOW_DAYS} days, and a decision counts only when its quarantine was at most ${MAX_PAIRING_GAP_DAYS} days earlier.</p>`,
     `<h3>Scans by result</h3>`,
-    `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table class="usage"><thead><tr><th scope="col">Result</th><th scope="col">Last 7 days</th><th scope="col">All time</th></tr></thead><tbody>${counts}</tbody></table></div>`,
+    `<div class="scroll" tabindex="0" role="region" aria-label="Content Scan results table"><table class="usage"><thead><tr><th scope="col">Result</th><th scope="col">Last 7 days</th><th scope="col">All time</th></tr></thead><tbody>${counts}</tbody></table></div>`,
     `<h3>Time to a result</h3>`,
-    `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table class="usage"><thead><tr><th scope="col">Measure</th><th scope="col">Last 7 days</th><th scope="col">All time</th></tr></thead><tbody>${latencyRows}</tbody></table></div>`,
+    `<div class="scroll" tabindex="0" role="region" aria-label="Content Scan latency table"><table class="usage"><thead><tr><th scope="col">Measure</th><th scope="col">Last 7 days</th><th scope="col">All time</th></tr></thead><tbody>${latencyRows}</tbody></table></div>`,
     `<h3>Neurons</h3>`,
     `<ul>${neuronTiles.map(gaugeItem).join("")}</ul>`,
     `<p>Neurons per scan, all time: ${measured}, next to the planning estimate of about ${PLANNING_NEURONS_PER_SCAN}. The scan keeps its fixed estimate until there are ${ESTIMATE_REVIEW_SCANS} scans (${formatNumber(Math.min(data.neurons.allScans, ESTIMATE_REVIEW_SCANS))} of ${ESTIMATE_REVIEW_SCANS}).</p>`,

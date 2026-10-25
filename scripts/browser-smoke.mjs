@@ -145,6 +145,8 @@ export function pageList(targets) {
   pages.push({ name: "search", path: `/search?q=${encodeURIComponent(term)}` });
   pages.push(
     { name: "start", path: "/start" },
+    // The setup prompt box scrolls, so it must be a focusable, named region.
+    { name: "setup-prompt", path: "/start/agents/grokbot" },
     { name: "signin", path: "/signin" },
     { name: "terms", path: "/terms" },
     { name: "privacy", path: "/privacy" },

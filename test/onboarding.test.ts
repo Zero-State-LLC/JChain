@@ -1,7 +1,7 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { CLIENTS_RELEASE_URL, CLIENTS_TAG } from "../src/clients-release";
+import { CLIENTS_RELEASE_PUBLISHED, CLIENTS_RELEASE_URL, CLIENTS_TAG } from "../src/clients-release";
 import { afterSignIn } from "../src/signin";
 import {
   ADMIN2,
@@ -159,25 +159,59 @@ describe("AT-77 one URL for agents", () => {
     expect(operator).toContain('<a href="/join">https://j-chain.net/join</a>');
     const setup = await (await call("/start/agents/other")).text();
     expect(setup).toContain('href="/join"');
-    // Until issue #80 the clients are files on a GitHub release, named only as advanced and optional.
+    // Until issue #80 the clients are files on a GitHub release, named only as advanced and optional,
+    // and only once that release is published (the flag in the clients release module).
     expect(CLIENTS_RELEASE_URL).toBe(`https://github.com/Zero-State-LLC/JChain/releases/tag/${CLIENTS_TAG}`);
     expect(CLIENTS_TAG).toMatch(/^clients-v\d+\.\d+\.\d+$/);
-    expect(llms).toContain(`- [Clients](${CLIENTS_RELEASE_URL}) (advanced, optional):`);
-    expect(llms).toContain("Joining needs none of them.");
-    expect(start).toContain(`Advanced and optional: install a client from the GitHub release <a href="${CLIENTS_RELEASE_URL}">${CLIENTS_TAG}</a>`);
-    expect(setup).toContain(`<a href="${CLIENTS_RELEASE_URL}">${CLIENTS_TAG}</a>`);
-    expect(setup).toContain("no agent needs one to join");
     const join = await (await call("/join", { policy: null })).text();
-    // The plain-HTTP flow is unchanged: the client appears only under More, after every step.
+    // The plain-HTTP flow is unchanged either way.
     expect(join).toContain("No package, no script, no form.");
-    expect(join.indexOf(CLIENTS_RELEASE_URL)).toBeGreaterThan(join.indexOf("## More"));
-    expect(join).toContain("You do not need any of them to join.");
+    expect(setup).toMatch(/no agent needs/i);
+    if (CLIENTS_RELEASE_PUBLISHED) {
+      expect(llms).toContain(`- [Clients](${CLIENTS_RELEASE_URL}) (advanced, optional):`);
+      expect(llms).toContain("Joining needs none of them.");
+      expect(start).toContain(`Advanced and optional: install a client from the GitHub release <a href="${CLIENTS_RELEASE_URL}">${CLIENTS_TAG}</a>`);
+      expect(setup).toContain(`<a href="${CLIENTS_RELEASE_URL}">${CLIENTS_TAG}</a>`);
+      // The client appears only under More, after every step.
+      expect(join.indexOf(CLIENTS_RELEASE_URL)).toBeGreaterThan(join.indexOf("## More"));
+      expect(join).toContain("You do not need any of them to join.");
+    } else {
+      for (const [path, text] of [["/llms.txt", llms], ["/start", start], ["/start/agents/other", setup], ["/join", join]]) {
+        expect(text, path).not.toContain(CLIENTS_TAG);
+        expect(text, path).not.toContain("GitHub release");
+      }
+      expect(start).toContain('use the prompts at <a href="/start/agents">Set up your agent</a>');
+    }
     for (const [path, text] of [["/llms.txt", llms], ["/start", start], ["/operator", operator], ["/start/agents/other", setup], ["/join", join]]) {
       expect(text, path).not.toContain("npx jchain-connect");
       expect(text, path).not.toContain("npm install @zero-state");
       expect(text, path).not.toContain("pip install zero-state-jchain");
     }
     expect(await (await call("/start/agents/other.md")).text()).toContain(`${ORIGIN}/join`);
+  });
+
+  it("links no client release from any human page or /join while the release is unpublished", async () => {
+    if (CLIENTS_RELEASE_PUBLISHED) return;
+    const pages: [string, Parameters<typeof call>[1]][] = [
+      ["/", undefined],
+      ["/start", { policy: null }],
+      ["/llms.txt", { policy: null }],
+      ["/join", { policy: null }],
+      ["/join.md", { policy: null }],
+      ["/operator", { email: OPERATOR }],
+      ["/start/agents", undefined],
+      ["/start/agents/grokbot", undefined],
+      ["/start/agents/hermes", undefined],
+      ["/start/agents/openclaw", undefined],
+      ["/start/agents/other", undefined],
+      ["/start/agents/other.md", undefined],
+    ];
+    for (const [path, options] of pages) {
+      const response = await call(path, options);
+      const text = await response.text();
+      expect(text, path).not.toContain("releases/tag/clients-");
+      expect(text, path).not.toContain(CLIENTS_TAG);
+    }
   });
 });
 

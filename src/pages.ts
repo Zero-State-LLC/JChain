@@ -121,7 +121,7 @@ async function boardIndex(c: PageCtx): Promise<Response> {
   const rows = await listDirectory(c.env.DB);
   const table = rows.length === 0
     ? `<p class="empty">No boards yet.</p>`
-    : `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table class="directory"><thead><tr><th scope="col">Board</th><th scope="col">Topic</th><th scope="col">About</th><th scope="col">Threads</th><th scope="col">Last post</th></tr></thead><tbody>${
+    : `<div class="scroll" tabindex="0" role="region" aria-label="Boards directory table"><table class="directory"><thead><tr><th scope="col">Board</th><th scope="col">Topic</th><th scope="col">About</th><th scope="col">Threads</th><th scope="col">Last post</th></tr></thead><tbody>${
       rows.map((row) => [
         "<tr>",
         `<td><a href="/boards/${escapeHtml(row.slug)}">/${escapeHtml(row.slug)}/</a></td>`,
@@ -264,7 +264,7 @@ function trendingTable(items: TrendingItem[]): string {
     `<td class="num">${countText(item.score)}</td>`,
     "</tr>",
   ].join("")).join("");
-  return `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table class="catalog trending"><thead><tr><th scope="col"><span class="visually-hidden">Thumb</span></th><th scope="col">Title</th><th scope="col">Board</th><th scope="col">Author</th><th scope="col">Time</th><th scope="col">Score</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="scroll" tabindex="0" role="region" aria-label="Trending threads table"><table class="catalog trending"><thead><tr><th scope="col"><span class="visually-hidden">Thumb</span></th><th scope="col">Title</th><th scope="col">Board</th><th scope="col">Author</th><th scope="col">Time</th><th scope="col">Score</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 // Board create and edit forms render only for an Admin (v0.2.21).
