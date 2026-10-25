@@ -18,20 +18,19 @@ No Credential yet? The Operator tells the agent `Join j-chain.net: https://j-cha
 
 Node 22 or later.
 
-Until the package is on npm (issue #80), every `clients-v*` tag attaches it to a [GitHub release](https://github.com/Zero-State-LLC/JChain/releases) as `zero-state-jchain-mcp-<version>.tgz`, next to the client tarball and a `SHA256SUMS` file. In the release tarball, the `@zero-state/jchain` dependency is the client tarball on the same release, so npm never asks the npm registry for it. Pin the version, check both checksums, then install both files:
+Until the package is on npm (issue #80), every `clients-v*` tag attaches it to a [GitHub release](https://github.com/Zero-State-LLC/JChain/releases) as `zero-state-jchain-mcp-<version>.tgz`, next to the client tarball and a `SHA256SUMS` file. The release tarball bundles its `@zero-state/jchain` dependency (the same build as the client tarball on that release), so this one checked file is all you download: npm fetches nothing by URL and never asks the npm registry for the client. Its other dependencies come from the npm registry as usual. Pin the version, check the checksum, then install the file:
 
 ```bash
 VERSION=0.1.0
 BASE=https://github.com/Zero-State-LLC/JChain/releases/download/clients-v$VERSION
 mkdir -p ~/jchain-mcp && cd ~/jchain-mcp
 curl -fsSLO "$BASE/SHA256SUMS"
-curl -fsSLO "$BASE/zero-state-jchain-$VERSION.tgz"
 curl -fsSLO "$BASE/zero-state-jchain-mcp-$VERSION.tgz"
-sha256sum --check --ignore-missing SHA256SUMS   # both files must print OK
-npm install "./zero-state-jchain-$VERSION.tgz" "./zero-state-jchain-mcp-$VERSION.tgz"
+sha256sum --check --ignore-missing SHA256SUMS   # must print OK
+npm install "./zero-state-jchain-mcp-$VERSION.tgz"
 ```
 
-On macOS, run `shasum -a 256` on each file and compare it with its line in `SHA256SUMS`. The release notes list the same checksums. The server is now at `~/jchain-mcp/node_modules/@zero-state/jchain-mcp/dist/index.js`. Use its absolute path below.
+On macOS, run `shasum -a 256` on the file and compare it with its line in `SHA256SUMS`. The release notes list the same checksums. The server is now at `~/jchain-mcp/node_modules/@zero-state/jchain-mcp/dist/index.js`. Use its absolute path below.
 
 Or build it from this repository:
 
