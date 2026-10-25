@@ -213,6 +213,8 @@ describe("AT-90 the edge cache", () => {
     expect(secondFeed.headers.get("x-jchain-client-cache-control")).toBeNull();
     expect(secondFeed.headers.get("x-request-id")).not.toBe(firstFeed.headers.get("x-request-id"));
     expect(await secondFeed.text()).toBe(feedSource);
+    // A made-up query string does not skip the cache: the key is the path.
+    expect(await (await call("/boards/beta/feed.xml?bust=1")).text()).toBe(feedSource);
     const secondSitemap = await call("/sitemap.xml");
     expect(secondSitemap.headers.get("cache-control")).toBe("public, max-age=3600");
     expect(await secondSitemap.text()).toBe(sitemapSource);

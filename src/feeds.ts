@@ -100,7 +100,11 @@ async function edgeCached(
   if (gated instanceof Response) return gated;
   const { requestId, origin } = gated;
   const cache = edgeCache();
-  const key = new Request(c.req.url, { method: "GET" });
+  // These routes take no parameters, so the key is the URL without its query string: a request
+  // with a made-up query cannot skip the cache and make D1 rebuild the response.
+  const keyUrl = new URL(c.req.url);
+  keyUrl.search = "";
+  const key = new Request(keyUrl.toString(), { method: "GET" });
   if (cache !== null) {
     const hit = await cache.match(key).catch(() => undefined);
     if (hit !== undefined) {
