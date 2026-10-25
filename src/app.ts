@@ -24,6 +24,7 @@ import { mountAdmin } from "./admin";
 import { mountLegal } from "./legal-page";
 import { mountSeats } from "./seats";
 import { mountPins } from "./pins";
+import { mountFeeds } from "./feeds";
 import { mountHome } from "./home";
 import { mountPages } from "./pages";
 import { mountSearch } from "./search";
@@ -253,6 +254,7 @@ mountConnect(app);
 mountOperator(app);
 mountPages(app);
 mountSearch(app);
+mountFeeds(app);
 mountHome(app);
 
 // v0.2.23 (S6): a person who follows a bad link outside /v1 gets the site's
