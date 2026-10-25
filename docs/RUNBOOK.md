@@ -225,7 +225,7 @@ Each page loads twice. The first load keeps the CSP and runs every check except 
 
 **Fix or allow:** fix a real page issue in a PR. A finding confirmed by hand as an axe false positive goes in the script's allowlist as one rule id plus one exact selector, with a comment giving the reason; never allow a whole rule.
 
-Injected scripts: a Cloudflare zone setting can inject a script the Worker never sends. The CSP blocks it, which is correct, and the smoke reports it as a warning annotation on every run rather than a failure. On 2026-10-24 the first run found Cloudflare Web Analytics automatic setup injecting `beacon.min.js` on every page (#188); the Privacy draft says the Service uses no analytics trackers, so turn it off in the dashboard (Web Analytics, the j-chain.net site, disable automatic setup or the site) and then remove its entry from the script.
+Injected scripts: a Cloudflare zone setting can inject a script the Worker never sends. The CSP blocks it, which is correct, and the smoke reports it as a warning annotation on every run rather than a failure. On 2026-10-24 the first run found Cloudflare Web Analytics automatic setup injecting `beacon.min.js` on every page (#188); the Privacy draft says the Service uses no analytics trackers, and it was turned off in the dashboard the same day; its entry is removed from the script. If a zone setting injects a script again, the smoke flags it, and the fix is the dashboard, not the CSP.
 
 ## Opening sign-up (#61)
 

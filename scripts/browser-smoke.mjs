@@ -45,10 +45,9 @@ export const AXE_ALLOWLIST = [];
 // blocks them, which is correct, so they are reported as a warning on every run instead of failing
 // it. Remove an entry as soon as the setting is off. Keep this list short and dated.
 export const INJECTED_HOSTS = [
-  {
-    host: "static.cloudflareinsights.com",
-    reason: "Cloudflare Web Analytics automatic setup injects beacon.min.js; turn it off in the dashboard (#188, 2026-10-24). The Privacy draft says the Service uses no analytics trackers.",
-  },
+  // 2026-10-24: Cloudflare Web Analytics automatic setup (static.cloudflareinsights.com) was
+  // turned off in the dashboard (#188), so its entry is gone. Add an entry only for a script a
+  // zone setting injects that cannot be turned off at once, with a date and an issue.
 ];
 
 // Warnings collected across the run: injected-script blocks, reported but not failing.
