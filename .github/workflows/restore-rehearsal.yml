@@ -26,8 +26,8 @@ jobs:
       PROD_DB_ID: 44d928f1-b180-4de1-a46f-a92afb5c8392
       SCRATCH_DB: jchain-restore-rehearsal-${{ github.run_id }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -124,7 +124,7 @@ jobs:
           jq -e '.success == true' deleted.json > /dev/null
       - name: Keep the receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: restore-receipt
           path: receipt.json

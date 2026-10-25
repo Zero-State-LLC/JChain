@@ -1,11 +1,14 @@
 name: Release clients
 # Tests and packs the three clients. workflow_dispatch packs only and keeps the files as a
-# workflow artifact. A tag clients-v<version> also attaches them to a GitHub release:
+# workflow artifact. A tag clients-v<version> on a commit that is on main also attaches them
+# to a new GitHub release:
 #   zero-state-jchain-<version>.tgz             @zero-state/jchain (npm tarball)
-#   zero-state-jchain-mcp-<version>.tgz         @zero-state/jchain-mcp (npm tarball)
+#   zero-state-jchain-mcp-<version>.tgz         @zero-state/jchain-mcp (npm tarball, client bundled)
 #   zero_state_jchain-<version>-py3-none-any.whl  zero-state-jchain (wheel)
 #   zero_state_jchain-<version>.tar.gz          zero-state-jchain (sdist)
 #   SHA256SUMS                                  sha256sum of every file above
+# Releases are immutable: a re-run never replaces a file on an existing release. To change a
+# release, bump the client version and push a new tag.
 # Nothing is published to npm or PyPI: that waits on issue #80.
 on:
   workflow_dispatch:
@@ -16,9 +19,26 @@ permissions:
 jobs:
   versions:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history, so the ancestry check below can see main.
+          fetch-depth: 0
+      - name: Check a release tag points at a commit on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::notice::$GITHUB_SHA is on main"
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main. Release tags must point at a commit on main."
+            exit 1
+          else
+            echo "::notice::$GITHUB_SHA is not on main. A manual run only builds, so it goes ahead; a tag on this commit would fail."
+          fi
       - name: Check every client version matches the tag and the pages
+        id: check
         run: |
           ts="$(node -p "require('./clients/typescript/package.json').version")"
           mcp="$(node -p "require('./clients/mcp/package.json').version")"
@@ -33,6 +53,7 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match client version $ts"
             exit 1
           fi
+          echo "version=$ts" >> "$GITHUB_OUTPUT"
   typescript:
     needs: versions
     runs-on: ubuntu-latest
@@ -40,14 +61,21 @@ jobs:
       run:
         working-directory: clients/typescript
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
       - run: npm ci
       - run: npm test
-      - run: npm run build && npm pack
-      - uses: actions/upload-artifact@v4
+      # npm pack writes a fixed mtime on every entry, so it needs no SOURCE_DATE_EPOCH.
+      # Packing twice and comparing proves the tarball is reproducible.
+      - name: Pack, twice, and check both tarballs match
+        run: |
+          npm run build && npm pack
+          mkdir -p "$RUNNER_TEMP/first" && mv zero-state-jchain-*.tgz "$RUNNER_TEMP/first/"
+          npm pack
+          for f in zero-state-jchain-*.tgz; do cmp "$f" "$RUNNER_TEMP/first/$f"; done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: client-typescript
           path: clients/typescript/zero-state-jchain-*.tgz
@@ -59,8 +87,8 @@ jobs:
       run:
         working-directory: clients/mcp
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
       - name: Install the local TypeScript client
@@ -69,16 +97,49 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      # @zero-state/jchain is not on npm (issue #80), so the packed server depends on the client
-      # tarball from the same release. The repository's package.json is unchanged.
-      - name: Point the client dependency at the release tarball
+      # @zero-state/jchain is not on npm (issue #80), so the release tarball bundles the client
+      # (bundleDependencies): installing it fetches nothing by URL. Only this runner's copy of
+      # package.json and node_modules changes; the repository's dev setup still links ../typescript.
+      - name: Bundle the client into the server tarball
         run: |
           version="$(node -p "require('./package.json').version")"
-          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/clients-v${version}/zero-state-jchain-${version}.tgz"
-          npm pkg set "dependencies.@zero-state/jchain=${url}"
-          node -p "require('./package.json').dependencies['@zero-state/jchain']"
+          (cd ../typescript && npm pack)
+          client="../typescript/zero-state-jchain-${version}.tgz"
+          rm -rf node_modules/@zero-state/jchain
+          mkdir -p node_modules/@zero-state/jchain
+          tar -xzf "$client" -C node_modules/@zero-state/jchain --strip-components=1
+          npm pkg set "dependencies.@zero-state/jchain=${version}"
+          npm pkg set "bundleDependencies[0]=@zero-state/jchain"
+          node -p "JSON.stringify({dependency: require('./package.json').dependencies['@zero-state/jchain'], bundled: require('./package.json').bundleDependencies})"
       - run: npm pack
-      - uses: actions/upload-artifact@v4
+      - name: Check the tarball carries the client and installs on its own
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tarball="$PWD/zero-state-jchain-mcp-${version}.tgz"
+          tar -tzf "$tarball" | grep -qx "package/node_modules/@zero-state/jchain/dist/index.js" || {
+            echo "::error::The MCP tarball does not bundle @zero-state/jchain"
+            exit 1
+          }
+          dir="$RUNNER_TEMP/install-check"
+          mkdir -p "$dir" && cd "$dir"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund --ignore-scripts "$tarball"
+          if grep -q "releases/download" package-lock.json; then
+            echo "::error::Installing the MCP tarball resolved a dependency by release URL"
+            exit 1
+          fi
+          node -e '
+            const lock = require("./package-lock.json").packages;
+            const entry = lock["node_modules/@zero-state/jchain-mcp/node_modules/@zero-state/jchain"];
+            if (!entry || entry.inBundle !== true) { console.error("::error::@zero-state/jchain is not installed from the bundle"); process.exit(1); }
+            console.log("bundled client", entry.version);
+          '
+          node --input-type=module -e "
+            const m = await import('$dir/node_modules/@zero-state/jchain-mcp/dist/server.js');
+            if (typeof m.createJChainServer !== 'function') { console.error('::error::createJChainServer missing'); process.exit(1); }
+            console.log('server', m.SERVER_VERSION);
+          "
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: client-mcp
           path: clients/mcp/zero-state-jchain-mcp-*.tgz
@@ -90,44 +151,63 @@ jobs:
       run:
         working-directory: clients/python
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
       - run: python -m pip install -e '.[test]' mypy build
       - run: python -m pytest -q
       - run: python -m mypy --strict src
-      - run: python -m build
-      - uses: actions/upload-artifact@v4
+      # Hatchling stamps SOURCE_DATE_EPOCH into the wheel and sdist, so the tagged commit's time
+      # makes both reproducible. Building twice and comparing proves it.
+      - name: Build, twice, and check both builds match
+        run: |
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          python -m build
+          mv dist "$RUNNER_TEMP/first-dist"
+          python -m build
+          for f in dist/*; do cmp "$f" "$RUNNER_TEMP/first-dist/$(basename "$f")"; done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: client-python
           path: |
             clients/python/dist/*.whl
             clients/python/dist/*.tar.gz
           if-no-files-found: error
-  release:
-    if: github.event_name == 'push'
-    needs: [typescript, mcp, python]
+  assets:
+    needs: [versions, typescript, mcp, python]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: client-*
           path: assets
           merge-multiple: true
+      - name: Check the bundled client is the released client
+        env:
+          VERSION: ${{ needs.versions.outputs.version }}
+        run: |
+          mkdir -p check/client check/mcp
+          tar -xzf "assets/zero-state-jchain-${VERSION}.tgz" -C check/client
+          tar -xzf "assets/zero-state-jchain-mcp-${VERSION}.tgz" -C check/mcp
+          diff -r check/client/package check/mcp/package/node_modules/@zero-state/jchain
+          rm -rf check
       - name: Write the checksums and the release notes
+        env:
+          VERSION: ${{ needs.versions.outputs.version }}
         run: |
           cd assets
-          ls -l
           sha256sum -- * > ../SHA256SUMS
           mv ../SHA256SUMS .
-          cat SHA256SUMS
-          version="${GITHUB_REF_NAME#clients-v}"
-          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          for f in *; do
+            echo "::notice title=Release asset::${f} $(stat -c %s -- "$f") bytes sha256 $(sha256sum -- "$f" | cut -d' ' -f1)"
+          done
+          tag="clients-v${VERSION}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}"
           {
-            echo "The j-chain.net clients at version ${version}, built from \`${GITHUB_SHA}\`. They are not on npm or PyPI yet (issue #80), so install them from these files."
+            echo "The j-chain.net clients at version ${VERSION}, built from \`${GITHUB_SHA}\`. They are not on npm or PyPI yet (issue #80), so install them from these files."
             echo
             echo "Joining j-chain.net needs none of them: an agent follows https://j-chain.net/join with plain HTTPS requests."
             echo
@@ -136,12 +216,12 @@ jobs:
             echo '```sh'
             echo "BASE=${base}"
             echo 'curl -fsSLO "$BASE/SHA256SUMS"'
-            echo "curl -fsSLO \"\$BASE/zero-state-jchain-${version}.tgz\""
+            echo "curl -fsSLO \"\$BASE/zero-state-jchain-${VERSION}.tgz\""
             echo 'sha256sum --check --ignore-missing SHA256SUMS'
-            echo "npm install ./zero-state-jchain-${version}.tgz"
+            echo "npm install ./zero-state-jchain-${VERSION}.tgz"
             echo '```'
             echo
-            echo "The same works for \`zero-state-jchain-mcp-${version}.tgz\` (its \`@zero-state/jchain\` dependency is the client tarball on this release) and for \`pip install ./zero_state_jchain-${version}-py3-none-any.whl\`. See each client's README."
+            echo "The same works for \`zero-state-jchain-mcp-${VERSION}.tgz\`, which bundles its \`@zero-state/jchain\` dependency, so that one file is all it needs, and for \`pip install ./zero_state_jchain-${VERSION}-py3-none-any.whl\`. See each client's README."
             echo
             echo "## SHA-256"
             echo
@@ -150,13 +230,38 @@ jobs:
             echo '```'
           } > ../notes.md
           cat ../notes.md
-      - name: Create or update the release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-assets
+          path: |
+            assets/*
+            notes.md
+          if-no-files-found: error
+  release:
+    if: github.event_name == 'push'
+    needs: assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-assets
+          path: out
+      - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ls -l out/assets
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" assets/* --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+            count="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')"
+            if [ "$count" -gt 0 ]; then
+              echo "::error::Release $GITHUB_REF_NAME already has $count files. Releases are immutable, so this run replaces nothing. To ship a change, bump the client version and push a new clients-v tag."
+              exit 1
+            fi
+            # A release someone opened by hand with no files yet: attach them (never --clobber).
+            gh release upload "$GITHUB_REF_NAME" out/assets/* --repo "$GITHUB_REPOSITORY"
+            gh release edit "$GITHUB_REF_NAME" --notes-file out/notes.md --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$GITHUB_REF_NAME" assets/* --verify-tag --title "Clients ${GITHUB_REF_NAME#clients-v}" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+            gh release create "$GITHUB_REF_NAME" out/assets/* --verify-tag --title "Clients ${GITHUB_REF_NAME#clients-v}" --notes-file out/notes.md --repo "$GITHUB_REPOSITORY"
           fi

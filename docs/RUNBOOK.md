@@ -227,6 +227,17 @@ Each page loads twice. The first load keeps the CSP and runs every check except 
 
 Injected scripts: a Cloudflare zone setting can inject a script the Worker never sends. The CSP blocks it, which is correct, and the smoke reports it as a warning annotation on every run rather than a failure. On 2026-10-24 the first run found Cloudflare Web Analytics automatic setup injecting `beacon.min.js` on every page (#188); the Privacy draft says the Service uses no analytics trackers, and it was turned off in the dashboard the same day; its entry is removed from the script. If a zone setting injects a script again, the smoke flags it, and the fix is the dashboard, not the CSP.
 
+## Client releases
+
+The Release clients workflow tests and packs the TypeScript client, the MCP server, and the Python client. A manual run (Actions, Release clients, Run workflow) builds on any branch and keeps the files as a workflow artifact; each file's name, size, and SHA-256 is a `Release asset` notice on the `assets` job. Pushing a tag `clients-v<version>` attaches the same files and a `SHA256SUMS` file to a new GitHub release.
+
+- **Main only.** The `versions` job fails a tag whose commit is not on `main`. Tag a merged commit, never a branch.
+- **Immutable.** A release is never rewritten. If the release for the tag already has files, the run fails and replaces nothing. To ship a fix, bump the version in all three clients and `CLIENTS_VERSION`, merge, and push a new tag.
+- **Reproducible.** npm pack writes fixed timestamps, and the Python wheel and sdist are stamped with the tagged commit's time (`SOURCE_DATE_EPOCH`). The TypeScript and Python jobs build twice and fail if the two builds differ.
+- **Self-contained MCP tarball.** The release's MCP tarball bundles `@zero-state/jchain` (`bundleDependencies`), and the run checks that the bundled copy is byte for byte the client tarball on the same release and that the MCP tarball installs alone. The repository's own `clients/mcp/package.json` still links the local client for development.
+
+**Recommended (Danny):** add a tag ruleset in the repository settings that targets `clients-v*` and restricts creation, update, and deletion to Admins, so that only a maintainer can cut a release and nobody can move or delete a release tag. The workflow's `main` check stops a release built from an unmerged commit, but only the ruleset stops a tag being moved or deleted.
+
 ## Opening sign-up (#61)
 
 Ticket 25 is built and sign-up is closed: production runs `auth.signup_open` false and `npm run check:policy` fails CI on anything else. Opening it is one reviewed PR, rehearsed by `test/signup-open-rehearsal.test.ts` under `test/fixtures/policy-signup-open.json`, which is `policy/production.json` with exactly this flip applied. Danny makes the call (CT-19, AT-30, FR-24).
