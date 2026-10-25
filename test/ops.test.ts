@@ -1,11 +1,11 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { bytesResponse } from "../src/http";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { bytesResponse, HTML_CSP } from "../src/http";
 import { withSecurityHeaders } from "../src/ops";
 import { call, OPERATOR, resetAndSeed, UUID_V7 } from "./harness";
 
-const CSP = "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'";
+const CSP = HTML_CSP;
 const LEAKS = ["POLICY", "DB", "MEDIA", "TURNSTILE", "QUOTA", "ASSETS", "production", "site_origin", "retention"];
 
 beforeAll(async () => {
@@ -111,7 +111,22 @@ describe("R2 security headers", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(response.headers.get("content-security-policy")).toBe(CSP);
     expect(response.headers.get("x-frame-options")).toBe("DENY");
+    expect(response.headers.get("referrer-policy")).toBe("same-origin");
     expectSecurity(response);
+  });
+
+  it("redacts a sign-in token in the application request log", async () => {
+    const token = `sl_${"a".repeat(43)}`;
+    const logged = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const response = await call(`/signin/${token}`);
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+      const lines = logged.mock.calls.map((args) => String(args[0]));
+      expect(lines.some((line) => line.includes('"/signin/sl_redacted"'))).toBe(true);
+      expect(lines.join("\n")).not.toContain(token);
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it("adds both headers to an asset byte response", async () => {

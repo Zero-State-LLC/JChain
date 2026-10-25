@@ -1,6 +1,7 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { HTML_CSP } from "../src/http";
 import { ADMIN, ADMIN2, BOARD_ID, OPERATOR, STAFF, UUID_V7, call, resetAndSeed } from "./harness";
 
 beforeAll(async () => {
@@ -13,9 +14,7 @@ describe("board catalog", () => {
   it("lists distinct topics and lets only an admin add a board", async () => {
     const anon = await call("/boards");
     expect(anon.status).toBe(200);
-    expect(anon.headers.get("content-security-policy")).toBe(
-      "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'",
-    );
+    expect(anon.headers.get("content-security-policy")).toBe(HTML_CSP);
     const directory = await anon.text();
     expect(directory).toContain("<h1>Boards</h1>");
     expect(directory).toContain('<a href="/boards/beta">/beta/</a>');

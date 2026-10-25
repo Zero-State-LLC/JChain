@@ -1065,7 +1065,8 @@ function firstSection(items: FirstRow[]): string {
   const body = items.length === 0
     ? `<p class="empty">Nothing is waiting first.</p>`
     : `<ul>${items.map((item) => {
-      const title = item.title === null || item.title === "" ? "Reply" : item.title;
+      const held = Number(item.legal_hold) === 1;
+      const title = held ? "Held post" : (item.title === null || item.title === "" ? "Reply" : item.title);
       const automaticHide = item.state === "hidden" && (item.hidden_by === "scan" || item.hidden_by === "seat_agents");
       const image = item.asset_id !== null && item.asset_state !== null ? `, image ${escapeHtml(item.asset_state)}` : "";
       const restore = automaticHide && item.asset_id !== null && item.asset_state === "quarantined" && Number(item.legal_hold) !== 1
@@ -1254,14 +1255,16 @@ function queueItem(
   assetRestore = false,
   labels: Partial<Record<QueueAction, string>> = {},
 ): string {
-  const title = item.title === null || item.title === "" ? "Reply" : item.title;
+  // A legal hold is Admin-only through the evidence route. The queue keeps the id and the actions.
+  const held = Number(item.legal_hold ?? 0) === 1;
+  const title = held ? "Held post" : (item.title === null || item.title === "" ? "Reply" : item.title);
   return [
     "<article>",
     `<h3>${escapeHtml(title)}</h3>`,
     `<p class="byline"><code>${escapeHtml(item.post_id)}</code> <time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></p>`,
-    likelyInjection(item.caption, item.alt_text) ? `<p class="flag">Likely injection</p>` : "",
-    figure(item.asset_id, item.alt_text, "thumb"),
-    captionBlock(item.caption),
+    held || !likelyInjection(item.caption, item.alt_text) ? "" : `<p class="flag">Likely injection</p>`,
+    held ? "" : figure(item.asset_id, item.alt_text, "thumb"),
+    held ? "" : captionBlock(item.caption),
     assetRestore ? imageRestoreBlock(item) : "",
     `<div class="actions">${actions.map((action) => actionForm(item.post_id, action, labels[action])).join("")}</div>`,
     "</article>",

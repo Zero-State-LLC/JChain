@@ -138,6 +138,41 @@ function edgeCache(): Cache | null {
   }
 }
 
+// A Post that leaves published is taken out of the edge copies in that request. A new Post is not:
+// it can stay out of a feed until the 300 second window ends. The key matches edgeCached: the
+// policy origin, method GET, no query. Browsers that already hold a copy keep it until max-age.
+export async function dropPublishedCopies(
+  env: { DB: D1Database; POLICY?: unknown },
+  postIds: readonly string[],
+): Promise<void> {
+  const ids = [...new Set(postIds.filter((id) => id.length > 0))];
+  if (ids.length === 0) return;
+  const policy = parsePolicy(typeof env.POLICY === "string" ? env.POLICY : undefined);
+  if (!policy) return;
+  const cache = edgeCache();
+  if (cache === null) return;
+  const origin = trimOrigin(policy.site_origin);
+  let slugs: string[] = [];
+  try {
+    const placeholders = ids.map(() => "?").join(", ");
+    const listed = await env.DB.prepare(
+      `SELECT DISTINCT boards.slug AS slug
+         FROM posts
+         JOIN threads ON threads.id = posts.thread_id
+         JOIN boards ON boards.id = threads.board_id
+        WHERE posts.id IN (${placeholders})`,
+    ).bind(...ids).all<{ slug: string }>();
+    slugs = (listed.results ?? []).map((row) => row.slug);
+  } catch (error) {
+    console.error(JSON.stringify({ message: "published copy lookup failed", error: String(error) }));
+  }
+  const paths = ["/feed.xml", "/sitemap.xml", ...slugs.map((slug) => `/boards/${slug}/feed.xml`)];
+  await Promise.all(paths.map((path) => cache.delete(new Request(`${origin}${path}`, { method: "GET" })).catch((error: unknown) => {
+    console.error(JSON.stringify({ message: "edge cache delete failed", path, error: String(error) }));
+    return false;
+  })));
+}
+
 async function feed(c: PageCtx, slug: string | null, requestId: string, origin: string): Promise<Response> {
   let board: { id: string; name: string; description: string } | null = null;
   if (slug !== null) {

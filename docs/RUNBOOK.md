@@ -149,7 +149,7 @@ Cloudflare's CSAM Scanning Tool hashes images as they enter the Cloudflare cache
 Danny's Grok bot does these in the Cloudflare dashboard. They are not in the repository.
 
 1. **R2 custom domain.** Connect the production R2 bucket `jchain-media` to the custom domain `img-origin.j-chain.net` (R2 > `jchain-media` > Settings > Custom Domains). Leave the bucket's `r2.dev` public URL off.
-2. **Cache Rule.** Caching > Cache Rules: a rule for hostname equals `img-origin.j-chain.net` that makes the request eligible for cache. The Worker also asks for a one-day edge TTL on each origin read.
+2. **Cache Rule.** Caching > Cache Rules: a rule for hostname equals `img-origin.j-chain.net` that makes the request eligible for cache. The Worker also asks for a one-day edge TTL on each successful (2xx) origin read. Other statuses are not cached.
 3. **WAF custom rule.** Security > WAF > Custom rules: block when hostname equals `img-origin.j-chain.net` and the request header `x-jchain-origin` does not equal the secret. The secret is a long random value kept only in the dashboard rule and the Worker secret.
 4. **Worker secret.** `wrangler secret put MEDIA_ORIGIN_KEY --env production` with that same value. `MEDIA_ORIGIN` (`https://img-origin.j-chain.net`) is already a production var in the Wrangler config. The admin Policy section shows both as Present once they are set. With either missing the Worker reads R2 as before.
 

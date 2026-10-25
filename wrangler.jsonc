@@ -16,7 +16,7 @@
   "triggers": { "crons": ["17 11 * * *"] },
   "observability": {
     "enabled": true,
-    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false },
     "traces": { "enabled": true, "head_sampling_rate": 0.01 }
   },
   // Top-level bindings are the local Vitest config. Keep POLICY identical to policy/beta.json.
@@ -87,7 +87,7 @@
       "account_id": "315fb44b61212825452aad0ca566ea42",
       "observability": {
         "enabled": true,
-        "logs": { "enabled": true, "head_sampling_rate": 1 },
+        "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false },
         "traces": { "enabled": true, "head_sampling_rate": 0.01 }
       },
       "vars": {

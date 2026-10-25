@@ -7,8 +7,10 @@
 //
 // A 451 from the origin is the tool's block: fail closed, quarantine every published Post on the
 // Asset under a legal hold, and alert the Moderators after the response. The NCMEC report stays
-// human. Any other answer, or a thrown fetch, falls back to R2, as the Content Scan fails open.
+// human. A 404 is not_found and is not cached. Any other answer, or a thrown fetch, falls back to
+// R2, as the Content Scan fails open. Only a 2xx is kept in the zone cache.
 import { derivativeKey } from "./asset-pipeline";
+import { dropPublishedCopies } from "./feeds";
 import { utcSeconds } from "./ids";
 import { alertAfterResponse } from "./moderator-alert";
 import type { Policy } from "./policy";
@@ -50,7 +52,12 @@ export async function readFromOrigin(
   try {
     response = await fetch(`${origin.base}/${derivativeKey(assetId, variant)}`, {
       headers: { [ORIGIN_KEY_HEADER]: origin.key },
-      cf: { cacheEverything: true, cacheTtl: ORIGIN_CACHE_TTL_SECONDS },
+      // cacheEverything lets a 2xx enter the zone cache for the CSAM scanner. cacheTtlByStatus
+      // keeps that one-day TTL on 2xx only: 0 means do not store, so a 404 or an error cannot stick.
+      cf: {
+        cacheEverything: true,
+        cacheTtlByStatus: { "200-299": ORIGIN_CACHE_TTL_SECONDS, "300-599": 0 },
+      },
     });
   } catch {
     return fallback(null, assetId);
@@ -105,7 +112,10 @@ export async function quarantineMediaMatch(
       asset_id: assetId,
       quarantined: applied ? 1 + plan.siblingIds.length : 0,
     }));
-    if (applied) await alertAfterResponse(env, executionCtx, policy);
+    if (applied) {
+      await dropPublishedCopies(env, [post.id, ...plan.siblingIds]);
+      await alertAfterResponse(env, executionCtx, policy);
+    }
   } catch {
     console.error(JSON.stringify({ event: "media_origin_quarantine_failed", asset_id: assetId }));
   }

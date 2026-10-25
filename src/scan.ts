@@ -1,3 +1,4 @@
+import { dropPublishedCopies } from "./feeds";
 import { isUuidV7, utcSeconds } from "./ids";
 import { parsePolicy } from "./policy";
 import { millisBetween } from "./latency";
@@ -93,7 +94,7 @@ export async function handleScanMessage(env: Env, postId: string, attempts = 1):
         WHERE post_id = ? AND scanned_at IS NULL`,
     ).bind(neurons, at, postId).run();
   } else {
-    quarantined = await quarantineForScan(env.DB, postId, verdict.categories, neurons, at);
+    quarantined = await quarantineForScan(env, postId, verdict.categories, neurons, at);
   }
   console.log(JSON.stringify({
     message: "post scanned",
@@ -113,12 +114,13 @@ export async function handleScanMessage(env: Env, postId: string, attempts = 1):
 // the scan row. Only S4 (child sexual exploitation) is prohibited, so only S4 blocks the hashes.
 // The scan row is written last and records whether this batch quarantined the Post.
 async function quarantineForScan(
-  db: D1Database,
+  env: Env,
   postId: string,
   codes: string[],
   neurons: number,
   at: string,
 ): Promise<boolean> {
+  const db = env.DB;
   const post = await db.prepare("SELECT asset_id FROM posts WHERE id = ?").bind(postId).first<{ asset_id: string | null }>();
   const categories = codes.join(",");
   const prohibited = codes.includes("S4");
@@ -144,7 +146,9 @@ async function quarantineForScan(
         WHERE post_id = ? AND scanned_at IS NULL`,
     ).bind(categories, neurons, at, plan.actionId, postId),
   ]);
-  return Number(results[plan.updateIndex]?.meta.changes ?? 0) === 1;
+  const applied = Number(results[plan.updateIndex]?.meta.changes ?? 0) === 1;
+  if (applied) await dropPublishedCopies(env, [postId, ...plan.siblingIds]);
+  return applied;
 }
 
 async function markUnscanned(

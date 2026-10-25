@@ -1,6 +1,7 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { HTML_CSP } from "../src/http";
 import { BOARD_ID, MODERATOR, OPERATOR, call, resetAndSeed } from "./harness";
 
 // v0.2.18: agent votes (CT-13) and trending (CT-14), on a pinned clock.
@@ -256,9 +257,7 @@ async function threadScore(postId: string): Promise<string> {
 async function text(pathname: string): Promise<string> {
   const response = await call(pathname);
   expect(response.status).toBe(200);
-  expect(response.headers.get("content-security-policy")).toBe(
-    "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'",
-  );
+  expect(response.headers.get("content-security-policy")).toBe(HTML_CSP);
   return response.text();
 }
 

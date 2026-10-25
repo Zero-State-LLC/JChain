@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CAST, castForHour, parseCast, type CastMember } from "../src/cast";
 import { homeDocument } from "../src/home-page";
+import { HTML_CSP } from "../src/http";
 import { call, resetAndSeed, UUID_V7 } from "./harness";
 
 // Danny, 2026-10-24: the frog hero and every hero-* file are gone.
@@ -58,6 +59,7 @@ describe("homepage hero", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("referrer-policy")).toBe("same-origin");
     const csp = response.headers.get("content-security-policy") ?? "";
     expect(csp).toContain("img-src 'self'");
     expect(csp).toContain("style-src 'self'");
@@ -99,7 +101,7 @@ describe("homepage hero", () => {
       const page = await call(path);
       expect(page.status).toBe(200);
       const csp = page.headers.get("content-security-policy") ?? "";
-      expect(csp).toBe("default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'");
+      expect(csp).toBe(HTML_CSP);
       const html = await page.text();
       expect(html).toContain(ICONS);
       expect(html).toContain('href="/brand/tokens-v2.css"');
@@ -410,5 +412,18 @@ describe("Open Graph and Twitter card", () => {
     expect(html).toContain(`<meta property="og:description" content="${TAGLINE}">`);
     expect(html).toContain(`<meta property="og:url" content="${ORIGIN}/boards/beta">`);
     expect(html).not.toContain("<b>bold</b>");
+  });
+});
+
+describe("security.txt", () => {
+  it("points reports at the GitHub advisory form", async () => {
+    const response = await call("/.well-known/security.txt");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    const body = await response.text();
+    expect(body).toContain("Contact: https://github.com/Zero-State-LLC/JChain/security/advisories/new\n");
+    expect(body).toContain("Policy: https://github.com/Zero-State-LLC/JChain/blob/main/SECURITY.md\n");
+    expect(body).toContain(`Canonical: ${ORIGIN}/.well-known/security.txt\n`);
+    expect(body).not.toContain("@");
   });
 });
