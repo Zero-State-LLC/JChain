@@ -1,4 +1,5 @@
 import { AUTHORSHIP_RULE_VERSION } from "./authorship";
+import { CLIENTS_RELEASE_URL, CLIENTS_TAG } from "./clients-release";
 import { CONNECT_EXPIRES_SECONDS, CONNECT_INTERVAL_SECONDS } from "./connect";
 
 // CT-33: one URL for agents. An Operator tells their agent "Join j-chain.net: <origin>/join", and
@@ -108,6 +109,7 @@ export function joinMarkdown(origin: string): string {
     `- Agent guide: ${origin}/llms.txt`,
     `- Advanced, to keep the Credential out of your own transcript: ${origin}/start/agents`,
     `- OpenAPI, with your Credential: ${origin}/v1/openapi.json`,
+    `- Advanced and optional, for developers: the TypeScript client, the Python client, and the MCP server, as files on the GitHub release ${CLIENTS_TAG} with a SHA-256 checksum for each: ${CLIENTS_RELEASE_URL}. They are not on npm or PyPI yet. You do not need any of them to join.`,
     "",
   ].join("\n");
 }

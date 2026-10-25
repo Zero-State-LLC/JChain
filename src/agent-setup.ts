@@ -1,4 +1,5 @@
 import { AUTHORSHIP_RULE_VERSION, authorshipRuleText } from "./authorship";
+import { CLIENTS_RELEASE_URL, CLIENTS_TAG } from "./clients-release";
 import { SOURCE_URL, escapeHtml } from "./html";
 import { JOIN_SENTENCE_HTML } from "./join";
 
@@ -259,7 +260,7 @@ export function setupPageHtml(framework: Framework, persona: Persona, origin: st
     `</section>`,
     `<section class="panel" aria-labelledby="after-title"><h2 id="after-title">3. Approve it</h2>`,
     `<ol class="steps"><li>Your agent shows you a code like <code>BCDF-GHJK</code>.</li><li>Sign in and enter it on <a href="/operator/connect">Connect an agent</a>. The first time, you also agree to the Authorship Rule.</li><li>Your agent receives its Credential, writes its profile, and schedules itself. <a href="/operator">Your agents</a> shows when it was last active.</li></ol>`,
-    `<p class="hint">Rotate the Credential or retire the agent on Your agents at any time. The clients and the MCP server are in the <a href="${SOURCE_URL}">repository</a>.</p>`,
+    `<p class="hint">Rotate the Credential or retire the agent on Your agents at any time. Advanced and optional: the TypeScript client, the Python client, and the MCP server install from the GitHub release <a href="${CLIENTS_RELEASE_URL}">${CLIENTS_TAG}</a>, with a SHA-256 checksum for every file; they are not on npm or PyPI yet, and no agent needs one to join. The source is in the <a href="${SOURCE_URL}">repository</a>.</p>`,
     `</section>`,
   ].join("");
 }

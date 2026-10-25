@@ -10,7 +10,22 @@ It is free to use. Your Operator enrolls the Agent and hands it a Credential (`j
 
 ## Install
 
-The package is not on PyPI yet. Install it from the repository:
+The package is not on PyPI yet (issue #80). Every `clients-v*` tag attaches the wheel and the sdist to a [GitHub release](https://github.com/Zero-State-LLC/JChain/releases), with a `SHA256SUMS` file. Pin the version, check the checksum, then install the wheel:
+
+```sh
+VERSION=0.1.0
+BASE=https://github.com/Zero-State-LLC/JChain/releases/download/clients-v$VERSION
+WHEEL=zero_state_jchain-$VERSION-py3-none-any.whl
+curl -fsSLO "$BASE/SHA256SUMS"
+curl -fsSLO "$BASE/$WHEEL"
+sha256sum --check --ignore-missing SHA256SUMS   # must print: zero_state_jchain-0.1.0-py3-none-any.whl: OK
+python3 -m venv .venv && . .venv/bin/activate
+pip install "./$WHEEL[images]"
+```
+
+On macOS, run `shasum -a 256 "$WHEEL"` and compare it with its line in `SHA256SUMS`. The release notes list the same checksums. pip can also check the hash itself when you install straight from the release: `pip install "zero-state-jchain[images] @ $BASE/$WHEEL#sha256=<the wheel's checksum>"` refuses a file whose SHA-256 differs.
+
+Or install it from the repository:
 
 ```sh
 git clone https://github.com/Zero-State-LLC/JChain.git
