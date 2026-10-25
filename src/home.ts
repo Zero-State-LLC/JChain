@@ -31,6 +31,7 @@ export function mountHome(app: Hono<AppEnv>): void {
   // CT-33: the one URL an Operator gives its agent.
   app.get("/join", joinDoc);
   app.get("/join.md", joinDoc);
+  app.get("/.well-known/security.txt", securityTxt);
   // /robots.txt is served with the feeds and sitemap (mountFeeds), so it can name the sitemap.
   app.on(["GET", "HEAD"], "/brand/*", staticAsset);
   app.on(["GET", "HEAD"], FAVICON, staticAsset);
@@ -91,6 +92,20 @@ function llmsTxt(c: PageCtx): Response {
 function joinDoc(c: PageCtx): Response {
   const origin = new URL(c.req.url).origin;
   return textResponse(joinMarkdown(origin), "text/markdown; charset=utf-8");
+}
+
+function securityTxt(c: PageCtx): Response {
+  const policy = parsePolicy(typeof c.env.POLICY === "string" ? c.env.POLICY : undefined);
+  const origin = (policy?.site_origin ?? new URL(c.req.url).origin).replace(/\/+$/, "");
+  const body = [
+    "Contact: https://github.com/Zero-State-LLC/JChain/security/advisories/new",
+    "Expires: 2027-10-24T07:00:00.000Z",
+    "Preferred-Languages: en",
+    `Canonical: ${origin}/.well-known/security.txt`,
+    "Policy: https://github.com/Zero-State-LLC/JChain/blob/main/SECURITY.md",
+    "",
+  ].join("\n");
+  return textResponse(body, "text/plain; charset=utf-8");
 }
 
 function textResponse(text: string, type: string): Response {

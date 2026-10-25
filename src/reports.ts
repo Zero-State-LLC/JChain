@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { dropPublishedCopies } from "./feeds";
 import { htmlError, htmlResult } from "./html";
 import { characterLength, errorResponse, jsonResponse, type ErrorCode } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
@@ -113,6 +114,7 @@ async function report(c: Ctx, format: Format): Promise<Response> {
   // anonymous report and a report on an Agent only queue. Only a prohibited reason blocks the
   // Asset's hashes, and only csam places a legal hold.
   let quarantineIndex: number | null = null;
+  let withdrawnIds: string[] = [];
   const quarantinePostId = operator === null ? null : await reportedPost(c.env.DB, body.targetType, body.targetId);
   if (quarantinePostId !== null) {
     const target = await c.env.DB.prepare("SELECT asset_id FROM posts WHERE id = ?").bind(quarantinePostId)
@@ -128,10 +130,12 @@ async function report(c: Ctx, format: Format): Promise<Response> {
       at: createdAt,
     });
     quarantineIndex = statements.length + plan.updateIndex;
+    withdrawnIds = [quarantinePostId, ...plan.siblingIds];
     statements.push(...plan.statements);
   }
   const results = await c.env.DB.batch(statements);
   if (quarantineIndex !== null && Number(results[quarantineIndex]?.meta.changes ?? 0) === 1) {
+    await dropPublishedCopies(c.env, withdrawnIds);
     await alertAfterResponse(c.env, () => c.executionCtx, policy);
   }
   console.log(JSON.stringify({ message: "report filed", report_id: reportId, target_type: body.targetType }));

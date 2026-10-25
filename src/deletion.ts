@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { derivativeKey, originalKey, originalThumbKey, refundDerivatives } from "./asset-pipeline";
+import { dropPublishedCopies } from "./feeds";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
@@ -94,9 +95,10 @@ async function requestDeletion(c: Ctx): Promise<Response> {
 // One bounded batch of an Agent's owner deletion. True when it changed anything.
 export async function deletionBatch(env: DeletionEnv, agentId: string, actor: string): Promise<boolean> {
   const queued = await queueRemovals(env.DB, agentId, actor, utcSeconds());
+  if (queued.publishedIds.length > 0) await dropPublishedCopies(env, queued.publishedIds);
   const revoked = await revokeAssets(env, agentId);
   const finished = await finishRemovals(env.DB, agentId);
-  return queued || revoked || finished;
+  return queued.changed || revoked || finished;
 }
 
 // Daily retention (round-2 audit row 9): continues every owner deletion that still has work, up to
@@ -129,7 +131,12 @@ export async function continueDeletions(env: DeletionEnv): Promise<number> {
   return batches;
 }
 
-async function queueRemovals(db: D1Database, agentId: string, actor: string, occurredAt: string): Promise<boolean> {
+async function queueRemovals(
+  db: D1Database,
+  agentId: string,
+  actor: string,
+  occurredAt: string,
+): Promise<{ changed: boolean; publishedIds: string[] }> {
   const listed = await db.prepare(
     `SELECT posts.id AS id, posts.state AS state FROM posts
       WHERE posts.author_agent_id = ? AND posts.state IN ${QUEUED_STATES} AND ${ownerDeleted("posts")}
@@ -137,7 +144,7 @@ async function queueRemovals(db: D1Database, agentId: string, actor: string, occ
       LIMIT ${DELETION_POST_BATCH}`,
   ).bind(agentId).all<{ id: string; state: string }>();
   const rows = listed.results ?? [];
-  if (rows.length === 0) return false;
+  if (rows.length === 0) return { changed: false, publishedIds: [] };
   const statements: D1PreparedStatement[] = [];
   for (const post of rows) {
     if (post.state === "published") {
@@ -181,7 +188,11 @@ async function queueRemovals(db: D1Database, agentId: string, actor: string, occ
       WHERE author_agent_id = ? AND state IN ${QUEUED_STATES} AND id IN (${placeholders})`,
   ).bind(agentId, ...rows.map((post) => post.id)));
   const results = await db.batch(statements);
-  return Number(results[results.length - 1]?.meta.changes ?? 0) > 0;
+  const changed = Number(results[results.length - 1]?.meta.changes ?? 0) > 0;
+  return {
+    changed,
+    publishedIds: changed ? rows.filter((post) => post.state === "published").map((post) => post.id) : [],
+  };
 }
 
 async function revokeAssets(env: DeletionEnv, agentId: string): Promise<boolean> {

@@ -2,6 +2,7 @@ import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { utcSeconds, uuidv7 } from "../src/ids";
+import { ORIGIN_CACHE_TTL_SECONDS } from "../src/media-origin";
 import { derivativeKey } from "../src/asset-pipeline";
 import { ALERT_SUBJECT } from "../src/moderator-alert";
 import { clearNamedQuota } from "../src/quota";
@@ -31,7 +32,12 @@ const AUTH = {
 };
 
 type Sent = { from: string; to: string; subject: string; text: string };
-type Seen = { url: string; key: string | null };
+type Seen = { url: string; key: string | null; cf: { cacheEverything?: boolean; cacheTtl?: number; cacheTtlByStatus?: Record<string, number> } | null };
+
+const ORIGIN_CACHE = {
+  cacheEverything: true,
+  cacheTtlByStatus: { "200-299": ORIGIN_CACHE_TTL_SECONDS, "300-599": 0 },
+};
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
@@ -80,7 +86,7 @@ describe("AT-78 published images come through the zone-cached origin", () => {
     expect(response.headers.get("cache-control")).toBe("public, max-age=300");
     expect(response.headers.get("x-jchain-media")).toBe("origin-hit");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(ORIGIN_BYTES);
-    expect(seen).toEqual([{ url: `${MEDIA_ORIGIN}/${derivativeKey(seeded.assetId, "display")}`, key: ORIGIN_KEY }]);
+    expect(seen).toEqual([{ url: `${MEDIA_ORIGIN}/${derivativeKey(seeded.assetId, "display")}`, key: ORIGIN_KEY, cf: ORIGIN_CACHE }]);
   });
 
   it("names the cache status none when the origin sends no cf-cache-status", async () => {
@@ -94,11 +100,12 @@ describe("AT-78 published images come through the zone-cached origin", () => {
   });
 
   it("is not_found when the origin has no such object", async () => {
-    stubOrigin(() => new Response("missing", { status: 404 }));
+    const seen = stubOrigin(() => new Response("missing", { status: 404 }));
     const author = await enroll("Missing", OPERATOR);
     const seeded = await seedPost(author.agentId);
     await expectError(await call(contentPath(seeded.assetId, "display"), { env: originEnv() }), 404, "not_found");
     expect((await postRow(seeded.postId))?.state).toBe("published");
+    expect(seen[0]?.cf).toEqual(ORIGIN_CACHE);
   });
 
   it("fails open to R2 on any other origin status", async () => {
@@ -223,7 +230,11 @@ function stubOrigin(handler: (url: string) => Response): Seen[] {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     if (url.startsWith(`${MEDIA_ORIGIN}/`)) {
-      seen.push({ url, key: new Headers(init?.headers).get("x-jchain-origin") });
+      const cf = init?.cf;
+      const cache = cf !== undefined && typeof cf === "object" && cf !== null && !Array.isArray(cf)
+        ? cf as Seen["cf"]
+        : null;
+      seen.push({ url, key: new Headers(init?.headers).get("x-jchain-origin"), cf: cache });
       return handler(url);
     }
     return realFetch(input, init);

@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { derivativeKey } from "../src/asset-pipeline";
 import { utcSeconds, uuidv7 } from "../src/ids";
 import { runRetention } from "../src/retention";
+import { HTML_CSP } from "../src/http";
 import { LEGAL_LINKS } from "../src/rules-copy";
 import postpublishFixture from "./fixtures/policy-postpublish.json";
 import {
@@ -59,7 +60,7 @@ async function signIn(bindings: Env, sent: SentMail[], email: string): Promise<s
 }
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
-const CSP = "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'";
+const CSP = HTML_CSP;
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);

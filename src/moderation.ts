@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { blockAssetHashes } from "./blocked-hashes";
+import { dropPublishedCopies } from "./feeds";
 import { htmlError, htmlResult } from "./html";
 import { errorResponse, characterLength, jsonResponse, type ErrorCode } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
@@ -429,6 +430,7 @@ async function movePost(
   }
   const prohibited = PROHIBITED_REASONS.has(action.reasonCode);
   const csamRemoval = name === "remove" && action.reasonCode === "csam";
+  let publishedSiblingIds: string[] = [];
   if (post.asset_id !== null && ((name === "quarantine" && prohibited) || csamRemoval)) {
     // Gap rows 12 and 18: a prohibited Post quarantine, and a csam removal, also quarantine the
     // Asset (keyed on this batch's audit row). The removal blocks its hashes below.
@@ -449,6 +451,7 @@ async function movePost(
       legalHold: action.reasonCode === "csam",
       at: occurredAt,
     });
+    publishedSiblingIds = siblings.siblingIds;
     statements.push(...siblings.statements);
   }
   if (name === "quarantine" && prohibited && post.asset_id !== null) {
@@ -492,6 +495,13 @@ async function movePost(
   const audited = Number(results[auditIndex]?.meta.changes ?? 0) === 1;
   const recorded = writtenIndex === null || Number(results[writtenIndex]?.meta.changes ?? 0) === 1;
   if (!updated || !audited || !recorded) return moderationError(requestId, format, "state_conflict");
+  const leftPublished = [
+    ...(post.state === "published" && (name === "hide" || name === "quarantine" || name === "remove")
+      ? [action.targetId]
+      : []),
+    ...publishedSiblingIds,
+  ];
+  if (leftPublished.length > 0) await dropPublishedCopies(c.env, leftPublished);
   if (enqueueScan) {
     try {
       await c.env.ASSET_UPLOAD.send({ post_id: action.targetId });

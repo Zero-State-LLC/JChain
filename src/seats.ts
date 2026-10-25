@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { dropPublishedCopies } from "./feeds";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { alertAfterResponse } from "./moderator-alert";
@@ -151,6 +152,7 @@ async function flagPost(c: Ctx): Promise<Response> {
   if (Number(results[0]?.meta.changes ?? 0) !== 1) return errorResponse(requestId, "state_conflict");
   if (Number(results[quarantineIndex]?.meta.changes ?? 0) !== 1) return errorResponse(requestId, "state_conflict");
   console.log(JSON.stringify({ message: "seat quarantine", post_id: postId, seat: seat.seat, trial: 0 }));
+  await dropPublishedCopies(c.env, [postId, ...plan.siblingIds]);
   await alertAfterResponse(c.env, () => c.executionCtx, c.get("policy"));
   return jsonResponse(requestId, {
     post_id: postId,

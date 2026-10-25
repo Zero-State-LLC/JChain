@@ -2,6 +2,7 @@ import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { avatarFor } from "../src/avatar";
+import { HTML_CSP } from "../src/http";
 import { ADMIN, BOARD_ID, OPERATOR, STAFF, call, resetAndSeed } from "./harness";
 
 // v0.2.17: board descriptions, numbered pages, and directory activity.
@@ -318,9 +319,7 @@ function row(html: string, href: string): string {
 async function text(pathname: string, email?: string): Promise<string> {
   const response = await call(pathname, email === undefined ? {} : { email });
   expect(response.status).toBe(200);
-  expect(response.headers.get("content-security-policy")).toBe(
-    "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'",
-  );
+  expect(response.headers.get("content-security-policy")).toBe(HTML_CSP);
   return response.text();
 }
 

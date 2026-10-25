@@ -27,11 +27,15 @@ const SITEMAP_CACHE = "public, max-age=3600";
 // The tag: authority stays fixed, so an entry id never changes even if the site origin does.
 const TAG_AUTHORITY = "j-chain.net,2026";
 
-// The feeds and the sitemap are kept at the edge (the Workers Cache API) for this many seconds, so
-// a burst of readers or crawlers costs one D1 read per URL per window. Only a 200 is kept.
+// The feeds and the sitemap are kept at the edge (the Workers Cache API) for this many seconds.
+// A hit still checks that every listed Thread is visible. Only a 200 is kept.
 export const EDGE_CACHE_SECONDS = 300;
 // Carries the client's Cache-Control through the edge copy, whose own header sets the edge lifetime.
 const CLIENT_CACHE_HEADER = "x-jchain-client-cache-control";
+// Left on copies stored before the visibility check stopped reading a timestamp. Never sent to clients.
+const CACHED_AT_HEADER = "x-jchain-cached-at";
+// D1 allows 100 bound parameters. Each chunk is one read, and a feed fits in one.
+const VISIBILITY_CHUNK = 100;
 
 // Pages a crawler should not walk, besides the ones the agent guide's robots rules already name.
 const EXTRA_DISALLOW = ["/admin", "/search"];
@@ -107,10 +111,11 @@ async function edgeCached(
   const key = new Request(keyUrl.toString(), { method: "GET" });
   if (cache !== null) {
     const hit = await cache.match(key).catch(() => undefined);
-    if (hit !== undefined) {
+    if (hit !== undefined && await cachedCopyIsCurrent(c.env.DB, hit)) {
       const headers = new Headers(hit.headers);
       const client = headers.get(CLIENT_CACHE_HEADER);
       headers.delete(CLIENT_CACHE_HEADER);
+      headers.delete(CACHED_AT_HEADER);
       if (client !== null) headers.set("cache-control", client);
       headers.set("x-request-id", requestId);
       return new Response(hit.body, { status: hit.status, headers });
@@ -136,6 +141,72 @@ function edgeCache(): Cache | null {
   } catch {
     return null;
   }
+}
+
+// cache.delete only removes the copy in the data center that handled the withdrawal. A hit in any
+// other data center is served only while every Thread URL in it is still visible. The URLs come
+// from link and sitemap locations, not from caption text. A failed check rebuilds. A Thread that
+// becomes visible again can wait for the rest of the window, the same as a new Post.
+async function cachedCopyIsCurrent(db: D1Database, hit: Response): Promise<boolean> {
+  try {
+    const body = await hit.clone().text();
+    const ids = threadIdsIn(body);
+    for (let start = 0; start < ids.length; start += VISIBILITY_CHUNK) {
+      const chunk = ids.slice(start, start + VISIBILITY_CHUNK);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const found = await db.prepare(
+        `SELECT COUNT(DISTINCT posts.thread_id) AS n
+           FROM posts
+          WHERE posts.title IS NOT NULL AND posts.thread_id IN (${placeholders}) AND ${VISIBLE_POST}`,
+      ).bind(...chunk).first<{ n: number }>();
+      if (Number(found?.n ?? 0) !== chunk.length) return false;
+    }
+    return true;
+  } catch (error) {
+    console.error(JSON.stringify({ message: "edge cache check failed", error: String(error) }));
+    return false;
+  }
+}
+
+function threadIdsIn(body: string): string[] {
+  const pattern = /(?:href="[^"]*|loc>)[^"<]*\/threads\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
+  return [...new Set([...body.matchAll(pattern)].map((match) => match[1].toLowerCase()))];
+}
+
+// cache.delete reaches only the data center that is running this request. Other data centers drop a
+// withdrawn Thread on the next read, in cachedCopyIsCurrent. A new Post is not deleted: it can stay
+// out of a feed until the 300 second window ends. The key matches edgeCached: the policy origin,
+// method GET, no query. Browsers that already hold a copy keep it until max-age.
+export async function dropPublishedCopies(
+  env: { DB: D1Database; POLICY?: unknown },
+  postIds: readonly string[],
+): Promise<void> {
+  const ids = [...new Set(postIds.filter((id) => id.length > 0))];
+  if (ids.length === 0) return;
+  const policy = parsePolicy(typeof env.POLICY === "string" ? env.POLICY : undefined);
+  if (!policy) return;
+  const cache = edgeCache();
+  if (cache === null) return;
+  const origin = trimOrigin(policy.site_origin);
+  let slugs: string[] = [];
+  try {
+    const placeholders = ids.map(() => "?").join(", ");
+    const listed = await env.DB.prepare(
+      `SELECT DISTINCT boards.slug AS slug
+         FROM posts
+         JOIN threads ON threads.id = posts.thread_id
+         JOIN boards ON boards.id = threads.board_id
+        WHERE posts.id IN (${placeholders})`,
+    ).bind(...ids).all<{ slug: string }>();
+    slugs = (listed.results ?? []).map((row) => row.slug);
+  } catch (error) {
+    console.error(JSON.stringify({ message: "published copy lookup failed", error: String(error) }));
+  }
+  const paths = ["/feed.xml", "/sitemap.xml", ...slugs.map((slug) => `/boards/${slug}/feed.xml`)];
+  await Promise.all(paths.map((path) => cache.delete(new Request(`${origin}${path}`, { method: "GET" })).catch((error: unknown) => {
+    console.error(JSON.stringify({ message: "edge cache delete failed", path, error: String(error) }));
+    return false;
+  })));
 }
 
 async function feed(c: PageCtx, slug: string | null, requestId: string, origin: string): Promise<Response> {
