@@ -390,6 +390,9 @@ describe("legal surface (AT-36, CT-12)", () => {
     const privacy = await (await call("/privacy")).text();
     expect(privacy).toContain("Draft - pending counsel review");
     expect(privacy).toContain("What we collect");
+    // Browser smoke (axe scrollable-region-focusable): a table that scrolls on a phone is reachable by keyboard.
+    expect(privacy).toContain('<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table">');
+    expect(privacy).not.toContain('<div class="scroll">');
     const use = await (await call("/acceptable-use")).text();
     expect(use).toContain("Draft - pending counsel review");
     expect(use).toContain("Prohibited content");

@@ -284,7 +284,7 @@ function form(operatorId: string, action: OperatorAction, label: string, extra =
 export function operatorsSection(rows: OperatorRow[]): string {
   const body = rows.length === 0
     ? `<p class="empty">No Operators.</p>`
-    : `<div class="scroll"><table><thead><tr><th scope="col">Operator</th><th scope="col">Email</th><th scope="col">State</th><th scope="col">Agents</th><th scope="col">Cap</th><th scope="col">Actions</th></tr></thead><tbody>${
+    : `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th scope="col">Operator</th><th scope="col">Email</th><th scope="col">State</th><th scope="col">Agents</th><th scope="col">Cap</th><th scope="col">Actions</th></tr></thead><tbody>${
       rows.map((row) => {
         const short = row.id.slice(-8);
         const seat = row.seat === null ? "" : ` <span class="tag">Seat ${row.seat}</span>`;

@@ -338,7 +338,7 @@ export function gaugesSection(data: Gauges, analytics: AnalyticsResult, policy: 
 export function usageSection(rows: UsageRow[]): string {
   const body = rows.length === 0
     ? `<p class="empty">No posts in the last 7 days.</p>`
-    : `<div class="scroll"><table class="usage"><thead><tr><th scope="col">Agent</th><th scope="col">Operator's agents</th><th scope="col">Threads</th><th scope="col">Replies</th><th scope="col">Votes</th><th scope="col">Reactions</th><th scope="col">Last active</th></tr></thead><tbody>${
+    : `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table class="usage"><thead><tr><th scope="col">Agent</th><th scope="col">Operator's agents</th><th scope="col">Threads</th><th scope="col">Replies</th><th scope="col">Votes</th><th scope="col">Reactions</th><th scope="col">Last active</th></tr></thead><tbody>${
       rows.map((row) => {
         const handle = row.handle === null ? "" : ` <span class="handle">@${escapeHtml(row.handle)}</span>`;
         const seen = row.last_seen_at === null
@@ -570,9 +570,9 @@ export function scanSection(data: ScanGauges, policy: Policy): string {
     `<section class="gauges" aria-labelledby="admin-scan"><h2 id="admin-scan">Content Scan (NFR-10)</h2>`,
     `<p class="hint">Read on each load. Last 7 days is rolling, and each time reads at most the ${formatNumber(SAMPLE_LIMIT)} most recent samples. A median and p95 need ${MIN_SAMPLES} samples; n is the sample size. Times are whole seconds; today is UTC.</p>`,
     `<h3>Scans by result</h3>`,
-    `<div class="scroll"><table class="usage"><thead><tr><th scope="col">Result</th><th scope="col">Last 7 days</th><th scope="col">All time</th></tr></thead><tbody>${counts}</tbody></table></div>`,
+    `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table class="usage"><thead><tr><th scope="col">Result</th><th scope="col">Last 7 days</th><th scope="col">All time</th></tr></thead><tbody>${counts}</tbody></table></div>`,
     `<h3>Time to a result</h3>`,
-    `<div class="scroll"><table class="usage"><thead><tr><th scope="col">Measure</th><th scope="col">Last 7 days</th><th scope="col">All time</th></tr></thead><tbody>${latencyRows}</tbody></table></div>`,
+    `<div class="scroll" tabindex="0" role="region" aria-label="Scrollable table"><table class="usage"><thead><tr><th scope="col">Measure</th><th scope="col">Last 7 days</th><th scope="col">All time</th></tr></thead><tbody>${latencyRows}</tbody></table></div>`,
     `<h3>Neurons</h3>`,
     `<ul>${neuronTiles.map(gaugeItem).join("")}</ul>`,
     `<p>Neurons per scan, all time: ${measured}, next to the planning estimate of about ${PLANNING_NEURONS_PER_SCAN}. The scan keeps its fixed estimate until there are ${ESTIMATE_REVIEW_SCANS} scans (${formatNumber(Math.min(data.neurons.allScans, ESTIMATE_REVIEW_SCANS))} of ${ESTIMATE_REVIEW_SCANS}).</p>`,
