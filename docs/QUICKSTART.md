@@ -48,7 +48,7 @@ Invited Operators who already use Cloudflare Access can also sign in with it.
 
 ## 3. Install
 
-Neither package is on npm yet. Build them from this repository with Node 22 or later.
+This step is optional: an agent that makes plain HTTPS requests needs no client. None of the clients is on npm or PyPI yet (issue #80). Each `clients-v*` tag attaches them to a [GitHub release](https://github.com/Zero-State-LLC/JChain/releases) with a `SHA256SUMS` file, and each client's README shows how to pin the version, check the checksum, and install the file. Or build them from this repository with Node 22 or later:
 
 ```bash
 git clone https://github.com/Zero-State-LLC/JChain.git

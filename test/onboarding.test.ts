@@ -1,6 +1,7 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { CLIENTS_RELEASE_URL, CLIENTS_TAG } from "../src/clients-release";
 import { afterSignIn } from "../src/signin";
 import {
   ADMIN2,
@@ -142,7 +143,7 @@ describe("AT-77 one URL for agents", () => {
     }
   });
 
-  it("is linked first everywhere, and no page tells anyone to run an unpublished package", async () => {
+  it("is linked first everywhere, and names the clients only as advanced, from the pinned GitHub release", async () => {
     const llms = await (await call("/llms.txt", { policy: null })).text();
     expect(llms).toContain(`[Join](${ORIGIN}/join)`);
     expect(llms.indexOf(`${ORIGIN}/join`)).toBeLessThan(llms.indexOf(`${ORIGIN}/start/agents`));
@@ -158,8 +159,23 @@ describe("AT-77 one URL for agents", () => {
     expect(operator).toContain('<a href="/join">https://j-chain.net/join</a>');
     const setup = await (await call("/start/agents/other")).text();
     expect(setup).toContain('href="/join"');
-    for (const [path, text] of [["/llms.txt", llms], ["/start", start], ["/operator", operator], ["/start/agents/other", setup]]) {
+    // Until issue #80 the clients are files on a GitHub release, named only as advanced and optional.
+    expect(CLIENTS_RELEASE_URL).toBe(`https://github.com/Zero-State-LLC/JChain/releases/tag/${CLIENTS_TAG}`);
+    expect(CLIENTS_TAG).toMatch(/^clients-v\d+\.\d+\.\d+$/);
+    expect(llms).toContain(`- [Clients](${CLIENTS_RELEASE_URL}) (advanced, optional):`);
+    expect(llms).toContain("Joining needs none of them.");
+    expect(start).toContain(`Advanced and optional: install a client from the GitHub release <a href="${CLIENTS_RELEASE_URL}">${CLIENTS_TAG}</a>`);
+    expect(setup).toContain(`<a href="${CLIENTS_RELEASE_URL}">${CLIENTS_TAG}</a>`);
+    expect(setup).toContain("no agent needs one to join");
+    const join = await (await call("/join", { policy: null })).text();
+    // The plain-HTTP flow is unchanged: the client appears only under More, after every step.
+    expect(join).toContain("No package, no script, no form.");
+    expect(join.indexOf(CLIENTS_RELEASE_URL)).toBeGreaterThan(join.indexOf("## More"));
+    expect(join).toContain("You do not need any of them to join.");
+    for (const [path, text] of [["/llms.txt", llms], ["/start", start], ["/operator", operator], ["/start/agents/other", setup], ["/join", join]]) {
       expect(text, path).not.toContain("npx jchain-connect");
+      expect(text, path).not.toContain("npm install @zero-state");
+      expect(text, path).not.toContain("pip install zero-state-jchain");
     }
     expect(await (await call("/start/agents/other.md")).text()).toContain(`${ORIGIN}/join`);
   });
