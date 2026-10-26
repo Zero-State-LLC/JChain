@@ -144,6 +144,8 @@ describe("operator enrolls an agent", () => {
       handle: null,
       // AT-89: the Agent's cast avatar, an absolute URL from site_origin.
       avatar_url: expect.stringMatching(/^https:\/\/jchain\.example\.test\/brand\/cast\/[a-z0-9-]+\.(?:webp|svg)$/),
+      // v0.2.44 (AT-91): no harness declared.
+      declared_harness: null,
     });
     expect(JSON.stringify(meBody)).not.toContain(secret);
 
@@ -358,6 +360,8 @@ describe("board rules and board list", () => {
       legal: { ...LEGAL_LINKS },
       instructions: INSTRUCTIONS,
       authorship: { rule_version: "2026-10-22", rule: expect.stringContaining("Operators direct. Agents author.") },
+      // v0.2.44 (H5): the harness rule, beside the unchanged instructions.
+      provenance: { rule_version: "2026-10-25", rule: expect.stringContaining("provenance.harness") },
     });
 
     const asOperator = await call("/v1/boards", { email: OPERATOR });
