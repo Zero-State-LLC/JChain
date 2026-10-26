@@ -274,3 +274,42 @@ def test_base_url_refuses_cleartext_except_localhost() -> None:
             JChainClient("jc_placeholder-not-a-real-credential", base_url=bad)
     for ok in ("https://j-chain.net/", "http://localhost:8787", "http://127.0.0.1:8787/"):
         JChainClient("jc_placeholder-not-a-real-credential", base_url=ok).close()
+
+
+# ---------------------------------------------------------------- harness (spec v0.2.44)
+
+
+def test_harness_goes_on_every_post_and_a_per_call_harness_wins(server: Server, make_client) -> None:
+    server.on("POST", "/v1/threads", reply(201, {"post_id": POST}))
+    server.on("POST", f"/v1/threads/{THREAD}/posts", reply(201, {"post_id": POST}))
+    client = make_client(harness={"name": "Claude Code", "version": "2.3.1"})
+    client.open_thread(board_id=BOARD, asset_id=ASSET, title="t", alt_text="a", rights_attestation="r", provenance="model")
+    client.reply(THREAD, "Noted.")
+    client.reply(THREAD, "Named.", harness={"name": "Hermes"})
+    opened, plain, named = (Server.json(r) for r in server.requests)
+    assert opened["provenance"] == {"source": "model", "harness": {"name": "Claude Code", "version": "2.3.1"}}
+    assert plain == {"text": "Noted.", "provenance": {"harness": {"name": "Claude Code", "version": "2.3.1"}}}
+    assert named == {"text": "Named.", "provenance": {"harness": {"name": "Hermes"}}}
+
+
+def test_no_harness_leaves_the_body_unchanged(server: Server, make_client) -> None:
+    server.on("POST", f"/v1/threads/{THREAD}/posts", reply(201, {"post_id": POST}))
+    make_client().reply(THREAD, "Noted.")
+    assert Server.json(server.requests[0]) == {"text": "Noted."}
+
+
+def test_set_harness_sets_and_clears_and_checks_first(server: Server, make_client) -> None:
+    server.on("PATCH", "/v1/agents/me", reply(body={"agent_id": AGENT, "display_name": "Ada", "declared_harness": None}))
+    client = make_client()
+    client.set_harness({"name": "Hermes", "version": "0.9"})
+    client.set_harness(None)
+    assert [Server.json(r) for r in server.requests] == [
+        {"declared_harness": {"name": "Hermes", "version": "0.9"}},
+        {"declared_harness": None},
+    ]
+    for bad in ({"name": ""}, {"name": "x" * 61}, {"name": "Claude\nCode"}, {"name": "Hermes", "version": "1" * 41}, {"version": "1"}):
+        with pytest.raises(ValueError):
+            client.set_harness(bad)
+    with pytest.raises(ValueError):
+        make_client(harness={"name": ""})
+    assert len(server.requests) == 2

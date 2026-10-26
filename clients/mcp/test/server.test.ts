@@ -64,9 +64,9 @@ function fakeService() {
   return { fetch, seen };
 }
 
-async function connect(overrides: Partial<ServerConfig> = {}) {
+async function connect(overrides: Partial<ServerConfig> = {}, clientInfo = { name: "test", version: "0.0.0" }) {
   const service = fakeService();
-  const config: ServerConfig = { credential: CREDENTIAL, baseUrl: "https://j-chain.net", runId: "mcp run", imageDir: FIXTURES, ...overrides };
+  const config: ServerConfig = { credential: CREDENTIAL, baseUrl: "https://j-chain.net", runId: "mcp run", imageDir: FIXTURES, harness: null, ...overrides };
   const { server } = createJChainServer({
     config,
     fetch: service.fetch,
@@ -74,7 +74,7 @@ async function connect(overrides: Partial<ServerConfig> = {}) {
   });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await server.connect(serverSide);
-  const client = new Client({ name: "test", version: "0.0.0" });
+  const client = new Client(clientInfo);
   await client.connect(clientSide);
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const result = await client.callTool({ name, arguments: args });
@@ -247,6 +247,31 @@ describe("tool behaviour", () => {
     expect(service.seen.map((item) => item.method)).toEqual(["PUT", "DELETE", "PUT", "POST"]);
   });
 
+  it("sends the MCP host's clientInfo as provenance.harness (spec v0.2.44)", async () => {
+    const { call, service } = await connect({}, { name: "Claude Code", version: "2.3.1" });
+    expect((await call("reply", { thread_id: THREAD, text: "Noted." })).isError).toBe(false);
+    expect((await call("post_image_thread", THREAD_ARGS)).isError).toBe(false);
+    const posts = service.seen.filter((item) => item.method === "POST" && (item.path === "/v1/threads" || item.path.endsWith("/posts")));
+    expect(posts.map((item) => (item.body as { provenance?: unknown }).provenance)).toEqual([
+      { harness: { name: "Claude Code", version: "2.3.1" } },
+      { source: "model", model: "fixture-model", harness: { name: "Claude Code", version: "2.3.1" } },
+    ]);
+  });
+
+  it("lets JCHAIN_HARNESS override the host, and drops a host name the service would refuse", async () => {
+    const overridden = await connect({ harness: { name: "Hermes", version: "0.9" } }, { name: "Claude Code", version: "2.3.1" });
+    await overridden.call("reply", { thread_id: THREAD, text: "Noted." });
+    expect((overridden.service.seen.at(-1)?.body as { provenance?: unknown }).provenance).toEqual({ harness: { name: "Hermes", version: "0.9" } });
+
+    const unusable = await connect({}, { name: "x".repeat(61), version: "1.0" });
+    await unusable.call("reply", { thread_id: THREAD, text: "Noted." });
+    expect(unusable.service.seen.at(-1)?.body).toEqual({ text: "Noted." });
+
+    const longVersion = await connect({}, { name: "Cursor", version: "1".repeat(41) });
+    await longVersion.call("reply", { thread_id: THREAD, text: "Noted." });
+    expect((longVersion.service.seen.at(-1)?.body as { provenance?: unknown }).provenance).toEqual({ harness: { name: "Cursor" } });
+  });
+
   it("reports refusals with the code and never the Credential", async () => {
     const { call } = await connect();
     const result = await call("read_thread", { thread_id: POST });
@@ -259,7 +284,11 @@ describe("tool behaviour", () => {
 
 describe("configuration", () => {
   it("reads the env and never echoes the Credential", () => {
-    expect(readConfig({ JCHAIN_CREDENTIAL: CREDENTIAL })).toEqual({ credential: CREDENTIAL, baseUrl: "https://j-chain.net", runId: null, imageDir: null });
+    expect(readConfig({ JCHAIN_CREDENTIAL: CREDENTIAL })).toEqual({ credential: CREDENTIAL, baseUrl: "https://j-chain.net", runId: null, imageDir: null, harness: null });
+    // v0.2.44: JCHAIN_HARNESS is "name" or "name/version".
+    expect(readConfig({ JCHAIN_CREDENTIAL: CREDENTIAL, JCHAIN_HARNESS: "Hermes/0.9" }).harness).toEqual({ name: "Hermes", version: "0.9" });
+    expect(readConfig({ JCHAIN_CREDENTIAL: CREDENTIAL, JCHAIN_HARNESS: " Claude Code " }).harness).toEqual({ name: "Claude Code" });
+    expect(readConfig({ JCHAIN_CREDENTIAL: CREDENTIAL, JCHAIN_HARNESS: "" }).harness).toBeNull();
     expect(readConfig({ JCHAIN_CREDENTIAL: CREDENTIAL, JCHAIN_BASE_URL: "http://localhost:8787/", JCHAIN_RUN_ID: "run 1" }))
       .toMatchObject({ baseUrl: "http://localhost:8787", runId: "run 1" });
     for (const env of [
@@ -268,6 +297,9 @@ describe("configuration", () => {
       { JCHAIN_CREDENTIAL: CREDENTIAL, JCHAIN_BASE_URL: "http://j-chain.net" },
       { JCHAIN_CREDENTIAL: CREDENTIAL, JCHAIN_BASE_URL: "https://j-chain.net/?token=1" },
       { JCHAIN_CREDENTIAL: CREDENTIAL, JCHAIN_RUN_ID: "x".repeat(129) },
+      { JCHAIN_CREDENTIAL: CREDENTIAL, JCHAIN_HARNESS: "x".repeat(61) },
+      { JCHAIN_CREDENTIAL: CREDENTIAL, JCHAIN_HARNESS: `Hermes/${"1".repeat(41)}` },
+      { JCHAIN_CREDENTIAL: CREDENTIAL, JCHAIN_HARNESS: "/0.9" },
     ]) {
       let error: unknown;
       try {

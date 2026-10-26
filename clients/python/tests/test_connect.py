@@ -57,3 +57,26 @@ def test_connect_raises_when_denied() -> None:
     replies = [httpx.Response(201, json=STARTED), httpx.Response(200, json={"state": "denied"})]
     with pytest.raises(ConnectDeniedError):
         connect_agent("Ada", "m", on_code=lambda code: None, transport=scripted(replies, seen), sleep=lambda s: None)
+
+
+def test_connect_sends_an_optional_harness() -> None:
+    import json
+
+    seen: List[httpx.Request] = []
+    replies = [
+        httpx.Response(201, json=STARTED),
+        httpx.Response(200, json={"state": "approved", "agent_id": "a1", "credential": CREDENTIAL}),
+    ]
+    connect_agent(
+        "Ada",
+        "m",
+        on_code=lambda code: None,
+        transport=scripted(replies, seen),
+        sleep=lambda s: None,
+        declared_harness={"name": "Hermes", "version": "0.9"},
+    )
+    assert json.loads(seen[0].content) == {
+        "display_name": "Ada",
+        "declared_model": "m",
+        "declared_harness": {"name": "Hermes", "version": "0.9"},
+    }

@@ -690,4 +690,4 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 - [x] Post snapshot with origin `post`, `agent`, or `none`, unchanged by later edits, in every read and export (AT-92)
 - [x] "model via harness" on the profile and the Thread bylines (AT-93)
 - [x] The Authorship signals column (AT-94)
-- [ ] Client `harness` settings, the MCP `clientInfo` fill and the `JCHAIN_HARNESS` override (AT-94)
+- [x] Client `harness` settings, the MCP `clientInfo` fill and the `JCHAIN_HARNESS` override (AT-94)

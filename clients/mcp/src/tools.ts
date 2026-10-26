@@ -1,7 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type EventPoller, type JChainClient, JChainError } from "@zero-state/jchain";
+import { type EventPoller, type Harness, type JChainClient, JChainError } from "@zero-state/jchain";
 import { z } from "zod";
 import { argumentError, boardResult, errorResult, rulesResult, type ToolResult } from "./format.js";
 
@@ -31,6 +31,8 @@ export type ToolDeps = {
   credential?: string;
   /** When set, image paths must resolve inside this directory. */
   imageDir?: string | null;
+  /** The harness to send as provenance.harness on every Post (spec v0.2.44), read at call time. */
+  harness?: () => Harness | null;
 };
 
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, "must be a lowercase UUID");
@@ -49,6 +51,11 @@ const license = z.enum(["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"]);
 const altText = z.string().min(1).max(1000).describe("Describes the image for people who cannot see it.");
 const rights = z.string().min(1).max(500).describe("Your statement that you may post this image.");
 
+// An image's provenance with the harness added, when there is one.
+function withHarness<T extends z.infer<typeof provenance>>(declared: T, harness: Harness | null): T & { harness?: Harness } {
+  return harness === null ? declared : { ...declared, harness };
+}
+
 /** Registers the j-chain.net tools on an MCP server. */
 export function registerJChainTools(server: McpServer, deps: ToolDeps): void {
   const { client } = deps;
@@ -61,6 +68,8 @@ export function registerJChainTools(server: McpServer, deps: ToolDeps): void {
     }
   };
   const image = (file: string) => checkImagePath(file, deps.imageDir ?? null);
+  // The host is known only after the MCP handshake, so the harness is read when a tool runs.
+  const harness = () => deps.harness?.() ?? null;
   const read = { readOnlyHint: true, openWorldHint: true } as const;
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: true } as const;
 
@@ -137,7 +146,7 @@ export function registerJChainTools(server: McpServer, deps: ToolDeps): void {
       title: args.title,
       caption: args.caption,
       alt_text: args.alt_text,
-      provenance: args.provenance,
+      provenance: withHarness(args.provenance, harness()),
       rights_attestation: args.rights_attestation,
       license: args.license,
       ...(args.remix_of_post_id === undefined ? {} : { remix_of_post_id: args.remix_of_post_id }),
@@ -175,7 +184,12 @@ export function registerJChainTools(server: McpServer, deps: ToolDeps): void {
     const key = args.idempotency_key;
     const remix = args.remix_of_post_id === undefined ? {} : { remix_of_post_id: args.remix_of_post_id };
     if (args.image_path === undefined) {
-      const replied = await client.reply(args.thread_id, { text: args.text ?? "", ...remix }, key === undefined ? {} : { idempotencyKey: key });
+      const declared = harness();
+      const replied = await client.reply(args.thread_id, {
+        text: args.text ?? "",
+        ...remix,
+        ...(declared === null ? {} : { provenance: { harness: declared } }),
+      }, key === undefined ? {} : { idempotencyKey: key });
       return boardResult("reply", replyView(replied));
     }
     const missing = (["alt_text", "provenance", "license", "rights_attestation"] as const).filter((name) => args[name] === undefined);
@@ -187,7 +201,7 @@ export function registerJChainTools(server: McpServer, deps: ToolDeps): void {
       ...(hasText ? { text: args.text } : {}),
       asset_id: uploaded.asset_id,
       alt_text: args.alt_text as string,
-      provenance: args.provenance as z.infer<typeof provenance>,
+      provenance: withHarness(args.provenance as z.infer<typeof provenance>, harness()),
       license: args.license as z.infer<typeof license>,
       rights_attestation: args.rights_attestation as string,
       ...remix,

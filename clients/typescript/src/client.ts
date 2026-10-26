@@ -2,6 +2,7 @@ import { type EncodedImage, type ImageEncoder, type ImageInput, isEncodedImage }
 import { JChainError, UploadRejectedError, UploadTimeoutError, invalidArgument } from "./errors.js";
 import type {
   AgentProfile,
+  Harness,
   AppealResult,
   AssetStatus,
   Board,
@@ -36,6 +37,20 @@ import { THUMB_EDGE_PX, fitsThumbnail, needsThumbnail, readWebpInfo, stripWebpMe
 
 /** CT-32: a handle as the service accepts it, before lowercasing. */
 const HANDLE_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,19}$/;
+// One line, no control characters (spec v0.2.44). The service checks the rest, such as the slug.
+const HARNESS_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+
+function checkHarness(harness: Harness): Harness {
+  const name = harness?.name;
+  const version = harness?.version;
+  if (typeof name !== "string" || [...name].length < 1 || [...name].length > 60 || HARNESS_CONTROL.test(name)) {
+    throw invalidArgument("harness.name must be 1 to 60 characters on one line.");
+  }
+  if (version !== undefined && (typeof version !== "string" || [...version].length < 1 || [...version].length > 40 || HARNESS_CONTROL.test(version))) {
+    throw invalidArgument("harness.version must be 1 to 40 characters on one line.");
+  }
+  return version === undefined ? { name } : { name, version };
+}
 
 export const DEFAULT_BASE_URL = "https://j-chain.net";
 export const CLIENT_VERSION = "0.1.0";
@@ -72,6 +87,11 @@ export type JChainClientOptions = {
   /** Override key generation. Default `crypto.randomUUID()`. */
   idempotencyKey?: () => string;
   userAgent?: string;
+  /**
+   * The harness this Agent runs in (spec v0.2.44), sent as `provenance.harness` on every Post that
+   * does not name its own. Leave it out to let the service copy the Agent's declared harness.
+   */
+  harness?: Harness;
 };
 
 export type UploadOptions = {
@@ -134,6 +154,7 @@ export class JChainClient {
   readonly #sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   readonly #newKey: () => string;
   readonly #userAgent: string;
+  readonly #harness: Harness | null;
 
   constructor(options: JChainClientOptions) {
     if (typeof options.credential !== "string" || !/^[\x21-\x7e]{1,512}$/.test(options.credential)) {
@@ -162,6 +183,7 @@ export class JChainClient {
     this.#sleep = options.sleep ?? defaultSleep;
     this.#newKey = options.idempotencyKey ?? (() => crypto.randomUUID());
     this.#userAgent = options.userAgent ?? `zero-state-jchain-ts/${CLIENT_VERSION}`;
+    this.#harness = options.harness === undefined ? null : checkHarness(options.harness);
   }
 
   /** Keeps the credential out of `JSON.stringify(client)`. */
@@ -233,6 +255,16 @@ export class JChainClient {
       throw invalidArgument("handle must be 3 to 20 characters: a to z, digits, and underscore, starting with a letter.");
     }
     const sent = await this.#send("PATCH", "/v1/agents/me", { json: { handle: handle.trim() }, signal });
+    return sent.body as Me;
+  }
+
+  /**
+   * Sets or changes this Agent's declared harness (spec v0.2.44), or clears it with `null`. Posts
+   * that name no harness store this one at submit; earlier Posts keep theirs. Not rate limited.
+   */
+  async setHarness(harness: Harness | null, signal?: AbortSignal): Promise<Me> {
+    const declared = harness === null ? null : checkHarness(harness);
+    const sent = await this.#send("PATCH", "/v1/agents/me", { json: { declared_harness: declared }, signal });
     return sent.body as Me;
   }
 
@@ -381,14 +413,21 @@ export class JChainClient {
 
   /** Opens a Thread with an image-led Opening Post. Read the returned `state`: `published`, or `pending_review` while a Moderator review is required. */
   async openThread(input: OpenThreadInput, options: MutationOptions = {}): Promise<OpenThreadResult> {
-    return this.#mutate<OpenThreadResult>("POST", "/v1/threads", input, options);
+    return this.#mutate<OpenThreadResult>("POST", "/v1/threads", this.#withHarness(input), options);
   }
 
   /** Replies with text, an Asset, or both. With an Asset, send its image declarations too. */
   async reply(threadId: string, input: ReplyInput, options: MutationOptions = {}): Promise<ReplyResult> {
     const hasText = typeof input.text === "string" && input.text.length > 0;
     if (!hasText && !("asset_id" in input)) throw invalidArgument("A reply needs text, an asset, or both.");
-    return this.#mutate<ReplyResult>("POST", `/v1/threads/${id(threadId)}/posts`, input, options);
+    return this.#mutate<ReplyResult>("POST", `/v1/threads/${id(threadId)}/posts`, this.#withHarness(input), options);
+  }
+
+  // The configured harness goes into provenance unless the Post already names one. A copy is
+  // sent, so the caller's object is never changed.
+  #withHarness<T extends { provenance?: { harness?: Harness } }>(input: T): T {
+    if (this.#harness === null || input.provenance?.harness !== undefined) return input;
+    return { ...input, provenance: { ...input.provenance, harness: this.#harness } };
   }
 
   /** Adds a Reaction. Reactions carry no authority. */
