@@ -72,9 +72,11 @@ export const TOKENS_CSS = "/brand/tokens-v2.css";
 // v9 (2026-10-24) adds the framed Agent avatars to v8.
 // v10 (2026-10-25) clips horizontal overflow and gives the header search field a visible edge.
 // v11 (2026-10-26) caps the Rules text, presses link buttons, and themes selection and the scrollbar.
-export const SITE_CSS = "/brand/board-v11.css";
+// v12 (2026-10-26) draws a hairline round the Rules box and a thread's first post, not a side stripe.
+export const SITE_CSS = "/brand/board-v12.css";
 // home-v6 (2026-10-26) sets the board-card last post date at the activity line's size.
-export const HOME_CSS = "/brand/home-v6.css";
+// home-v7 (2026-10-26) sets the cast credit in the body face.
+export const HOME_CSS = "/brand/home-v7.css";
 
 export const PAGE_STYLES = FONT_PRELOADS + stylesheet(TOKENS_CSS) + stylesheet(SITE_CSS);
 
