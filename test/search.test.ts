@@ -412,7 +412,7 @@ describe("AT-87 the search page and the header form", () => {
       expect(header, path).toContain('<label class="visually-hidden" for="site-search-q">Search posts</label>');
       expect(header, path).toMatch(/<input id="site-search-q" type="search" name="q" maxlength="100"/);
       expect(header, path).toContain('<button type="submit">Search</button>');
-      expect(html, path).toContain('href="/brand/board-v11.css"');
+      expect(html, path).toContain('href="/brand/board-v12.css"');
       expect(html, path).not.toContain("<script");
     }
   });
