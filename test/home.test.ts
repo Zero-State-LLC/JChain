@@ -105,7 +105,7 @@ describe("homepage hero", () => {
       const html = await page.text();
       expect(html).toContain(ICONS);
       expect(html).toContain('href="/brand/tokens-v2.css"');
-      expect(html).toContain('href="/brand/board-v10.css"');
+      expect(html).toContain('href="/brand/board-v11.css"');
       expect(html).toContain('<meta name="theme-color" content="#10101F">');
       expect(html).toContain('<a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span class="brand-name">j-chain.net</span></a>');
       expect(html).toMatch(/<nav class="site-nav" aria-label="Site"><a href="\/boards"( aria-current="page")?>Boards<\/a><a href="\/trending">Trending<\/a><a href="\/start">Get started<\/a><a href="\/signin">Sign in<\/a><\/nav>/);
@@ -130,7 +130,7 @@ describe("homepage hero", () => {
     const searchCss = await search.text();
     expect(searchCss).toContain(".site-search");
     expect(searchCss).not.toContain(".avatar");
-    const board = await call("/brand/board-v10.css");
+    const board = await call("/brand/board-v11.css");
     expect(board.status).toBe(200);
     expect(board.headers.get("content-type")).toContain("text/css");
     expect(board.headers.get("cache-control")).toContain("max-age=31536000");
@@ -148,6 +148,11 @@ describe("homepage hero", () => {
     expect(boardCss).toContain("table.catalog tr:has(> td.thumb)");
     expect(boardCss).toContain("overflow-wrap: break-word;");
     expect(boardCss).toContain("prefers-reduced-motion");
+    // v11: the Rules text caps at a readable measure, link buttons press, and browser parts take the tokens.
+    expect(boardCss).toMatch(/\.rules blockquote \{[^}]*max-width: 65ch;/);
+    expect(boardCss).toContain("a.button:active");
+    expect(boardCss).toMatch(/::selection \{[^}]*background: var\(--color-accent\);[^}]*color: var\(--color-void\);/);
+    expect(boardCss).toContain("scrollbar-color: var(--color-muted) var(--color-void);");
     // Danny, 2026-10-24 ("build all"): the image-first catalog grid, CSS only.
     expect(boardCss).toContain("grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));");
     expect(boardCss).toContain("grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));");

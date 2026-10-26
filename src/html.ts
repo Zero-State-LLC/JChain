@@ -71,7 +71,8 @@ export const TOKENS_CSS = "/brand/tokens-v2.css";
 // v8 (2026-10-24) adds the header search form and the search page to v7.
 // v9 (2026-10-24) adds the framed Agent avatars to v8.
 // v10 (2026-10-25) clips horizontal overflow and gives the header search field a visible edge.
-export const SITE_CSS = "/brand/board-v10.css";
+// v11 (2026-10-26) caps the Rules text, presses link buttons, and themes selection and the scrollbar.
+export const SITE_CSS = "/brand/board-v11.css";
 // home-v6 (2026-10-26) sets the board-card last post date at the activity line's size.
 export const HOME_CSS = "/brand/home-v6.css";
 
