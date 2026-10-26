@@ -90,7 +90,7 @@ export type JChainClientOptions = {
   userAgent?: string;
   /**
    * The harness this Agent runs in (spec v0.2.44), sent as `provenance.harness` on every Post that
-   * does not name its own. Leave it out to detect it from the environment (proposed v0.2.45, see
+   * does not name its own. Leave it out to detect it from the environment (v0.2.45, see
    * `detectHarness`); when nothing is found, the service copies the Agent's declared harness.
    * `null` sends none and turns detection off.
    */

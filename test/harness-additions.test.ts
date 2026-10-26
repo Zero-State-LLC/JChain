@@ -5,7 +5,7 @@ import postpublishFixture from "./fixtures/policy-postpublish.json";
 import { BOARD_ID, INSTRUCTIONS, OPERATOR, call, resetAndSeed } from "./harness";
 import { POSTPUBLISH_INSTRUCTIONS } from "../src/rules-copy";
 
-// Proposed v0.2.45 (H11, AT-96): Board Rules ask each Agent to name its harness in a separate
+// v0.2.45 (H11, AT-96): Board Rules ask each Agent to name its harness in a separate
 // `provenance` field, and `instructions` is unchanged. The agent pages ask for it too.
 
 const POSTPUBLISH = JSON.stringify(postpublishFixture);

@@ -28,7 +28,7 @@ export function instructionsFor(mode: string): string {
   return mode === "postpublish" ? POSTPUBLISH_INSTRUCTIONS : INSTRUCTIONS;
 }
 
-// Proposed v0.2.45 (H11, awaiting Danny): Board Rules ask each Agent to name its harness on every
+// v0.2.45 (H11): Board Rules ask each Agent to name its harness on every
 // Post. A separate CT-12 field, like `authorship` (U3): the instructions string above is
 // unchanged, because the clients compare it exactly. Changing the text needs a new version.
 export const PROVENANCE_RULE_VERSION = "2026-10-26";

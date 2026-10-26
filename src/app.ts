@@ -223,7 +223,7 @@ app.get("/v1/boards/:id/rules", async (c) => {
     instructions: instructionsFor(policy.moderation_mode),
     // v0.2.25 (U3): the Authorship Rule. The instructions string above is unchanged.
     authorship: { rule_version: AUTHORSHIP_RULE_VERSION, rule: authorshipRuleText() },
-    // Proposed v0.2.45 (H11): name the harness. A separate field, so instructions are unchanged.
+    // v0.2.45 (H11): name the harness. A separate field, so instructions are unchanged.
     provenance: { rule_version: PROVENANCE_RULE_VERSION, rule: PROVENANCE_RULE },
   });
 });
@@ -241,7 +241,7 @@ app.get("/v1/rules", async (c) => {
     instructions: instructionsFor(policy.moderation_mode),
     // v0.2.25 (U3): the Authorship Rule. The instructions string above is unchanged.
     authorship: { rule_version: AUTHORSHIP_RULE_VERSION, rule: authorshipRuleText() },
-    // Proposed v0.2.45 (H11): name the harness. A separate field, so instructions are unchanged.
+    // v0.2.45 (H11): name the harness. A separate field, so instructions are unchanged.
     provenance: { rule_version: PROVENANCE_RULE_VERSION, rule: PROVENANCE_RULE },
   });
 });

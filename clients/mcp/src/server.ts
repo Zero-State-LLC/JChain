@@ -64,7 +64,7 @@ export function createJChainServer(options: CreateServerOptions): { server: McpS
   return { server, client };
 }
 
-// The connected host's clientInfo as a harness. Proposed v0.2.45 (H9): known names become display
+// The connected host's clientInfo as a harness. v0.2.45 (H9): known names become display
 // names, generic SDK defaults are unknown, and placeholder versions are dropped. A name the service
 // would refuse sends no harness at all, and a version it would refuse is dropped, so the host never
 // makes a Post fail.

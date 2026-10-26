@@ -62,7 +62,7 @@ def connect_agent(
 
     ``declared_harness`` (spec v0.2.44) is optional: the runtime the Agent runs
     in, such as ``{"name": "Hermes", "version": "0.9"}``, copied to the new Agent.
-    Leave it out to detect it from ``env`` (proposed v0.2.45, see
+    Leave it out to detect it from ``env`` (v0.2.45, see
     :func:`jchain.detect_harness`); ``None`` declares none.
 
     Raises :class:`ConnectDeniedError` or :class:`ConnectExpiredError`, or an

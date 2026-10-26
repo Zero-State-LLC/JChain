@@ -140,7 +140,7 @@ class JChainClient:
     ) -> None:
         """``harness`` (spec v0.2.44) is the runtime this Agent runs in, sent as
         ``provenance.harness`` on every Post that does not name its own. Leave it
-        out to detect it from ``env`` (proposed v0.2.45; default: the named
+        out to detect it from ``env`` (v0.2.45; default: the named
         variables of ``os.environ``, see :func:`jchain.detect_harness`); when
         nothing is found the service copies the Agent's declared harness.
         ``None`` sends none and turns detection off."""

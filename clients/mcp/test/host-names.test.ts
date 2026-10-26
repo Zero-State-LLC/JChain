@@ -4,7 +4,7 @@ import { staticEncoder } from "@zero-state/jchain";
 import { describe, expect, it } from "vitest";
 import { createJChainServer, translateHost, type ServerConfig } from "../src/server.js";
 
-// Proposed v0.2.45 (H9, AT-95): known MCP host names become display names, generic SDK defaults
+// v0.2.45 (H9, AT-95): known MCP host names become display names, generic SDK defaults
 // are unknown (no harness is sent, so the Agent's declaration applies), and placeholder versions
 // are dropped.
 

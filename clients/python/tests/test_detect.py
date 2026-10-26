@@ -1,4 +1,4 @@
-"""Proposed spec v0.2.45 (H10, AT-95): with no ``harness=``, the client names
+"""Spec v0.2.45 (H10, AT-95): with no ``harness=``, the client names
 the harness the environment gives, reading only a few named variables."""
 
 from __future__ import annotations

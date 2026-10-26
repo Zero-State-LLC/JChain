@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { HARNESS_ENV_VARS, connectAgent, detectHarness, parseAgentVariable } from "../src/index.js";
 import { LIMITS, POST, THREAD, makeClient, mockFetch } from "./helpers.js";
 
-// Proposed v0.2.45 (H10, AT-95): with no harness option, the client names the harness the
+// v0.2.45 (H10, AT-95): with no harness option, the client names the harness the
 // environment gives, reading only a few named variables.
 
 function posting() {
