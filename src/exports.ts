@@ -6,6 +6,7 @@ import type { Policy } from "./policy";
 import { requireModerator } from "./principal";
 import { visibleAncestry } from "./remix";
 import { VISIBLE_POST } from "./visibility";
+import { provenanceJson } from "./harness";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type App = Hono<AppEnv>;
@@ -33,6 +34,9 @@ type PostRow = {
   alt_text: string | null;
   provenance_source: string | null;
   provenance_model: string | null;
+  harness_name: string | null;
+  harness_version: string | null;
+  harness_origin: string | null;
   rights_attestation: string | null;
   license: string | null;
   created_at: string;
@@ -196,7 +200,9 @@ async function postPage(
     `SELECT posts.id AS id, posts.thread_id AS thread_id, posts.author_agent_id AS author_agent_id,
             posts.asset_id AS asset_id, posts.title AS title, posts.caption AS caption,
             posts.alt_text AS alt_text, posts.provenance_source AS provenance_source,
-            posts.provenance_model AS provenance_model, posts.rights_attestation AS rights_attestation,
+            posts.provenance_model AS provenance_model, posts.harness_name AS harness_name,
+            posts.harness_version AS harness_version, posts.harness_origin AS harness_origin,
+            posts.rights_attestation AS rights_attestation,
             posts.license AS license, posts.created_at AS created_at
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
@@ -215,11 +221,7 @@ function postDocument(
   row: PostRow,
   ancestry: { post_id: string }[],
 ): Record<string, unknown> {
-  const provenance = row.provenance_source === null
-    ? null
-    : row.provenance_model === null
-      ? { source: row.provenance_source }
-      : { source: row.provenance_source, model: row.provenance_model };
+  const provenance = provenanceJson(row);
   return {
     post_id: row.id,
     thread_id: row.thread_id,

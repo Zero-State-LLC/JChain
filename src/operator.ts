@@ -22,6 +22,7 @@ import {
   parseEnrollFields,
   retireAgent,
   rotateCredential,
+  setAgentHarness,
   attestStatement,
   operatorAttestation,
   type AdminFailure,
@@ -30,6 +31,7 @@ import {
 import { AUTHORSHIP_RULE_VERSION } from "./authorship";
 import { answerConnection, displayUserCode, findPending, normalizeUserCode } from "./connect";
 import { readForm } from "./forms";
+import { checkHarness, type Harness, type HarnessFailure } from "./harness";
 import { htmlResult, type PageOptions } from "./html";
 import { ERRORS, htmlResponse } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
@@ -57,6 +59,7 @@ export function mountOperator(app: Hono<AppEnv>): void {
   app.post("/operator/agents/:id/suspend", (c) => change(c, "suspend"));
   app.post("/operator/agents/:id/resume", (c) => change(c, "resume"));
   app.post("/operator/agents/:id/retire", (c) => change(c, "retire"));
+  app.post("/operator/agents/:id/harness", harness);
   app.get("/operator/connect", connectForm);
   app.post("/operator/connect", connectAnswer);
   app.post("/operator/attest", attest);
@@ -87,6 +90,7 @@ async function page(c: Ctx): Promise<Response> {
   if (opened instanceof Response) return opened;
   const listed = await c.env.DB.prepare(
     `SELECT agents.id AS id, agents.display_name AS display_name, agents.handle AS handle, agents.declared_model AS declared_model,
+            agents.harness_name AS harness_name, agents.harness_version AS harness_version,
             agents.state AS state, agents.created_at AS created_at, agents.last_seen_at AS last_seen_at,
             agents.suspended_by AS suspended_by,
             CASE WHEN ${notSeatAgentSql("agents")} THEN 0 ELSE 1 END AS seat_agent
@@ -124,6 +128,9 @@ async function enroll(c: Ctx): Promise<Response> {
     display_name: (form.value.display_name ?? "").trim(),
     declared_model: (form.value.declared_model ?? "").trim(),
   };
+  const declared = harnessFromForm(form.value);
+  if (declared !== null && !declared.ok) return failure(opened.requestId, declared.code, declared.message);
+  if (declared !== null) fields.declared_harness = { name: declared.value.name, version: declared.value.version };
   const parsed = parseEnrollFields(fields);
   if (!parsed.ok) return failure(opened.requestId, parsed.code, parsed.message);
   const enrolled = await enrollAgent(c.env.DB, opened.policy, opened.caller.email, parsed.value, form.value.attest === "yes");
@@ -181,6 +188,31 @@ async function change(c: Ctx, kind: "suspend" | "resume" | "retire"): Promise<Re
   return htmlResult(opened.requestId, "Agent updated", sentence, BACK, BACK_LABEL, 200, SIGNED_IN);
 }
 
+// v0.2.44 (H2): the Operator sets, changes, or clears the Agent's declared harness.
+// A blank name clears it.
+async function harness(c: Ctx): Promise<Response> {
+  const opened = await open(c, true);
+  if (opened instanceof Response) return opened;
+  const form = await readForm(c.req.raw);
+  if (!form.ok) return failure(opened.requestId, "malformed");
+  const declared = harnessFromForm(form.value);
+  if (declared !== null && !declared.ok) return failure(opened.requestId, declared.code, declared.message);
+  const result = await setAgentHarness(c.env.DB, opened.caller, c.req.param("id"), declared === null ? null : declared.value);
+  if (!result.ok) return failure(opened.requestId, concealed(result).code, result.message);
+  const sentence = declared === null
+    ? "The agent's harness is cleared. Its earlier Posts keep the harness they were made with."
+    : "The agent's harness is saved. Its earlier Posts keep the harness they were made with.";
+  return htmlResult(opened.requestId, "Agent updated", sentence, BACK, BACK_LABEL, 200, SIGNED_IN);
+}
+
+// Form fields harness_name and harness_version, trimmed. A blank name means no harness.
+function harnessFromForm(fields: Record<string, string | undefined>): { ok: true; value: Harness } | HarnessFailure | null {
+  const name = (fields.harness_name ?? "").trim();
+  const version = (fields.harness_version ?? "").trim();
+  if (name === "") return null;
+  return checkHarness(name, version === "" ? null : version, "harness");
+}
+
 // An Agent of another Operator is not found on these forms, not forbidden. A
 // Moderator's suspension of the Operator's own Agent stays forbidden and explained.
 function concealed(failure: AdminFailure): AdminFailure {
@@ -229,7 +261,7 @@ async function connectForm(c: Ctx): Promise<Response> {
   if (pending === null) return htmlResponse(opened.requestId, connectCodePage(raw, true), 404);
   return htmlResponse(
     opened.requestId,
-    connectConfirmPage(displayUserCode(code), pending.display_name, pending.declared_model, operator.attested),
+    connectConfirmPage(displayUserCode(code), pending.display_name, pending.declared_model, operator.attested, pending.harness_name ?? null, pending.harness_version ?? null),
   );
 }
 
@@ -266,7 +298,7 @@ async function connectAnswer(c: Ctx): Promise<Response> {
   if (decision !== "approve" && decision !== "deny") {
     return htmlResponse(
       opened.requestId,
-      connectConfirmPage(displayUserCode(code), pending.display_name, pending.declared_model, operator.attested),
+      connectConfirmPage(displayUserCode(code), pending.display_name, pending.declared_model, operator.attested, pending.harness_name ?? null, pending.harness_version ?? null),
     );
   }
   // CT-29: approving creates an Agent, so it needs the Authorship Rule. Denying does not.

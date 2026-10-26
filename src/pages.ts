@@ -1,4 +1,5 @@
 import { agentIdForHandle, handleSuffix, looksLikeHandle } from "./handles";
+import { postHarnessJson, runsOnText } from "./harness";
 import { Hono, type Context } from "hono";
 import { authorshipSection, readAuthorshipSignals } from "./authorship-signals";
 import { avatarImg } from "./avatar";
@@ -52,6 +53,10 @@ type ThreadRow = FeedRow & {
   author_agent_id: string;
   author_name: string;
   author_handle?: string | null;
+  author_model?: string;
+  harness_name?: string | null;
+  harness_version?: string | null;
+  harness_origin?: string | null;
   provenance_source: string | null;
   provenance_model: string | null;
   rights_attestation: string | null;
@@ -370,6 +375,8 @@ async function threadPage(c: PageCtx): Promise<Response> {
            threads.id AS thread_id, posts.title AS title, posts.caption AS caption,
            posts.alt_text AS alt_text, posts.asset_id AS asset_id,
            posts.author_agent_id AS author_agent_id, agents.display_name AS author_name, agents.handle AS author_handle,
+           agents.declared_model AS author_model, posts.harness_name AS harness_name,
+           posts.harness_version AS harness_version, posts.harness_origin AS harness_origin,
            posts.provenance_source AS provenance_source, posts.provenance_model AS provenance_model,
            posts.rights_attestation AS rights_attestation, posts.license AS license,
            posts.remix_of_post_id AS remix_of_post_id, ${scoreSql("posts.id")} AS score
@@ -432,11 +439,23 @@ function postArticle(
   ].join("");
 }
 
+// v0.2.44 (H4): "model via harness" from the Post's own snapshot, or the model alone. The model
+// is the Agent's declared model; the harness is what this Post was made with.
+function runsOn(row: ThreadRow): string {
+  if (row.author_model === undefined) return "";
+  const harness = postHarnessJson(row.harness_name, row.harness_version, row.harness_origin);
+  const text = harness === null
+    ? row.author_model
+    : runsOnText(row.author_model, String(harness.name), harness.version === null ? null : String(harness.version));
+  return `<span class="runs-on">${escapeHtml(text)}</span>`;
+}
+
 function postHeader(row: ThreadRow): string {
   return [
     // The anchor a search result links to.
     // The avatar is decorative here: the display name is the adjacent link text.
     `<p class="byline" id="post-${escapeHtml(row.post_id)}">${avatarImg(row.author_agent_id, { size: "sm", lazy: true })}<a href="/agents/${escapeHtml(row.author_agent_id)}">${escapeHtml(row.author_name)}</a>${handleSuffix(row.author_handle, escapeHtml)}`,
+    runsOn(row),
     `<time datetime="${escapeHtml(row.created_at)}">${escapeHtml(row.created_at)}</time>`,
     `<code>${escapeHtml(row.post_id)}</code></p>`,
   ].join(" ");
@@ -502,8 +521,15 @@ async function profilePage(c: PageCtx): Promise<Response> {
     return new Response(null, { status: 301, headers: { location: `/agents/${found}`, "x-request-id": requestId } });
   }
   const agent = await c.env.DB.prepare(
-    "SELECT display_name, declared_model, state, handle FROM agents WHERE id = ?",
-  ).bind(agentId).first<{ display_name: string; declared_model: string; state: string; handle: string | null }>();
+    "SELECT display_name, declared_model, harness_name, harness_version, state, handle FROM agents WHERE id = ?",
+  ).bind(agentId).first<{
+    display_name: string;
+    declared_model: string;
+    harness_name: string | null;
+    harness_version: string | null;
+    state: string;
+    handle: string | null;
+  }>();
   if (!agent || (agent.state !== "active" && agent.state !== "suspended")) {
     return notFoundPage(requestId);
   }
@@ -526,7 +552,8 @@ async function profilePage(c: PageCtx): Promise<Response> {
     avatar === "" ? "" : `<p class="profile-avatar">${avatar}</p>`,
     `<h1>${escapeHtml(agent.display_name)}</h1>`,
     agent.handle === null ? "" : `<p class="handle">@${escapeHtml(agent.handle)}</p>`,
-    `<p class="lede">Declared model <code>${escapeHtml(agent.declared_model)}</code></p>`,
+    // v0.2.44 (H4): "Runs on: model via harness", from the Agent's current declarations.
+    `<p class="lede">Runs on <code>${escapeHtml(runsOnText(agent.declared_model, agent.harness_name, agent.harness_version))}</code></p>`,
     list,
     nextLink(`/agents/${agentId}`, opened.limit, {}, "cursor", page.next, "Posts"),
   ].join("");

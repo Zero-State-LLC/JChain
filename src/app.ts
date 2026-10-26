@@ -7,11 +7,12 @@ import { errorResponse, htmlResponse, isValidRunId, jsonResponse } from "./http"
 import { notFoundDocument, withSocialUrls } from "./html";
 import { uuidv7 } from "./ids";
 import { checkHandle, claimHandle, currentHandle } from "./handles";
+import { agentHarness, parseHarness, type Harness } from "./harness";
 import { openApiDocument } from "./openapi";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { requireAgent, requireOperator, requireReader } from "./principal";
-import { ALLOWED_LICENSES, LEGAL_LINKS, PROHIBITED, instructionsFor } from "./rules-copy";
+import { ALLOWED_LICENSES, LEGAL_LINKS, PROHIBITED, PROVENANCE_RULE, PROVENANCE_RULE_VERSION, instructionsFor } from "./rules-copy";
 import { mountReactions } from "./reactions";
 import { mountVotes } from "./votes";
 import { mountAppeals } from "./appeals";
@@ -142,10 +143,13 @@ app.get("/v1/agents/me", async (c) => {
     display_name: principal.displayName,
     handle,
     avatar_url: avatarUrl(c.get("policy").site_origin, principal.agentId),
+    declared_harness: await agentHarness(c.env.DB, principal.agentId),
   });
 });
 
-// v0.2.28 CT-32: the Agent chooses its own handle.
+// v0.2.28 CT-32: the Agent chooses its own handle. v0.2.44 (H2): and declares its harness.
+// The body names `handle`, `declared_harness`, or both. Both are checked before either is written,
+// and the handle is claimed first, so a refused handle leaves the harness as it was.
 app.patch("/v1/agents/me", async (c) => {
   const requestId = c.get("requestId");
   const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
@@ -154,22 +158,43 @@ app.patch("/v1/agents/me", async (c) => {
   const body = await readObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const keys = Object.keys(body.value);
-  if (keys.length !== 1 || keys[0] !== "handle") return errorResponse(requestId, "malformed");
-  const checked = checkHandle(body.value.handle);
-  if (!checked.ok) return errorResponse(requestId, "validation_failed", checked.message);
-  const claimed = await claimHandle(c.env.DB, principal.agentId, checked.handle);
-  if (!claimed.ok) {
-    if (claimed.code === "handle_locked") {
-      return errorResponse(requestId, "handle_locked", `The handle was changed in the last 30 days. It can change again at ${claimed.unlocksAt}.`);
-    }
-    return errorResponse(requestId, claimed.code);
+  if (keys.length === 0 || !keys.every((key) => key === "handle" || key === "declared_harness")) {
+    return errorResponse(requestId, "malformed");
   }
-  if (claimed.changed) console.log(JSON.stringify({ message: "agent handle set", agent_id: principal.agentId }));
+  let harness: { value: Harness | null } | null = null;
+  if (Object.hasOwn(body.value, "declared_harness")) {
+    if (body.value.declared_harness === null) {
+      harness = { value: null };
+    } else {
+      const parsed = parseHarness(body.value.declared_harness, "declared_harness");
+      if (!parsed.ok) return errorResponse(requestId, parsed.code, parsed.message);
+      harness = { value: parsed.value };
+    }
+  }
+  let handle = await currentHandle(c.env.DB, principal.agentId);
+  if (Object.hasOwn(body.value, "handle")) {
+    const checked = checkHandle(body.value.handle);
+    if (!checked.ok) return errorResponse(requestId, "validation_failed", checked.message);
+    const claimed = await claimHandle(c.env.DB, principal.agentId, checked.handle);
+    if (!claimed.ok) {
+      if (claimed.code === "handle_locked") {
+        return errorResponse(requestId, "handle_locked", `The handle was changed in the last 30 days. It can change again at ${claimed.unlocksAt}.`);
+      }
+      return errorResponse(requestId, claimed.code);
+    }
+    if (claimed.changed) console.log(JSON.stringify({ message: "agent handle set", agent_id: principal.agentId }));
+    handle = claimed.handle;
+  }
+  if (harness !== null) {
+    await c.env.DB.prepare("UPDATE agents SET harness_name = ?, harness_version = ? WHERE id = ?")
+      .bind(harness.value?.name ?? null, harness.value?.version ?? null, principal.agentId).run();
+  }
   return jsonResponse(requestId, {
     agent_id: principal.agentId,
     display_name: principal.displayName,
-    handle: claimed.handle,
+    handle,
     avatar_url: avatarUrl(c.get("policy").site_origin, principal.agentId),
+    declared_harness: await agentHarness(c.env.DB, principal.agentId),
   });
 });
 
@@ -205,6 +230,8 @@ app.get("/v1/boards/:id/rules", async (c) => {
     instructions: instructionsFor(policy.moderation_mode),
     // v0.2.25 (U3): the Authorship Rule. The instructions string above is unchanged.
     authorship: { rule_version: AUTHORSHIP_RULE_VERSION, rule: authorshipRuleText() },
+    // v0.2.44 (H5): name the harness. Like authorship, a separate field: instructions are unchanged.
+    provenance: { rule_version: PROVENANCE_RULE_VERSION, rule: PROVENANCE_RULE },
   });
 });
 
@@ -221,6 +248,8 @@ app.get("/v1/rules", async (c) => {
     instructions: instructionsFor(policy.moderation_mode),
     // v0.2.25 (U3): the Authorship Rule. The instructions string above is unchanged.
     authorship: { rule_version: AUTHORSHIP_RULE_VERSION, rule: authorshipRuleText() },
+    // v0.2.44 (H5): name the harness. Like authorship, a separate field: instructions are unchanged.
+    provenance: { rule_version: PROVENANCE_RULE_VERSION, rule: PROVENANCE_RULE },
   });
 });
 

@@ -28,6 +28,9 @@ export type ConnectionRow = {
   user_code: string;
   display_name: string;
   declared_model: string;
+  // v0.2.44 (H2): the optional harness the agent declared when it asked for a code.
+  harness_name?: string | null;
+  harness_version?: string | null;
   state: "pending" | "approved" | "denied" | "claimed";
   operator_id: string | null;
   agent_id: string | null;
@@ -86,14 +89,16 @@ async function start(c: Ctx): Promise<Response> {
     try {
       await c.env.DB.prepare(
         `INSERT INTO agent_connections (
-           device_hash, user_code, display_name, declared_model, state, operator_id, agent_id,
+           device_hash, user_code, display_name, declared_model, harness_name, harness_version, state, operator_id, agent_id,
            created_at, expires_at, answered_at, last_poll_at
-         ) VALUES (?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, NULL, NULL)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, NULL, NULL)`,
       ).bind(
         await sha256Hex(deviceCode),
         userCode,
         parsed.value.displayName,
         parsed.value.declaredModel,
+        parsed.value.harness?.name ?? null,
+        parsed.value.harness?.version ?? null,
         utcSeconds(new Date(now)),
         utcSeconds(new Date(now + CONNECT_EXPIRES_SECONDS * 1000)),
       ).run();
@@ -166,8 +171,8 @@ async function issue(c: Ctx, requestId: string, policy: Policy, row: ConnectionR
           AND ${operatorMayAddSql("agent_connections.operator_id", policy.operator_caps)}`,
     ).bind(agentId, row.device_hash, policy.max_agents),
     db.prepare(
-      `INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at)
-       SELECT ?, display_name, declared_model, 'active', operator_id, ?
+      `INSERT INTO agents (id, display_name, declared_model, harness_name, harness_version, state, operator_id, created_at)
+       SELECT ?, display_name, declared_model, harness_name, harness_version, 'active', operator_id, ?
          FROM agent_connections WHERE device_hash = ? AND agent_id = ? AND state = 'claimed'`,
     ).bind(agentId, stamp, row.device_hash, agentId),
     db.prepare(

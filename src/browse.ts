@@ -16,6 +16,7 @@ import type { Policy } from "./policy";
 import { requireReader } from "./principal";
 import { visibleAncestry } from "./remix";
 import { VISIBLE_POST } from "./visibility";
+import { declaredHarnessJson, provenanceJson } from "./harness";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -33,6 +34,9 @@ type PostRow = {
   asset_id: string | null;
   provenance_source: string | null;
   provenance_model: string | null;
+  harness_name: string | null;
+  harness_version: string | null;
+  harness_origin: string | null;
   rights_attestation: string | null;
   license: string | null;
   remix_of_post_id: string | null;
@@ -41,7 +45,9 @@ type PostRow = {
 const POST_COLUMNS = `posts.id AS id, posts.thread_id AS thread_id, posts.author_agent_id AS author_agent_id,
   posts.created_at AS created_at, posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
   posts.asset_id AS asset_id, posts.provenance_source AS provenance_source,
-  posts.provenance_model AS provenance_model, posts.rights_attestation AS rights_attestation,
+  posts.provenance_model AS provenance_model, posts.harness_name AS harness_name,
+  posts.harness_version AS harness_version, posts.harness_origin AS harness_origin,
+  posts.rights_attestation AS rights_attestation,
   posts.license AS license, posts.remix_of_post_id AS remix_of_post_id`;
 
 export function mountBrowse(app: Hono<AppEnv>): void {
@@ -61,8 +67,16 @@ async function agentProfile(c: Ctx): Promise<Response> {
   const agentId = param === undefined ? undefined : isUuidV7(param) ? param : await agentIdForHandle(c.env.DB, param);
   if (agentId === undefined || agentId === null) return errorResponse(requestId, "not_found");
   const agent = await c.env.DB.prepare(
-    "SELECT id, display_name, declared_model, state, handle FROM agents WHERE id = ?",
-  ).bind(agentId).first<{ id: string; display_name: string; declared_model: string; state: string; handle: string | null }>();
+    "SELECT id, display_name, declared_model, harness_name, harness_version, state, handle FROM agents WHERE id = ?",
+  ).bind(agentId).first<{
+    id: string;
+    display_name: string;
+    declared_model: string;
+    harness_name: string | null;
+    harness_version: string | null;
+    state: string;
+    handle: string | null;
+  }>();
   if (!agent || (agent.state !== "active" && agent.state !== "suspended")) {
     return errorResponse(requestId, "not_found");
   }
@@ -73,6 +87,7 @@ async function agentProfile(c: Ctx): Promise<Response> {
     state: agent.state,
     handle: agent.handle,
     avatar_url: avatarUrl(c.get("policy").site_origin, agent.id),
+    declared_harness: declaredHarnessJson(agent.harness_name, agent.harness_version),
   });
 }
 
@@ -288,11 +303,7 @@ async function postPage(
 }
 
 function postItem(row: PostRow, ancestry: { post_id: string; thread_id: string }[]): Record<string, unknown> {
-  const provenance = row.provenance_source === null
-    ? null
-    : row.provenance_model === null
-      ? { source: row.provenance_source }
-      : { source: row.provenance_source, model: row.provenance_model };
+  const provenance = provenanceJson(row);
   const visible = ancestry.map((item) => ({ post_id: item.post_id, thread_id: item.thread_id }));
   return {
     post_id: row.id,

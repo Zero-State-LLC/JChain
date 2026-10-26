@@ -1,8 +1,8 @@
 // FR-13 and CT-10 (round-2 audit row 8): a removed Post keeps only a minimal tombstone.
-// When a Post reaches `removed` without a legal hold, its title, caption, alt text, provenance,
-// and rights fields are cleared, its reactions, votes, and stored export copies are deleted, and
-// its appeal keeps only the decision (the author's words go), in the same D1 batch as the state
-// change.
+// When a Post reaches `removed` without a legal hold, its title, caption, alt text, provenance
+// (the harness snapshot included, v0.2.44), and rights fields are cleared, its reactions, votes,
+// and stored export copies are deleted, and its appeal keeps only the decision (the author's
+// words go), in the same D1 batch as the state change.
 // The title of an Opening Post is kept as an empty string, not NULL, because a non-NULL title is
 // what names a Thread's Opening Post, so the Moderator tombstone `{ thread_id, state: "removed" }`
 // still works. Audit rows, Content Scan results (category codes only), and Seat Flags (reason
@@ -16,12 +16,15 @@ const SCRUB = `title = CASE WHEN title IS NULL THEN NULL ELSE '' END,
        alt_text = CASE WHEN asset_id IS NULL THEN NULL ELSE '' END,
        provenance_source = CASE WHEN asset_id IS NULL THEN NULL ELSE 'unknown' END,
        provenance_model = NULL,
+       harness_name = NULL,
+       harness_version = NULL,
+       harness_origin = 'none',
        rights_attestation = CASE WHEN asset_id IS NULL THEN NULL ELSE '' END,
        license = CASE WHEN asset_id IS NULL THEN NULL ELSE 'all-rights-reserved' END`;
 
 // Columns a scrubbed removed Post no longer holds. Used to find rows removed before this change.
 export const UNSCRUBBED = `(caption != '' OR (title IS NOT NULL AND title != '')
-    OR (alt_text IS NOT NULL AND alt_text != '') OR provenance_model IS NOT NULL
+    OR (alt_text IS NOT NULL AND alt_text != '') OR provenance_model IS NOT NULL OR harness_name IS NOT NULL
     OR (rights_attestation IS NOT NULL AND rights_attestation != '')
     OR (asset_id IS NULL AND (provenance_source IS NOT NULL OR license IS NOT NULL))
     OR (asset_id IS NOT NULL AND (provenance_source != 'unknown' OR license != 'all-rights-reserved')))`;

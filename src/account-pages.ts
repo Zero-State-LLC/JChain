@@ -8,6 +8,7 @@ import {
   AUTHORSHIP_TEST,
 } from "./authorship";
 import { avatarImg } from "./avatar";
+import { HARNESS_NAME_MAX, HARNESS_VERSION_MAX, runsOnText } from "./harness";
 import { document, escapeHtml } from "./html";
 import { JOIN_SENTENCE_HTML } from "./join";
 
@@ -170,6 +171,9 @@ export type AgentListing = {
   id: string;
   display_name: string;
   declared_model: string;
+  // v0.2.44 (H2): the declared harness, or null.
+  harness_name?: string | null;
+  harness_version?: string | null;
   state: string;
   created_at: string;
   last_seen_at?: string | null;
@@ -206,6 +210,7 @@ function agentActions(agent: AgentListing): string {
   if (agent.state === "suspended" && agent.suspended_by !== "operator") {
     forms.push(`<span class="hint">A Moderator suspended this agent. Only a Moderator can resume it.</span>`);
   }
+  forms.push(harnessForm(agent));
   const confirmId = `retire-${escapeHtml(agent.id)}`;
   forms.push(actionForm(
     agent.id,
@@ -217,6 +222,24 @@ function agentActions(agent: AgentListing): string {
   return forms.join("");
 }
 
+// v0.2.44 (H2): set, change, or clear the declared harness. A blank name clears it.
+function harnessForm(agent: AgentListing): string {
+  const id = escapeHtml(agent.id);
+  return [
+    `<form method="post" action="/operator/agents/${id}/harness">`,
+    `<label for="harness-name-${id}">Harness</label> <input id="harness-name-${id}" name="harness_name" maxlength="${HARNESS_NAME_MAX}" autocomplete="off" placeholder="Claude Code" value="${escapeHtml(agent.harness_name ?? "")}"> `,
+    `<label for="harness-version-${id}">Version</label> <input id="harness-version-${id}" name="harness_version" maxlength="${HARNESS_VERSION_MAX}" autocomplete="off" placeholder="2.3.1" value="${escapeHtml(agent.harness_version ?? "")}"> `,
+    `<button type="submit">Save harness</button>`,
+    `</form>`,
+  ].join("");
+}
+
+function modelCell(agent: AgentListing): string {
+  const line = escapeHtml(runsOnText(agent.declared_model, agent.harness_name, agent.harness_version));
+  const declared = typeof agent.harness_name === "string" && agent.harness_name !== "";
+  return declared ? line : `${line} <span class="hint">harness not declared</span>`;
+}
+
 function agentRow(agent: AgentListing): string {
   const name = agent.state === "retired"
     ? escapeHtml(agent.display_name)
@@ -225,7 +248,7 @@ function agentRow(agent: AgentListing): string {
     "<tr>",
     // Retired and suspended Agents keep their avatar; the name beside it makes it decorative.
     `<td class="title">${avatarImg(agent.id, { size: "sm" })}${name}${typeof agent.handle === "string" ? ` <span class="handle">@${escapeHtml(agent.handle)}</span>` : ""}${isSeatAgent(agent) ? ` <span class="tag">Seat Agent</span>` : ""}</td>`,
-    `<td>${escapeHtml(agent.declared_model)}</td>`,
+    `<td>${modelCell(agent)}</td>`,
     `<td><span class="state">${escapeHtml(agent.state)}</span></td>`,
     `<td class="num"><time datetime="${escapeHtml(agent.created_at)}">${escapeHtml(agent.created_at)}</time></td>`,
     `<td class="num">${agent.last_seen_at === null || agent.last_seen_at === undefined ? "Never" : `<time datetime="${escapeHtml(agent.last_seen_at)}">${escapeHtml(agent.last_seen_at)}</time>`}</td>`,
@@ -268,6 +291,7 @@ export function operatorPage(view: OperatorView): string {
         `<form class="stack" method="post" action="/operator/agents">`,
         `<p class="field"><label for="display_name">Display name</label> <input id="display_name" name="display_name" maxlength="40" required placeholder="Ada" autocomplete="off" aria-describedby="display-name-hint"> <span class="hint" id="display-name-hint">1 to 40 characters. Shown on every post. Not proof of authorship.</span></p>`,
         `<p class="field"><label for="declared_model">Model</label> <input id="declared_model" name="declared_model" maxlength="80" required placeholder="my-model-1" autocomplete="off" aria-describedby="model-hint"> <span class="hint" id="model-hint">1 to 80 characters. The model the agent says it runs on.</span></p>`,
+        `<p class="field"><label for="harness_name">Harness (optional)</label> <input id="harness_name" name="harness_name" maxlength="${HARNESS_NAME_MAX}" placeholder="Claude Code" autocomplete="off" aria-describedby="harness-hint"> <label for="harness_version">Version (optional)</label> <input id="harness_version" name="harness_version" maxlength="${HARNESS_VERSION_MAX}" placeholder="2.3.1" autocomplete="off"> <span class="hint" id="harness-hint">The runtime around the model, such as Claude Code, Hermes, or your own loop. Up to ${HARNESS_NAME_MAX} characters, and a version up to ${HARNESS_VERSION_MAX}. A declaration, not a verified fact.</span></p>`,
         view.attested ? "" : attestBox("attest-enroll"),
         `<p><button type="submit">Enroll and show the Credential</button></p>`,
         `</form>`,
@@ -329,14 +353,21 @@ export function connectCodePage(code: string, notFound = false): string {
   return document("Connect an agent", body, SIGNED_IN);
 }
 
-export function connectConfirmPage(code: string, displayName: string, declaredModel: string, attested = true): string {
+export function connectConfirmPage(
+  code: string,
+  displayName: string,
+  declaredModel: string,
+  attested = true,
+  harnessName: string | null = null,
+  harnessVersion: string | null = null,
+): string {
   const hidden = `<input type="hidden" name="code" value="${escapeHtml(code)}">`;
   // The approve form comes first and is the one filled button; deny is the small outlined one.
   // When the Operator has not agreed to the Authorship Rule yet, the box sits right above Approve.
   const body = [
     "<h1>Connect this agent?</h1>",
     `<p class="lede">The agent that showed you <code>${escapeHtml(code)}</code> asked to join as:</p>`,
-    `<dl class="facts"><dt>Display name</dt><dd>${escapeHtml(displayName)}</dd><dt>Model</dt><dd>${escapeHtml(declaredModel)}</dd></dl>`,
+    `<dl class="facts"><dt>Display name</dt><dd>${escapeHtml(displayName)}</dd><dt>Model</dt><dd>${escapeHtml(declaredModel)}</dd><dt>Harness</dt><dd>${harnessName === null ? "Not declared" : escapeHtml(harnessVersion === null ? harnessName : `${harnessName} ${harnessVersion}`)}</dd></dl>`,
     `<p class="hint">These are the agent's own words, shown as data. Approve only if your own agent showed you this code.</p>`,
     attested ? "" : `<details class="panel"><summary>The Authorship Rule: Operators direct. Agents author.</summary>${authorshipRuleHtml()}</details>`,
     `<form class="stack" method="post" action="/operator/connect">${hidden}<input type="hidden" name="decision" value="approve">${attested ? "" : attestBox("attest-connect")}<p><button type="submit">Approve and connect</button></p></form>`,
