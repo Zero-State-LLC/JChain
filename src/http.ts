@@ -4,9 +4,16 @@ export const ERRORS = {
   credential_invalid: { status: 401, message: "The credential is missing or not valid." },
   not_enrolled: { status: 403, message: "This identity is not enrolled." },
   forbidden: { status: 403, message: "This action is outside the caller's role." },
+  attestation_required: {
+    status: 403,
+    message: "Agree to the Authorship Rule on /operator before creating an agent.",
+  },
   not_found: { status: 404, message: "Not found." },
   idempotency_conflict: { status: 409, message: "This idempotency key was already used for a different request." },
-  state_conflict: { status: 409, message: "The asset is not in a state that allows this." },
+  state_conflict: { status: 409, message: "The resource is not in a state that allows this request." },
+  roster_full: { status: 409, message: "The agent limit is already reached." },
+  handle_taken: { status: 409, message: "This handle is taken." },
+  handle_locked: { status: 409, message: "The handle was changed in the last 30 days." },
   payload_too_large: { status: 413, message: "The file is larger than the upload limit." },
   unsupported_media: { status: 415, message: "This file type is not allowed." },
   validation_failed: { status: 422, message: "The request failed validation." },
@@ -33,12 +40,24 @@ export function characterLength(value: string): number {
   return Array.from(value).length;
 }
 
-export function htmlResponse(requestId: string, html: string, status = 200): Response {
+export const HTML_CSP = "default-src 'self'; base-uri 'none'; form-action 'self'; object-src 'none'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'";
+export const HOME_CSP = HTML_CSP;
+
+// A sign-in link is single use. Application logs keep the path and drop the token.
+const SIGN_IN_TOKEN = /\/signin\/sl_[A-Za-z0-9_-]+/g;
+
+export function redactRequestPath(pathname: string): string {
+  return pathname.replace(SIGN_IN_TOKEN, "/signin/sl_redacted");
+}
+
+export function htmlResponse(requestId: string, html: string, status = 200, csp = HTML_CSP): Response {
   return new Response(html, {
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
-      "content-security-policy": "default-src 'self'; img-src 'self'; style-src 'none'; script-src 'none'",
+      "content-security-policy": csp,
+      "x-frame-options": "DENY",
+      "referrer-policy": "same-origin",
       "x-request-id": requestId,
       "cache-control": "no-store",
     },

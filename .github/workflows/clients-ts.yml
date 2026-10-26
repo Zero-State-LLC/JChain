@@ -1,0 +1,36 @@
+name: TypeScript client and MCP server
+on:
+  push:
+    branches: [main]
+    paths: ["clients/typescript/**", "clients/mcp/**", ".github/workflows/clients-ts.yml"]
+  pull_request:
+    paths: ["clients/typescript/**", "clients/mcp/**", ".github/workflows/clients-ts.yml"]
+permissions:
+  contents: read
+jobs:
+  clients-ts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: clients/typescript
+      - run: npm test
+        working-directory: clients/typescript
+      - run: npx tsc --noEmit -p .
+        working-directory: clients/typescript
+      - run: npm run build && npm pack --dry-run
+        working-directory: clients/typescript
+      - run: npm ci
+        working-directory: clients/mcp
+      - name: MCP tests the local client package
+        run: test "$(readlink node_modules/@zero-state/jchain)" = "../../../typescript"
+        working-directory: clients/mcp
+      - run: npm test
+        working-directory: clients/mcp
+      - run: npx tsc --noEmit -p .
+        working-directory: clients/mcp
+      - run: npm run build && npm pack --dry-run
+        working-directory: clients/mcp

@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import worker from "../src/index";
 import { encodeCursor } from "../src/browse";
 import { runReferenceClient } from "../src/reference-client";
-import { VALID_PNG } from "./fixtures/bytes";
+import { VALID_WEBP } from "./fixtures/bytes";
 import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, resetAndSeed } from "./harness";
 
 const MISSING_ID = "01900000-0000-7000-8000-000000000099";
@@ -113,12 +113,12 @@ describe("beta readiness", () => {
     expect(requestLines.every((entry) => typeof entry?.latency_ms === "number")).toBe(true);
 
     const queue = await (await call("/moderation", { email: MODERATOR })).text();
-    expect(queue).toContain("<h2>Metrics</h2>");
-    expect(queue).toMatch(/Queue depth: [1-9]/);
-    expect(queue).toMatch(/Oldest pending age: \d+ seconds/);
-    expect(queue).toContain("Upload queue depth: 0");
-    expect(queue).toMatch(/Storage bytes: [1-9]/);
-    expect(queue).toContain("Deletion backlog: 0");
+    expect(queue).toContain('<h2 id="metrics">Metrics</h2>');
+    expect(queue).toMatch(/Queue depth: <span class="num">[1-9]/);
+    expect(queue).toMatch(/Oldest pending age: <span class="num">\d+<\/span> seconds/);
+    expect(queue).toContain('Upload queue depth: <span class="num">0</span>');
+    expect(queue).toMatch(/Storage bytes: <span class="num">[1-9]/);
+    expect(queue).toContain('Deletion backlog: <span class="num">0</span>');
   });
 
   it("records the load receipt without claiming the 50-agent target", async () => {
@@ -126,10 +126,10 @@ describe("beta readiness", () => {
     for (let index = 0; index < 20; index += 1) {
       agents.push(await enroll(`Agent ${index}`));
     }
-    await expectError(await call("/v1/agents", {
+    await expectSuccess(await call("/v1/agents", {
       email: OPERATOR,
       body: { display_name: "Agent 20", declared_model: "fixture-model" },
-    }), 403, "forbidden");
+    }), 201);
 
     const ada = agents[0];
     if (ada === undefined) throw new Error("no agent");
@@ -334,16 +334,16 @@ async function readyAsset(credential: string): Promise<string> {
 }
 
 async function uploadedAsset(credential: string): Promise<string> {
-  const sha256 = await sha256HexBytes(VALID_PNG);
+  const sha256 = await sha256HexBytes(VALID_WEBP);
   const reserved = await expectSuccess(await call("/v1/uploads", {
     bearer: credential,
     headers: { "idempotency-key": crypto.randomUUID() },
-    body: { content_type: "image/png", byte_size: VALID_PNG.byteLength, sha256 },
+    body: { content_type: "image/webp", byte_size: VALID_WEBP.byteLength, sha256 },
   }), 201);
   const assetId = String(reserved.asset_id);
   await expectSuccess(await call(`/v1/uploads/${assetId}/content`, {
     method: "PUT",
-    raw: VALID_PNG,
+    raw: VALID_WEBP,
     headers: { "idempotency-key": crypto.randomUUID(), "upload-token": String(reserved.upload_token) },
   }));
   const completed = await expectSuccess(await call(`/v1/uploads/${assetId}/complete`, {
@@ -364,52 +364,8 @@ async function settle(assetId: string): Promise<void> {
     body: { asset_id: assetId },
   }]);
   if (!worker.queue) throw new Error("queue handler missing");
-  await worker.queue(batch, scriptedEnv(), ctx);
+  await worker.queue(batch, env, ctx);
   await getQueueResult(batch, ctx);
-}
-
-function scriptedEnv(): Env {
-  const payload = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 1]);
-  const handle = {
-    transform() {
-      return handle;
-    },
-    draw() {
-      return handle;
-    },
-    async output() {
-      return {
-        contentType: () => "image/webp",
-        response: () => new Response(payload),
-        image: () => new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(payload);
-            controller.close();
-          },
-        }),
-      };
-    },
-  };
-  const images = new Proxy(env.IMAGES, {
-    get(target, property, receiver) {
-      if (property === "info") {
-        return async (): Promise<ImageInfoResponse> => ({
-          format: "image/png",
-          fileSize: VALID_PNG.byteLength,
-          width: 1,
-          height: 1,
-        });
-      }
-      if (property === "input") return () => handle;
-      return Reflect.get(target, property, receiver);
-    },
-  });
-  return new Proxy(env, {
-    get(target, property, receiver) {
-      if (property === "IMAGES") return images;
-      return Reflect.get(target, property, receiver);
-    },
-  }) as Env;
 }
 
 async function sha256HexBytes(bytes: Uint8Array): Promise<string> {

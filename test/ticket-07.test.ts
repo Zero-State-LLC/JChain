@@ -2,7 +2,7 @@ import { applyD1Migrations, createExecutionContext, createMessageBatch, getQueue
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
-import { VALID_PNG } from "./fixtures/bytes";
+import { VALID_WEBP } from "./fixtures/bytes";
 import { BOARD_ID, MODERATOR, OPERATOR, call, resetAndSeed } from "./harness";
 
 const MISSING_ID = "01900000-0000-7000-8000-000000000099";
@@ -47,6 +47,10 @@ describe("reports", () => {
     expect(queue).toContain("&lt;script&gt;");
     expect(queue).not.toContain("<script>");
 
+    // v0.2.36: the signed-in report quarantined the Thread's Opening Post.
+    const opening = await env.DB.prepare("SELECT state, quarantined_by FROM posts WHERE thread_id = ? AND title IS NOT NULL")
+      .bind(threadId).first<{ state: string; quarantined_by: string | null }>();
+    expect(opening).toEqual({ state: "quarantined", quarantined_by: "report" });
     await expectError(await call("/v1/reports", {
       bearer: agent.credential,
       body: { target_type: "thread", target_id: threadId, reason_code: "spam" },
@@ -128,7 +132,7 @@ describe("reports", () => {
     const anon = await (await call(`/reports?target_type=thread&target_id=${threadId}`)).text();
     expect(anon).toContain("Browser reports are for an Operator.");
     expect(anon).not.toContain("turnstile");
-    expect(anon).not.toContain("<form");
+    expect(anon).not.toContain('method="post"');
     const page = await (await call(`/reports?target_type=thread&target_id=${threadId}`, { email: OPERATOR })).text();
     expect(page).toContain(`action="/reports"`);
     expect(page).not.toContain("turnstile");
@@ -209,7 +213,8 @@ describe("moderation actions", () => {
       headers: { "idempotency-key": "locked-reply" },
       body: { text: "too late" },
     });
-    await expectError(reply, 409, "state_conflict");
+    // v0.2.31 (AT-07): the Opening Post was removed, so the locked Thread answers not_found, not state_conflict.
+    await expectError(reply, 404, "not_found");
     expect(await postCount()).toBe(2);
 
     const unlocked = await expectSuccess(await act("thread", threadId, "unlock"));
@@ -374,16 +379,16 @@ async function publishedThread(
 }
 
 async function readyAsset(credential: string): Promise<string> {
-  const sha256 = await sha256HexBytes(VALID_PNG);
+  const sha256 = await sha256HexBytes(VALID_WEBP);
   const reserved = await expectSuccess(await call("/v1/uploads", {
     bearer: credential,
     headers: { "idempotency-key": crypto.randomUUID() },
-    body: { content_type: "image/png", byte_size: VALID_PNG.byteLength, sha256 },
+    body: { content_type: "image/webp", byte_size: VALID_WEBP.byteLength, sha256 },
   }), 201);
   const assetId = String(reserved.asset_id);
   await expectSuccess(await call(`/v1/uploads/${assetId}/content`, {
     method: "PUT",
-    raw: VALID_PNG,
+    raw: VALID_WEBP,
     headers: { "idempotency-key": crypto.randomUUID(), "upload-token": String(reserved.upload_token) },
   }));
   await expectSuccess(await call(`/v1/uploads/${assetId}/complete`, {
@@ -404,52 +409,8 @@ async function settle(assetId: string): Promise<void> {
     body: { asset_id: assetId },
   }]);
   if (!worker.queue) throw new Error("queue handler missing");
-  await worker.queue(batch, scriptedEnv(), ctx);
+  await worker.queue(batch, env, ctx);
   await getQueueResult(batch, ctx);
-}
-
-function scriptedEnv(): Env {
-  const payload = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 1]);
-  const handle = {
-    transform() {
-      return handle;
-    },
-    draw() {
-      return handle;
-    },
-    async output() {
-      return {
-        contentType: () => "image/webp",
-        response: () => new Response(payload),
-        image: () => new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(payload);
-            controller.close();
-          },
-        }),
-      };
-    },
-  };
-  const images = new Proxy(env.IMAGES, {
-    get(target, property, receiver) {
-      if (property === "info") {
-        return async (): Promise<ImageInfoResponse> => ({
-          format: "image/png",
-          fileSize: VALID_PNG.byteLength,
-          width: 1,
-          height: 1,
-        });
-      }
-      if (property === "input") return () => handle;
-      return Reflect.get(target, property, receiver);
-    },
-  });
-  return new Proxy(env, {
-    get(target, property, receiver) {
-      if (property === "IMAGES") return images;
-      return Reflect.get(target, property, receiver);
-    },
-  }) as Env;
 }
 
 async function reportCount(): Promise<number> {

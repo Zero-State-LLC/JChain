@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { decodeCursor, encodeCursor } from "../src/browse";
-import { VALID_PNG } from "./fixtures/bytes";
+import { VALID_WEBP } from "./fixtures/bytes";
 import { PROHIBITED } from "../src/rules-copy";
 import { BOARD_ID, INSTRUCTIONS, MODERATOR, OPERATOR, UUID_V7, call, releaseThread, resetAndSeed } from "./harness";
 
@@ -51,15 +51,19 @@ describe("accessible pages", () => {
     expect(keyboardShell(feedHtml)).toBe(true);
     expect(feedHtml).toContain("Square");
     expect(feedHtml).toContain('alt="A square"');
-    expect(feedHtml).toContain("<table");
+    expect(feedHtml).toContain('<ul class="thread-grid">');
     expect(feedHtml).toContain("Ada");
-    expect(feedHtml).toContain("<time");
-    expect(feedHtml).toContain("<td>1</td>");
-    expect(feedHtml).toContain("<h2>Rules</h2>");
+    expect(feedHtml).toContain("<span>Last post <time datetime=");
+    expect(feedHtml).toContain("<span>1 reply</span>");
+    expect(feedHtml).toContain(`<h3 class="card-title"><a href="/threads/${threadId}">Square</a></h3>`);
+    expect(feedHtml).toContain('<h2 id="rules">Rules</h2>');
     const quoted = feedHtml.slice(feedHtml.indexOf("<blockquote>"), feedHtml.indexOf("</blockquote>"));
     expect(quoted).toContain(INSTRUCTIONS);
-    for (const item of PROHIBITED) expect(quoted).toContain(item);
-    expect(feedHtml).toContain('<meta name="viewport" content="width=device-width">');
+    expect(PROHIBITED.map((item) => item.code)).toEqual(["id-document", "csam"]);
+    expect(quoted).toContain("<ul>");
+    expect(quoted).toContain("<q>id-document</q>");
+    expect(quoted).toContain("<q>csam</q>");
+    expect(feedHtml).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
     expect(feedHtml).not.toContain("Held");
     expect(feedHtml).not.toContain("<script");
     expect(feedHtml).not.toContain("<style");
@@ -81,7 +85,9 @@ describe("accessible pages", () => {
     expect(threadHtml).toContain(`href="/reports?target_type=post&amp;target_id=${replyId}"`);
     expect(threadHtml).toContain(`href="/reports?target_type=thread&amp;target_id=${threadId}"`);
     expect(threadHtml).toContain('href="/boards/beta"');
-    expect(threadHtml.match(/<img /g)).toHaveLength(1);
+    // One Post image, plus a decorative avatar in each of the two bylines.
+    expect(threadHtml.match(/<img src="\/v1\/assets\//g)).toHaveLength(1);
+    expect(threadHtml.match(/<img class="avatar avatar-sm" [^>]* alt="" aria-hidden="true" loading="lazy">/g)).toHaveLength(2);
 
     await env.DB.prepare("UPDATE posts SET alt_text = '' WHERE id = ?").bind(postId).run();
     const missingHtml = await page(`/threads/${threadId}`);
@@ -117,7 +123,7 @@ describe("accessible pages", () => {
     expect(queueHtml).toContain(`action="/moderation/actions"`);
     expect(queueHtml).toContain(`<select name="reason_code">`);
     expect(queueHtml).toContain(`<option value="rules" selected>rules</option>`);
-    expect(queueHtml).toMatch(/Storage bytes: \d+ \(\d+\.\d{2} GiB\)/);
+    expect(queueHtml).toMatch(/Storage bytes: <span class="num">\d+<\/span> \(<span class="num">\d+\.\d{2}<\/span> GiB\)/);
     expect(queueHtml).toContain("<p>Disengaged</p>");
     expect(queueHtml).toContain('href="/boards/beta"');
     expect(queueHtml).not.toContain("<script");
@@ -133,7 +139,7 @@ describe("accessible pages", () => {
     expect(anonReport).toContain("Browser reports are for an Operator.");
     expect(anonReport).not.toContain(`action="/v1/reports"`);
     expect(anonReport).not.toContain("turnstile");
-    expect(anonReport).not.toContain("<form");
+    expect(anonReport).not.toContain('method="post"');
     expect(anonReport).not.toContain("<style");
     expect(anonReport).not.toContain(" style=");
     const reportHtml = await page(`/reports?target_type=post&target_id=${postId}`, OPERATOR);
@@ -155,9 +161,10 @@ describe("accessible pages", () => {
     expect(await hidden.text()).not.toContain("Report this thread");
     expect((await call(`/threads/${heldId}?cursor=not-a-cursor`)).status).toBe(404);
 
+    // v0.2.36: a signed-in report of a Post quarantines it, so these reports name its Agent.
     const reportForm = new URLSearchParams({
-      target_type: "post",
-      target_id: postId,
+      target_type: "agent",
+      target_id: ada.agentId,
       reason_code: "rules",
       detail: "catalog",
     });
@@ -172,7 +179,7 @@ describe("accessible pages", () => {
     expect(await htmlReport.text()).toContain('href="/boards/beta"');
     const jsonReport = await call("/v1/reports", {
       email: OPERATOR,
-      body: { target_type: "post", target_id: postId, reason_code: "spam" },
+      body: { target_type: "agent", target_id: ada.agentId, reason_code: "spam" },
     });
     expect(jsonReport.status).toBe(201);
     expect(jsonReport.headers.get("content-type")).toContain("application/json");
@@ -226,7 +233,7 @@ describe("accessible pages", () => {
     expect(jsonAction.headers.get("content-type")).toContain("application/json");
   });
 
-  it("pages the feed, thread, and profile with the shared cursor", async () => {
+  it("pages the feed by number, and the thread and profile with the shared cursor", async () => {
     const ada = await enroll("Ada");
     const assetId = await readyAsset(ada.credential);
     const older = await publishThread(ada.credential, assetId, "Older title", "older caption", "pages-older");
@@ -238,13 +245,13 @@ describe("accessible pages", () => {
     const feed = await page("/boards/beta");
     expect(feed).toContain("Older title");
     expect(feed).toContain("Newer title");
-    expect(nextHref(feed, "Feed")).toBeNull();
+    expect(feed).not.toContain('aria-label="Pages"');
     const wide = await page("/boards/beta?limit=101");
     expect(wide).toContain("Older title");
     expect(wide).toContain("Newer title");
-    expect(nextHref(wide, "Feed")).toBeNull();
+    expect(wide).not.toContain('aria-label="Pages"');
     await expectError(await call("/boards/beta?limit=0"), 400, "malformed");
-    await expectError(await call("/boards/beta?cursor=not-a-cursor"), 400, "malformed");
+    await expectError(await call("/boards/beta?page=0"), 400, "malformed");
     await expectError(await call(`/threads/${older.threadId}?limit=0`), 400, "malformed");
     await expectError(await call(`/agents/${ada.agentId}?cursor=not-a-cursor`), 400, "malformed");
     await expectError(await call("/moderation?limit=0", { email: MODERATOR }), 400, "malformed");
@@ -252,12 +259,13 @@ describe("accessible pages", () => {
     const firstFeed = await page("/boards/beta?limit=1");
     expect(firstFeed).toContain("Newer title");
     expect(firstFeed).not.toContain("Older title");
-    const feedNext = nextHref(firstFeed, "Feed");
-    expect(feedNext).toContain("limit=1");
+    const feedNext = pageHref(firstFeed, "next");
+    expect(feedNext).toBe("/boards/beta?limit=1&page=2");
     const secondFeed = await page(feedNext ?? "");
     expect(secondFeed).toContain("Older title");
     expect(secondFeed).not.toContain("Newer title");
-    expect(nextHref(secondFeed, "Feed")).toBeNull();
+    expect(pageHref(secondFeed, "next")).toBeNull();
+    expect(pageHref(secondFeed, "prev")).toBe("/boards/beta?limit=1");
 
     const firstProfile = await page(`/agents/${ada.agentId}?limit=1`);
     expect(firstProfile).toContain("newer caption");
@@ -369,6 +377,11 @@ function nextHref(html: string, label: string): string | null {
   return found?.[1]?.replaceAll("&amp;", "&") ?? null;
 }
 
+function pageHref(html: string, rel: "next" | "prev"): string | null {
+  const found = html.match(new RegExp(`<a href="([^"]+)" rel="${rel}">`));
+  return found?.[1]?.replaceAll("&amp;", "&") ?? null;
+}
+
 async function page(pathname: string, email?: string): Promise<string> {
   const response = await call(pathname, email === undefined ? {} : { email });
   expect(response.status).toBe(200);
@@ -423,16 +436,16 @@ async function enroll(name: string): Promise<{ agentId: string; credential: stri
 }
 
 async function readyAsset(credential: string): Promise<string> {
-  const sha256 = await sha256HexBytes(VALID_PNG);
+  const sha256 = await sha256HexBytes(VALID_WEBP);
   const reserved = await expectSuccess(await call("/v1/uploads", {
     bearer: credential,
     headers: { "idempotency-key": crypto.randomUUID() },
-    body: { content_type: "image/png", byte_size: VALID_PNG.byteLength, sha256 },
+    body: { content_type: "image/webp", byte_size: VALID_WEBP.byteLength, sha256 },
   }), 201);
   const assetId = String(reserved.asset_id);
   await expectSuccess(await call(`/v1/uploads/${assetId}/content`, {
     method: "PUT",
-    raw: VALID_PNG,
+    raw: VALID_WEBP,
     headers: { "idempotency-key": crypto.randomUUID(), "upload-token": String(reserved.upload_token) },
   }));
   await expectSuccess(await call(`/v1/uploads/${assetId}/complete`, {
@@ -453,52 +466,8 @@ async function settle(assetId: string): Promise<void> {
     body: { asset_id: assetId },
   }]);
   if (!worker.queue) throw new Error("queue handler missing");
-  await worker.queue(batch, scriptedEnv(), ctx);
+  await worker.queue(batch, env, ctx);
   await getQueueResult(batch, ctx);
-}
-
-function scriptedEnv(): Env {
-  const payload = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 1]);
-  const handle = {
-    transform() {
-      return handle;
-    },
-    draw() {
-      return handle;
-    },
-    async output() {
-      return {
-        contentType: () => "image/webp",
-        response: () => new Response(payload),
-        image: () => new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(payload);
-            controller.close();
-          },
-        }),
-      };
-    },
-  };
-  const images = new Proxy(env.IMAGES, {
-    get(target, property, receiver) {
-      if (property === "info") {
-        return async (): Promise<ImageInfoResponse> => ({
-          format: "image/png",
-          fileSize: VALID_PNG.byteLength,
-          width: 1,
-          height: 1,
-        });
-      }
-      if (property === "input") return () => handle;
-      return Reflect.get(target, property, receiver);
-    },
-  });
-  return new Proxy(env, {
-    get(target, property, receiver) {
-      if (property === "IMAGES") return images;
-      return Reflect.get(target, property, receiver);
-    },
-  }) as Env;
 }
 
 async function sha256HexBytes(bytes: Uint8Array): Promise<string> {

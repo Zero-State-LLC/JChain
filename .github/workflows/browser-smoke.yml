@@ -1,0 +1,86 @@
+name: Browser smoke
+# Re-runs the post-deploy browser smoke by hand (RUNBOOK, Browser smoke). Read-only: it loads the
+# human pages in headless Chromium at 375x812 and 1280x800 and checks status, console and CSP,
+# stylesheets, images, horizontal overflow, and axe-core. It never signs in, submits a form, or
+# writes anything. Keep these steps in step with the browser-smoke job in deploy.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Site to check"
+        type: string
+        default: https://j-chain.net
+permissions:
+  contents: read
+concurrency:
+  group: browser-smoke
+  cancel-in-progress: false
+jobs:
+  browser-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      BASE_URL: ${{ inputs.base_url }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Check the base URL
+        run: |
+          [[ "$BASE_URL" =~ ^https?://[A-Za-z0-9.:-]+/?$ ]] || { echo "::error title=Browser smoke::base_url must be a bare origin such as https://j-chain.net"; exit 1; }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Install Playwright and axe-core outside the repository
+        # Not repository dependencies: CI runs `npm ci` against the lockfile. Exact versions.
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/browser"
+          mkdir -p "$dir"
+          cd "$dir"
+          npm init -y > /dev/null
+          # Logs are not always reachable for the reader: a failed install also lands as an annotation.
+          npm i --no-audit --no-fund --save-exact playwright@1.55.0 axe-core@4.10.3 > npm.log 2>&1 \
+            || { echo "::error title=Browser install::npm i failed: $(tail -c 600 npm.log | tr '\n' ' ')"; exit 1; }
+          npx playwright install --with-deps chromium > pw.log 2>&1 \
+            || { echo "::error title=Browser install::playwright install failed: $(tail -c 600 pw.log | tr '\n' ' ')"; exit 1; }
+          echo "BROWSER_DEPS_DIR=$dir" >> "$GITHUB_ENV"
+      - name: Browser smoke
+        run: |
+          for attempt in 1 2 3; do
+            if node scripts/browser-smoke.mjs "$BASE_URL" --out browser-smoke.json; then exit 0; fi
+            if [ "$attempt" -lt 3 ]; then echo "browser smoke attempt $attempt failed; retrying in 20 seconds"; sleep 20; fi
+          done
+          exit 1
+      - name: Annotate
+        # Only the last attempt's summary becomes annotations, so a retry does not repeat them.
+        if: always()
+        run: node scripts/browser-smoke.mjs --annotate browser-smoke.json
+      - name: Keep the summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-smoke
+          path: browser-smoke.json
+          if-no-files-found: ignore
+
+  # A failed check of production opens (or comments on) the same issue as the deploy job.
+  report-failure:
+    needs: browser-smoke
+    if: ${{ always() && needs.browser-smoke.result == 'failure' && inputs.base_url == 'https://j-chain.net' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or update the browser smoke issue
+        run: |
+          set -euo pipefail
+          title="Browser smoke failed"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          body="A manual browser smoke of https://j-chain.net failed: $RUN_URL. The run's annotations name each failing page, viewport, and check. See RUNBOOK, Browser smoke."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

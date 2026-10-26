@@ -1,0 +1,137 @@
+name: Deploy production
+# Runs the tests, applies D1 migrations to remote `jchain`, deploys
+# `wrangler deploy --env production` with the build sha and production policy,
+# then runs the read-only smoke check and, in its own job, the read-only browser smoke
+# (RUNBOOK, Browser smoke). Needs the CLOUDFLARE_API_TOKEN secret
+# (Workers edit and D1 edit). A push to main stays green until the repository
+# variable ENABLE_AUTODEPLOY is true and that secret is set.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      migrate:
+        description: "Apply pending D1 migrations before the deploy"
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ENABLE_AUTODEPLOY == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Require the deploy token
+        run: test -n "$CLOUDFLARE_API_TOKEN" || { echo "Set the CLOUDFLARE_API_TOKEN repository secret first."; exit 1; }
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - name: Apply D1 migrations
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.migrate }}
+        run: npx wrangler d1 migrations apply jchain --env production --remote
+      - name: Deploy
+        run: |
+          PROD_POLICY=$(jq -c . policy/production.json)
+          npx wrangler deploy --env production --var "BUILD_SHA:${GITHUB_SHA::7}" --var "POLICY:${PROD_POLICY}"
+      - name: Smoke check
+        # A new version takes a few seconds to reach every edge. Retry before calling it a failure.
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if npm run smoke -- https://j-chain.net; then exit 0; fi
+            echo "smoke attempt $attempt failed; retrying in 20 seconds"
+            sleep 20
+          done
+          exit 1
+
+  # Real-browser smoke and accessibility check of the human pages (RUNBOOK, Browser smoke).
+  # The deploy has already happened, so a failure here is loud (annotations and an issue) but
+  # does not roll back. Keep these steps in step with browser-smoke.yml.
+  browser-smoke:
+    needs: deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      BASE_URL: https://j-chain.net
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Install Playwright and axe-core outside the repository
+        # Not repository dependencies: CI runs `npm ci` against the lockfile. Exact versions.
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/browser"
+          mkdir -p "$dir"
+          cd "$dir"
+          npm init -y > /dev/null
+          # Logs are not always reachable for the reader: a failed install also lands as an annotation.
+          npm i --no-audit --no-fund --save-exact playwright@1.55.0 axe-core@4.10.3 > npm.log 2>&1 \
+            || { echo "::error title=Browser install::npm i failed: $(tail -c 600 npm.log | tr '\n' ' ')"; exit 1; }
+          npx playwright install --with-deps chromium > pw.log 2>&1 \
+            || { echo "::error title=Browser install::playwright install failed: $(tail -c 600 pw.log | tr '\n' ' ')"; exit 1; }
+          echo "BROWSER_DEPS_DIR=$dir" >> "$GITHUB_ENV"
+      - name: Wait for the new build
+        # The new version takes seconds to reach every edge: check pages once /version reports
+        # this commit, or after three minutes (the retry below still applies).
+        run: |
+          want="${GITHUB_SHA::7}"
+          for attempt in $(seq 1 18); do
+            build=$(curl -sS "$BASE_URL/version" | jq -r '.build // empty' 2> /dev/null || true)
+            if [ "$build" = "$want" ]; then echo "build $build is live"; exit 0; fi
+            echo "build ${build:-unknown}, waiting for $want ($attempt)"
+            sleep 10
+          done
+          echo "::warning title=Browser smoke::/version never reported $want; checking anyway"
+      - name: Browser smoke
+        run: |
+          for attempt in 1 2 3; do
+            if node scripts/browser-smoke.mjs "$BASE_URL" --out browser-smoke.json; then exit 0; fi
+            if [ "$attempt" -lt 3 ]; then echo "browser smoke attempt $attempt failed; retrying in 20 seconds"; sleep 20; fi
+          done
+          exit 1
+      - name: Annotate
+        # Only the last attempt's summary becomes annotations, so a retry does not repeat them.
+        if: always()
+        run: node scripts/browser-smoke.mjs --annotate browser-smoke.json
+      - name: Keep the summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-smoke
+          path: browser-smoke.json
+          if-no-files-found: ignore
+
+  # A failed browser smoke opens (or comments on) one issue, so a broken page is seen.
+  report-browser-smoke:
+    needs: browser-smoke
+    if: ${{ always() && needs.browser-smoke.result == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or update the browser smoke issue
+        run: |
+          set -euo pipefail
+          title="Browser smoke failed"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          body="The browser smoke after the deploy of ${GITHUB_SHA::7} failed: $RUN_URL. The deploy stands. The run's annotations name each failing page, viewport, and check. See RUNBOOK, Browser smoke."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

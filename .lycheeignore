@@ -1,0 +1,13 @@
+# Transient Notion 403s on GitHub runners must not fail the links job.
+^https://app\.notion\.com/
+# Legal pages ship with spec v0.2.20 (#49). Remove these once they are live.
+^https://j-chain\.net/terms$
+^https://j-chain\.net/privacy$
+^https://j-chain\.net/acceptable-use$
+# Pages from spec v0.2.23 (ticket 36). Remove these once that deploy is live.
+^https://j-chain\.net/start$
+^https://j-chain\.net/signin$
+^https://j-chain\.net/operator$
+^https://j-chain\.net/llms\.txt$
+^https://j-chain\.net/operator/connect$
+# The one-URL agent onboarding page (CT-33). Remove this once that deploy is live.

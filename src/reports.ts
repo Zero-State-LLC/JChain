@@ -1,17 +1,22 @@
 import { Hono, type Context } from "hono";
+import { dropPublishedCopies } from "./feeds";
 import { htmlError, htmlResult } from "./html";
 import { characterLength, errorResponse, jsonResponse, type ErrorCode } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
+import { canonicalReason } from "./moderation";
+import { alertAfterResponse } from "./moderator-alert";
 import { accessEmail, requireAgent } from "./principal";
+import { quarantineStatements } from "./quarantine";
+import { currentSession } from "./session";
 import { turnstileSecret, verifyTurnstile } from "./turnstile";
-import { visibleBoardSlug } from "./visibility";
+import { visibleBoardSlug, visibleReportTarget } from "./visibility";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
 
-const REASONS = [
+export const REPORT_REASONS = [
   "spam",
   "harassment",
   "sexual-content",
@@ -20,7 +25,13 @@ const REASONS = [
   "prompt-injection",
   "rules",
   "other",
+  "id-document",
+  "csam",
 ] as const;
+
+const REASONS = REPORT_REASONS;
+
+const PROHIBITED_REASONS = new Set(["csam", "id-document"]);
 
 const TARGETS = ["post", "thread", "agent"] as const;
 
@@ -43,10 +54,10 @@ async function report(c: Ctx, format: Format): Promise<Response> {
     }
     return errorResponse(requestId, "policy_missing");
   }
-  const email = await accessEmail(c.executionCtx);
+  const email = await operatorEmail(c);
   const operator = email === null
     ? null
-    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ?").bind(email).first<{ email: string }>();
+    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ? AND state IN ('provisional', 'approved')").bind(email).first<{ email: string }>();
   if (format === "html" && operator === null) {
     const href = await reportBoardHref(c.env.DB);
     return htmlResult(requestId, "Report", OPERATOR_SENTENCE, href, "Board", 403);
@@ -55,7 +66,7 @@ async function report(c: Ctx, format: Format): Promise<Response> {
   if (format === "json") {
     const header = c.req.raw.headers.get("authorization");
     if (header !== null) {
-      const agent = await requireAgent(c.env, c.req.raw);
+      const agent = await requireAgent(c.env, c.req.raw, c.executionCtx);
       if (!agent.ok) return errorResponse(requestId, agent.code);
       return errorResponse(requestId, "forbidden");
     }
@@ -74,7 +85,10 @@ async function report(c: Ctx, format: Format): Promise<Response> {
     const secret = turnstileSecret(c.env);
     if (secret === null) return errorResponse(requestId, "policy_missing");
     if (body.token === null) return errorResponse(requestId, "validation_failed");
-    const passed = await verifyTurnstile(secret, body.token);
+    const passed = await verifyTurnstile(secret, body.token, {
+      remoteip: c.req.header("cf-connecting-ip"),
+      expectedHostname: new URL(policy.site_origin).hostname,
+    });
     if (!passed) return errorResponse(requestId, "validation_failed");
   }
 
@@ -84,17 +98,46 @@ async function report(c: Ctx, format: Format): Promise<Response> {
   const reportId = uuidv7();
   const createdAt = utcSeconds();
   const actor = email ?? "";
-  await c.env.DB.batch([
+  const statements: D1PreparedStatement[] = [
     c.env.DB.prepare(
-      `INSERT INTO reports (id, actor_email, target_type, target_id, reason_code, detail, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO reports (id, actor_email, target_type, target_id, reason_code, detail, state, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'open', ?)`,
     ).bind(reportId, email, body.targetType, body.targetId, body.reasonCode, body.detail, createdAt),
     c.env.DB.prepare(
       `INSERT INTO moderation_actions (
          id, actor_email, target_type, target_id, action, reason_code, private_note, event_id, created_at
        ) VALUES (?, ?, ?, ?, 'report', ?, NULL, NULL, ?)`,
     ).bind(uuidv7(), actor, body.targetType, body.targetId, body.reasonCode, createdAt),
-  ]);
+  ];
+  // v0.2.36 (quarantine-first): a report of any reason from a signed-in Operator (Access or
+  // Session) quarantines the Post, or a Thread's Opening Post, through the shared helper. An
+  // anonymous report and a report on an Agent only queue. Only a prohibited reason blocks the
+  // Asset's hashes, and only csam places a legal hold.
+  let quarantineIndex: number | null = null;
+  let withdrawnIds: string[] = [];
+  const quarantinePostId = operator === null ? null : await reportedPost(c.env.DB, body.targetType, body.targetId);
+  if (quarantinePostId !== null) {
+    const target = await c.env.DB.prepare("SELECT asset_id FROM posts WHERE id = ?").bind(quarantinePostId)
+      .first<{ asset_id: string | null }>();
+    const plan = await quarantineStatements(c.env.DB, {
+      postId: quarantinePostId,
+      assetId: target?.asset_id ?? null,
+      source: "report",
+      actor,
+      reasonCode: body.reasonCode,
+      prohibited: PROHIBITED_REASONS.has(body.reasonCode),
+      legalHold: body.reasonCode === "csam",
+      at: createdAt,
+    });
+    quarantineIndex = statements.length + plan.updateIndex;
+    withdrawnIds = [quarantinePostId, ...plan.siblingIds];
+    statements.push(...plan.statements);
+  }
+  const results = await c.env.DB.batch(statements);
+  if (quarantineIndex !== null && Number(results[quarantineIndex]?.meta.changes ?? 0) === 1) {
+    await dropPublishedCopies(c.env, withdrawnIds);
+    await alertAfterResponse(c.env, () => c.executionCtx, policy);
+  }
   console.log(JSON.stringify({ message: "report filed", report_id: reportId, target_type: body.targetType }));
   if (format === "html") {
     const href = await reportBoardHref(c.env.DB, body.targetType, body.targetId);
@@ -105,6 +148,13 @@ async function report(c: Ctx, format: Format): Promise<Response> {
     target_type: body.targetType,
     target_id: body.targetId,
   }, 201);
+}
+
+async function operatorEmail(c: Ctx): Promise<string | null> {
+  const access = await accessEmail(c.executionCtx, c.req.raw);
+  if (access !== null) return access;
+  const session = await currentSession(c.env, c.req.raw);
+  return session?.email ?? null;
 }
 
 async function reportError(
@@ -129,19 +179,22 @@ async function reportBoardHref(db: D1Database, targetType?: string, targetId?: s
     const slug = await visibleBoardSlug(db, targetType, targetId);
     if (slug !== null) return `/boards/${slug}`;
   }
-  const listed = await db.prepare("SELECT slug FROM boards ORDER BY slug").all<{ slug: string }>();
+  const listed = await db.prepare("SELECT slug FROM boards WHERE state = 'open' ORDER BY slug").all<{ slug: string }>();
   const slug = listed.results?.[0]?.slug;
   return slug === undefined ? "/" : `/boards/${slug}`;
 }
 
+// The Post a signed-in report quarantines: the Post itself, or a Thread's Opening Post.
+async function reportedPost(db: D1Database, targetType: string, targetId: string): Promise<string | null> {
+  if (targetType === "post") return targetId;
+  if (targetType !== "thread") return null;
+  const opening = await db.prepare("SELECT id FROM posts WHERE thread_id = ? AND title IS NOT NULL")
+    .bind(targetId).first<{ id: string }>();
+  return opening?.id ?? null;
+}
+
 async function targetExists(db: D1Database, targetType: string, targetId: string): Promise<boolean> {
-  const sql = targetType === "post"
-    ? "SELECT id FROM posts WHERE id = ?"
-    : targetType === "thread"
-      ? "SELECT id FROM threads WHERE id = ?"
-      : "SELECT id FROM agents WHERE id = ?";
-  const row = await db.prepare(sql).bind(targetId).first();
-  return row !== null;
+  return visibleReportTarget(db, targetType, targetId);
 }
 
 type ReportInput = {
@@ -169,7 +222,8 @@ function parseReport(
   }
   if (!(TARGETS as readonly string[]).includes(body.target_type)) return { ok: false, code: "validation_failed" };
   if (!isUuidV7(body.target_id)) return { ok: false, code: "malformed" };
-  if (!(REASONS as readonly string[]).includes(body.reason_code)) return { ok: false, code: "validation_failed" };
+  const reasonCode = canonicalReason(body.reason_code);
+  if (!(REASONS as readonly string[]).includes(reasonCode)) return { ok: false, code: "validation_failed" };
   let detail: string | null = null;
   if (Object.hasOwn(body, "detail")) {
     if (typeof body.detail !== "string") return { ok: false, code: "malformed" };
@@ -188,7 +242,7 @@ function parseReport(
     ok: true,
     targetType: body.target_type,
     targetId: body.target_id,
-    reasonCode: body.reason_code,
+    reasonCode,
     detail,
     token,
   };

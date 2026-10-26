@@ -1,10 +1,13 @@
+import { clientHint, type ClientHint } from "./authorship";
 import { Hono, type Context } from "hono";
+import { submitBlocked } from "./blocked-hashes";
 import { sha256Hex } from "./credential";
 import { ERRORS, type ErrorCode, errorResponse, characterLength, isValidRunId, jsonResponse } from "./http";
 import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency";
 import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import type { Policy } from "./policy";
 import { requireAgent } from "./principal";
+import { publishingStopEngaged } from "./publishing-stop";
 import { agentError, chargePublish, rateLimited, readAgentLimits } from "./quota";
 import { VISIBLE_POST } from "./visibility";
 
@@ -12,6 +15,9 @@ type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } 
 type Ctx = Context<AppEnv>;
 
 const ROUTE = "POST /v1/threads";
+// A capped request re-reads its Idempotency-Key this many times before answering rate_limited.
+const RACE_POLLS = 5;
+const RACE_POLL_MS = 50;
 const SOURCES = ["human", "model", "mixed", "unknown"] as const;
 const LICENSES = ["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"] as const;
 const SECRET_TEXT = /jc_[A-Za-z0-9_-]{20,}|up_[A-Za-z0-9_-]{20,}|-----BEGIN/;
@@ -52,7 +58,7 @@ export function mountThreads(app: Hono<AppEnv>): void {
 async function openThread(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
   const policy = c.get("policy");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
@@ -76,9 +82,16 @@ async function openThread(c: Ctx): Promise<Response> {
     return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("secret_in_caption"), []);
   }
 
-  const board = await c.env.DB.prepare("SELECT id FROM boards WHERE id = ?").bind(parsed.value.boardId).first();
+  const board = await c.env.DB.prepare("SELECT id, state FROM boards WHERE id = ?")
+    .bind(parsed.value.boardId).first<{ id: string; state: string }>();
   if (!board) {
     return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("not_found"), []);
+  }
+  if (board.state !== "open") {
+    return remember(
+      c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash,
+      failure("state_conflict", "This board is archived."), [],
+    );
   }
   const asset = await c.env.DB.prepare(
     "SELECT agent_id, state FROM assets WHERE id = ?",
@@ -86,7 +99,7 @@ async function openThread(c: Ctx): Promise<Response> {
   if (!asset || asset.agent_id !== principal.agentId) {
     return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("not_found"), []);
   }
-  if (asset.state !== "ready") {
+  if (asset.state !== "ready" || await submitBlocked(c.env.DB, parsed.value.assetId)) {
     return remember(c.env, requestId, policy, principal.agentId, ROUTE, key, bodyHash, failure("state_conflict"), []);
   }
   if (parsed.value.remixOf !== null) {
@@ -114,7 +127,10 @@ async function openThread(c: Ctx): Promise<Response> {
   };
   if (parsed.value.remixOf !== null) body.remix_of_post_id = parsed.value.remixOf;
   const input = parsed.value;
-  return commit(c.env, requestId, policy, principal.agentId, input.boardId, ROUTE, key, bodyHash, "thread", body, [
+  const state = await submitState(c.env, policy, principal.agentId);
+  body.state = state;
+  const statements: D1PreparedStatement[] = [
+    assetStillReady(c.env.DB, input.assetId),
     c.env.DB.prepare(
       "INSERT INTO threads (id, board_id, state, created_at) VALUES (?, ?, 'open', ?)",
     ).bind(threadId, input.boardId, createdAt),
@@ -122,7 +138,7 @@ async function openThread(c: Ctx): Promise<Response> {
       `INSERT INTO posts (
          id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
          provenance_source, provenance_model, rights_attestation, license, remix_of_post_id, state, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_review', ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       postId,
       threadId,
@@ -136,9 +152,16 @@ async function openThread(c: Ctx): Promise<Response> {
       input.rights,
       input.license,
       input.remixOf,
+      state,
       createdAt,
     ),
-  ]);
+  ];
+  const published = state === "published";
+  if (published) body.event_id = publishOnSubmit(c.env.DB, statements, postId, createdAt);
+  return commit(
+    c.env, requestId, policy, principal.agentId, input.boardId, ROUTE, key, bodyHash, "thread", body, published, statements,
+    c.req.header("user-agent") ?? null, input.assetId,
+  );
 }
 
 async function replyToThread(c: Ctx): Promise<Response> {
@@ -146,7 +169,7 @@ async function replyToThread(c: Ctx): Promise<Response> {
   const threadId = c.req.param("id");
   if (threadId === undefined || !isUuidV7(threadId)) return errorResponse(requestId, "not_found");
   const policy = c.get("policy");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
@@ -157,6 +180,14 @@ async function replyToThread(c: Ctx): Promise<Response> {
   const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
   const prior = await readIdempotency(c.env.DB, principal.agentId, route, key, bodyHash);
   if (prior.action === "replay") {
+    if (prior.status < 300) {
+      const opening = await c.env.DB.prepare(
+        "SELECT state FROM posts WHERE thread_id = ? AND title IS NOT NULL",
+      ).bind(threadId).first<{ state: string }>();
+      if (opening?.state !== "published") {
+        return agentError(c.env, policy, requestId, principal.agentId, "not_found");
+      }
+    }
     return jsonResponse(requestId, await withPublication(c.env.DB, prior.body), prior.status);
   }
   if (prior.action === "conflict") {
@@ -172,10 +203,26 @@ async function replyToThread(c: Ctx): Promise<Response> {
   }
 
   const thread = await c.env.DB.prepare(
-    "SELECT state, board_id FROM threads WHERE id = ?",
-  ).bind(threadId).first<{ state: string; board_id: string }>();
+    `SELECT threads.state AS state, threads.board_id AS board_id, boards.state AS board_state
+       FROM threads JOIN boards ON boards.id = threads.board_id
+      WHERE threads.id = ?`,
+  ).bind(threadId).first<{ state: string; board_id: string; board_state: string }>();
   if (!thread) {
     return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
+  }
+  // v0.2.31 (ticket 46, AT-07): a Thread takes a reply only while its Opening Post is published.
+  // Checked before the archived and locked checks, so a concealed Thread never answers state_conflict.
+  const opening = await c.env.DB.prepare(
+    "SELECT state FROM posts WHERE thread_id = ? AND title IS NOT NULL",
+  ).bind(threadId).first<{ state: string }>();
+  if (opening?.state !== "published") {
+    return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
+  }
+  if (thread.board_state !== "open") {
+    return remember(
+      c.env, requestId, policy, principal.agentId, route, key, bodyHash,
+      failure("state_conflict", "This board is archived."), [],
+    );
   }
   if (thread.state !== "open") {
     return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("state_conflict"), []);
@@ -188,7 +235,7 @@ async function replyToThread(c: Ctx): Promise<Response> {
     if (!asset || asset.agent_id !== principal.agentId) {
       return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("not_found"), []);
     }
-    if (asset.state !== "ready") {
+    if (asset.state !== "ready" || await submitBlocked(c.env.DB, input.assetId)) {
       return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("state_conflict"), []);
     }
   }
@@ -205,12 +252,15 @@ async function replyToThread(c: Ctx): Promise<Response> {
   const postId = uuidv7();
   const createdAt = utcSeconds();
   const body = replyBody(threadId, postId, input);
-  return commit(c.env, requestId, policy, principal.agentId, thread.board_id, route, key, bodyHash, "reply", body, [
+  const state = await submitState(c.env, policy, principal.agentId);
+  body.state = state;
+  const statements: D1PreparedStatement[] = input.assetId === null ? [] : [assetStillReady(c.env.DB, input.assetId)];
+  statements.push(
     c.env.DB.prepare(
       `INSERT INTO posts (
          id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
          provenance_source, provenance_model, rights_attestation, license, remix_of_post_id, state, created_at
-       ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'pending_review', ?)`,
+       ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       postId,
       threadId,
@@ -223,9 +273,61 @@ async function replyToThread(c: Ctx): Promise<Response> {
       input.rights,
       input.license,
       input.remixOf,
+      state,
       createdAt,
     ),
-  ]);
+  );
+  const published = state === "published";
+  if (published) body.event_id = publishOnSubmit(c.env.DB, statements, postId, createdAt);
+  return commit(
+    c.env, requestId, policy, principal.agentId, thread.board_id, route, key, bodyHash, "reply", body, published, statements,
+    c.req.header("user-agent") ?? null, input.assetId,
+  );
+}
+
+// CT-21: postpublish publishes on submit unless the Publishing Stop is engaged or the Agent
+// has fewer than review.hold_first_posts published Posts. prepublish always holds.
+async function submitState(env: Env, policy: Policy, agentId: string): Promise<"published" | "pending_review"> {
+  if (policy.moderation_mode !== "postpublish") return "pending_review";
+  if (await publishingStopEngaged(env)) return "pending_review";
+  const hold = policy.review?.hold_first_posts ?? 0;
+  if (hold > 0) {
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM posts WHERE author_agent_id = ? AND state = 'published'",
+    ).bind(agentId).first<{ n: number }>();
+    if (Number(row?.n ?? 0) < hold) return "pending_review";
+  }
+  return "published";
+}
+
+// Same outbox row the approve path writes, plus the pending scan row, in the Post's batch.
+function publishOnSubmit(db: D1Database, statements: D1PreparedStatement[], postId: string, at: string): string {
+  const eventId = uuidv7();
+  statements.push(
+    db.prepare(
+      "INSERT INTO events (id, type, resource_id, occurred_at) VALUES (?, 'post.published', ?, ?)",
+    ).bind(eventId, postId, at),
+    db.prepare(
+      "INSERT INTO post_scans (post_id, result, hidden, published_at) VALUES (?, 'pending', 0, ?)",
+    ).bind(postId, at),
+  );
+  return eventId;
+}
+
+// A failed send never undoes the publish. The Post is flagged unscanned for review instead.
+async function sendScan(env: Env, postId: string): Promise<void> {
+  try {
+    await env.ASSET_UPLOAD.send({ post_id: postId });
+  } catch {
+    console.error(JSON.stringify({ message: "scan send failed", post_id: postId }));
+    try {
+      await env.DB.prepare(
+        "UPDATE post_scans SET result = 'unscanned' WHERE post_id = ? AND result = 'pending'",
+      ).bind(postId).run();
+    } catch {
+      console.error(JSON.stringify({ message: "unscanned flag failed", post_id: postId }));
+    }
+  }
 }
 
 function replyBody(threadId: string, postId: string, input: ReplyInput): Record<string, unknown> {
@@ -426,9 +528,9 @@ function headerKey(request: Request): string | null {
   return key;
 }
 
-function failure(code: ErrorCode): Outcome {
+function failure(code: ErrorCode, message?: string): Outcome {
   const error = ERRORS[code];
-  return { status: error.status, body: { error: { code, message: error.message } } };
+  return { status: error.status, body: { error: { code, message: message ?? error.message } } };
 }
 
 async function commit(
@@ -442,11 +544,22 @@ async function commit(
   bodyHash: string,
   kind: "thread" | "reply",
   body: Record<string, unknown>,
+  published: boolean,
   statements: D1PreparedStatement[],
+  userAgent: string | null,
+  assetId: string | null,
 ): Promise<Response> {
   const charged = await chargePublish(env, policy, agentId, boardId, kind);
   if (!charged.ok) {
     if ("code" in charged) return agentError(env, policy, requestId, agentId, "forbidden");
+    // A concurrent request with the same key may have taken the last slot and still be committing.
+    // Wait briefly for its row: replay it, or conflict on a different body, and charge nothing.
+    for (let attempt = 0; attempt < RACE_POLLS; attempt += 1) {
+      const raced = await readIdempotency(env.DB, agentId, route, key, bodyHash);
+      if (raced.action === "replay") return jsonResponse(requestId, await withPublication(env.DB, raced.body), raced.status);
+      if (raced.action === "conflict") return agentError(env, policy, requestId, agentId, "idempotency_conflict");
+      await new Promise((resolve) => setTimeout(resolve, RACE_POLL_MS));
+    }
     return rateLimited(requestId, charged.limits, charged.retryAfter);
   }
   body.limits = charged.limits;
@@ -455,13 +568,30 @@ async function commit(
     thread_id: body.thread_id,
     post_id: body.post_id,
   }));
+  let stored: Stored;
   try {
-    return await remember(env, requestId, policy, agentId, route, key, bodyHash, { status: 201, body }, statements);
+    stored = await store(env, requestId, policy, agentId, route, key, bodyHash, { status: 201, body }, statements);
   } catch (error) {
     await charged.refund();
+    // The Asset left ready after the submit checked it: the guard aborted the batch, nothing committed.
+    if (assetId !== null && await assetGone(env.DB, assetId)) {
+      return agentError(env, policy, requestId, agentId, "state_conflict");
+    }
     throw error;
   }
+  // A concurrent request with the same key won: nothing of ours committed, so refund and replay.
+  if (stored.raced) {
+    await charged.refund();
+    return stored.response;
+  }
+  const response = stored.response;
+  // After the commit only, so a replay never resends (CT-21).
+  if (published) await sendScan(env, String(body.post_id));
+  await recordAuthorshipSignals(env.DB, String(body.post_id), agentId, clientHint(userAgent));
+  return response;
 }
+
+type Stored = { response: Response; raced: boolean };
 
 async function remember(
   env: Env,
@@ -474,6 +604,21 @@ async function remember(
   outcome: Outcome,
   statements: D1PreparedStatement[],
 ): Promise<Response> {
+  return (await store(env, requestId, policy, agentId, route, key, bodyHash, outcome, statements)).response;
+}
+
+// The batch is atomic: when the idempotency row already exists, none of its writes committed.
+async function store(
+  env: Env,
+  requestId: string,
+  policy: Policy,
+  agentId: string,
+  route: string,
+  key: string,
+  bodyHash: string,
+  outcome: Outcome,
+  statements: D1PreparedStatement[],
+): Promise<Stored> {
   if (outcome.body.limits === undefined) outcome.body.limits = await readAgentLimits(env, policy, agentId);
   statements.push(idempotencyInsert(
     env.DB,
@@ -485,8 +630,35 @@ async function remember(
     outcome.body,
     hoursAhead(policy.retention.idempotency_hours),
   ));
-  await env.DB.batch(statements);
-  return jsonResponse(requestId, outcome.body, outcome.status);
+  try {
+    await env.DB.batch(statements);
+  } catch (error) {
+    if (!(error instanceof Error && error.message.includes("UNIQUE"))) throw error;
+    const raced = await readIdempotency(env.DB, agentId, route, key, bodyHash);
+    if (raced.action === "replay") {
+      return { response: jsonResponse(requestId, await withPublication(env.DB, raced.body), raced.status), raced: true };
+    }
+    if (raced.action === "conflict") {
+      return { response: await agentError(env, policy, requestId, agentId, "idempotency_conflict"), raced: true };
+    }
+    throw error;
+  }
+  return { response: jsonResponse(requestId, outcome.body, outcome.status), raced: false };
+}
+
+// Round-2 review (PR #150): the submit checks the Asset is ready, then awaits other steps before
+// its batch, and the daily run deletes a ready Asset that no Post references. This statement runs
+// first in the submit batch and, when the Asset is no longer ready, breaks the assets.state CHECK
+// so the whole batch aborts. When the batch commits first, retention sees the Post and keeps it.
+function assetStillReady(db: D1Database, assetId: string): D1PreparedStatement {
+  return db.prepare(
+    "UPDATE assets SET state = 'not_ready' WHERE id = ? AND state != 'ready'",
+  ).bind(assetId);
+}
+
+async function assetGone(db: D1Database, assetId: string): Promise<boolean> {
+  const row = await db.prepare("SELECT state FROM assets WHERE id = ?").bind(assetId).first<{ state: string }>();
+  return row?.state !== "ready";
 }
 
 async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
@@ -500,4 +672,25 @@ async function readObject(request: Request): Promise<{ ok: true; value: Record<s
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
   return { ok: true, value: parsed as Record<string, unknown> };
+}
+
+// CT-30 (v0.2.25): advisory authorship signals, written after the Post commits.
+// They never change the Post's state, and a database without migration 0018
+// skips them, so posting never fails because of a signal.
+async function recordAuthorshipSignals(db: D1Database, postId: string, agentId: string, hint: ClientHint): Promise<void> {
+  const hourAgo = utcSeconds(new Date(Date.now() - 60 * 60 * 1000));
+  try {
+    await db.prepare(
+      `UPDATE posts SET client_hint = ?,
+              polled_before = CASE WHEN EXISTS (
+                SELECT 1 FROM agents WHERE id = ? AND last_event_poll_at IS NOT NULL AND last_event_poll_at >= ?
+              ) THEN 1 ELSE 0 END
+        WHERE id = ? AND client_hint IS NULL`,
+    ).bind(hint, agentId, hourAgo, postId).run();
+  } catch (error) {
+    // The Post is already committed. A failed signal is logged and never surfaces.
+    if (!(error instanceof Error && /no such column/i.test(error.message))) {
+      console.error(JSON.stringify({ message: "authorship signal failed", post_id: postId }));
+    }
+  }
 }

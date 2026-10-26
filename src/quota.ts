@@ -86,6 +86,77 @@ export class Quota extends DurableObject<Env> {
     });
   }
 
+  // Refunds at most once per marker key. Markers use a prefix that apply() never sweeps.
+  async refundOnce(marker: string, charges: Array<{ key: string; amount: number }>): Promise<boolean> {
+    return this.ctx.storage.transaction(async (txn) => {
+      if (await txn.get(marker) !== undefined) return false;
+      for (const charge of charges) {
+        if (charge.amount <= 0) continue;
+        const current = Number(await txn.get<number>(charge.key) ?? 0);
+        await txn.put(charge.key, Math.max(0, current - charge.amount));
+      }
+      await txn.put(marker, 1);
+      return true;
+    });
+  }
+
+  // Round-2 audit finding 7: applies the charges at most once per marker key. A repeat with the
+  // marker already set charges nothing and succeeds, so a queue retry after a failed D1 write does
+  // not charge the same Asset's bytes twice. Markers use a prefix that apply() never sweeps.
+  async chargeOnce(marker: string, charges: Charge[]): Promise<ApplyResult> {
+    const now = Date.now();
+    return this.ctx.storage.transaction(async (txn) => {
+      if (await txn.get(marker) !== undefined) return { ok: true as const, remaining: {} };
+      const used = new Map<string, number>();
+      for (const charge of charges) used.set(charge.key, Number(await txn.get<number>(charge.key) ?? 0));
+      for (const charge of charges) {
+        const current = used.get(charge.key) ?? 0;
+        if (charge.amount > 0 && current + charge.amount > charge.limit) {
+          return {
+            ok: false as const,
+            counter: charge.counter,
+            retry_after: secondsUntil(charge.reset_at, now),
+            remaining: remainingMap(charges, used),
+          };
+        }
+      }
+      const remaining: Record<string, number> = {};
+      for (const charge of charges) {
+        const next = (used.get(charge.key) ?? 0) + charge.amount;
+        if (charge.amount > 0) await txn.put(charge.key, next);
+        remaining[charge.counter] = charge.limit - next;
+      }
+      await txn.put(marker, 1);
+      return { ok: true as const, remaining };
+    });
+  }
+
+  // Round-2 audit finding 6: ends a claim taken with claimAlert at `at`, unless it lapsed and
+  // another caller has claimed it since.
+  async releaseClaim(key: string, at: number): Promise<void> {
+    await this.ctx.storage.transaction(async (txn) => {
+      if (Number(await txn.get<number>(key) ?? 0) === at) await txn.delete(key);
+    });
+  }
+
+  // v0.2.36: claims an alert slot when none was claimed in the last gapMs. The key uses a prefix
+  // that apply() never sweeps.
+  async claimAlert(key: string, gapMs: number, now: number): Promise<boolean> {
+    return this.ctx.storage.transaction(async (txn) => {
+      const last = Number(await txn.get<number>(key) ?? 0);
+      if (last > 0 && now - last < gapMs) return false;
+      await txn.put(key, now);
+      return true;
+    });
+  }
+
+  // v0.2.28 G1: read counters without charging. Missing keys read as 0.
+  async peek(keys: string[]): Promise<Record<string, number>> {
+    const values: Record<string, number> = {};
+    for (const key of keys) values[key] = Number(await this.ctx.storage.get<number>(key) ?? 0);
+    return values;
+  }
+
   async clear(): Promise<void> {
     await this.ctx.storage.deleteAll();
   }
@@ -203,58 +274,103 @@ export async function chargeAgentWindow(
 export async function processingHeadroom(
   env: QuotaBinding,
   policy: Policy,
-): Promise<{ ok: true } | { ok: false; counter: "transformations" | "r2_bytes"; retryAfter: number }> {
-  const month = monthWindow();
+): Promise<{ ok: true } | { ok: false; counter: "r2_bytes"; retryAfter: number }> {
   const result = await env.QUOTA.getByName("global").apply([
-    zero(
-      `transformations:${month.key}`,
-      policy.hard_caps.transformations_per_month,
-      month.resetAt,
-      "transformations",
-    ),
     zero("r2_bytes", policy.hard_caps.r2_bytes, null, "r2_bytes"),
   ]);
-  if (!result.ok) return { ok: false, counter: "transformations", retryAfter: result.retry_after };
-  if ((result.remaining.transformations ?? 0) < 2) {
-    return { ok: false, counter: "transformations", retryAfter: secondsUntil(month.resetAt) };
-  }
-  if ((result.remaining.r2_bytes ?? 0) <= 0) return { ok: false, counter: "r2_bytes", retryAfter: 1 };
+  if (!result.ok) return { ok: false, counter: "r2_bytes", retryAfter: result.retry_after };
+  if ((result.remaining.r2_bytes ?? 0) <= 0) return { ok: false, counter: "r2_bytes", retryAfter: NO_RESET_RETRY_SECONDS };
   return { ok: true };
 }
 
-export async function chargeTransformations(
-  env: QuotaBinding,
-  policy: Policy,
-): Promise<{ ok: true; refund: (amount: number) => Promise<void> } | { ok: false; retryAfter: number }> {
-  const month = monthWindow();
-  const key = `transformations:${month.key}`;
-  const quota = env.QUOTA.getByName("global");
-  const result = await quota.apply([{
-    key,
-    amount: 2,
-    limit: policy.hard_caps.transformations_per_month,
-    reset_at: month.resetAt,
-    counter: "transformations",
-  }]);
-  if (!result.ok) return { ok: false, retryAfter: result.retry_after };
-  return { ok: true, refund: (amount: number) => quota.refund([{ key, amount }]) };
-}
-
+// Round-2 audit finding 7: the derivative bytes of one Asset are charged to r2_bytes once, under
+// the marker `r2_charged:<asset id>`, mirroring refundAssetBytes. A queue retry after the charge
+// (for example when the D1 write that marks the Asset ready fails) charges nothing more.
 export async function chargeDerivativeBytes(
   env: QuotaBinding,
   policy: Policy,
+  assetId: string,
   bytes: number,
-): Promise<{ ok: true; refund: () => Promise<void> } | { ok: false; retryAfter: number }> {
-  const charges = [{
+): Promise<{ ok: true } | { ok: false; retryAfter: number }> {
+  const result = await env.QUOTA.getByName("global").chargeOnce(`r2_charged:${assetId}`, [{
     key: "r2_bytes",
     amount: bytes,
     limit: policy.hard_caps.r2_bytes,
     reset_at: null,
     counter: "r2_bytes",
-  }];
-  const result = await env.QUOTA.getByName("global").apply(charges);
+  }]);
   if (!result.ok) return { ok: false, retryAfter: result.retry_after };
-  return { ok: true, refund: () => env.QUOTA.getByName("global").refund(charges) };
+  return { ok: true };
+}
+
+// Round-2 audit finding 6: one queue delivery at a time processes an Asset. The claim lives in the
+// global QUOTA object under `asset_claim:<asset id>`, lasts at most ASSET_CLAIM_MS when a worker
+// dies holding it, and is released when the delivery ends.
+export const ASSET_CLAIM_MS = 120_000;
+
+// Returns the claim time to pass to releaseAsset, or null when another delivery holds the claim.
+export async function claimAsset(env: QuotaBinding, assetId: string): Promise<number | null> {
+  const at = Date.now();
+  return await env.QUOTA.getByName("global").claimAlert(`asset_claim:${assetId}`, ASSET_CLAIM_MS, at) ? at : null;
+}
+
+export async function releaseAsset(env: QuotaBinding, assetId: string, at: number): Promise<void> {
+  await env.QUOTA.getByName("global").releaseClaim(`asset_claim:${assetId}`, at);
+}
+
+// Round-2 audit findings 4 and 5: the bytes an Agent may reserve for upload in one UTC day
+// (`quotas.agent.upload_bytes_per_day`), charged in the Agent's own object when a reservation is
+// made, for the display image and the declared thumbnail. Staged bytes are counted here, whether
+// or not they are later stored.
+export async function chargeUploadBytes(
+  env: QuotaBinding,
+  policy: Policy,
+  agentId: string,
+  bytes: number,
+): Promise<{ ok: true; refund: () => Promise<void> } | { ok: false; retryAfter: number }> {
+  const day = dayWindow();
+  const charges: Charge[] = [
+    {
+      key: `upload_bytes:${day.key}`,
+      amount: bytes,
+      limit: policy.quotas.agent.upload_bytes_per_day,
+      reset_at: day.resetAt,
+      counter: "upload_bytes",
+    },
+    // apply() sweeps every events: and reactions: key it is not given, so the current minute's
+    // counters ride along at zero and survive the charge.
+    ...minuteCharges(policy.quotas.agent, minuteWindow(), null),
+  ];
+  const stub = env.QUOTA.getByName(`agent:${agentId}`);
+  const result = await stub.apply(charges);
+  if (!result.ok) return { ok: false, retryAfter: result.retry_after };
+  return { ok: true, refund: () => stub.refund(charges.filter((charge) => charge.amount > 0)) };
+}
+
+// CT-23: neurons for one scan call, in the `ai` object on a UTC day window.
+export async function chargeScanNeurons(
+  env: QuotaBinding,
+  policy: Policy,
+  neurons: number,
+): Promise<{ ok: true; refund: () => Promise<void> } | { ok: false }> {
+  const raw = (policy as { moderation?: { ai_neurons_per_day?: unknown } }).moderation?.ai_neurons_per_day;
+  const limit = typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 0;
+  const day = dayWindow();
+  const charges = [{
+    key: `neurons:${day.key}`,
+    amount: neurons,
+    limit,
+    reset_at: day.resetAt,
+    counter: "neurons",
+  }];
+  const stub = env.QUOTA.getByName("ai");
+  const result = await stub.apply(charges);
+  if (!result.ok) return { ok: false };
+  return { ok: true, refund: () => stub.refund(charges) };
+}
+
+export async function refundAssetBytes(env: QuotaBinding, assetId: string, bytes: number): Promise<boolean> {
+  return env.QUOTA.getByName("global").refundOnce(`r2_refunded:${assetId}`, [{ key: "r2_bytes", amount: bytes }]);
 }
 
 export function rateLimited(requestId: string, limits: AgentLimits, retryAfter: number): Response {
@@ -450,15 +566,65 @@ function dayWindow(now = new Date()): Window {
   return { key: utcSeconds(start).slice(0, 10), resetAt: utcSeconds(end) };
 }
 
-function monthWindow(now = new Date()): Window {
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-  return { key: utcSeconds(start).slice(0, 7), resetAt: utcSeconds(end) };
-}
+// Round-2 audit finding 14: a cap with no reset (r2_bytes) frees space only when bytes are
+// deleted, so Retry-After is a fixed, documented back-off rather than 1 second.
+export const NO_RESET_RETRY_SECONDS = 3600;
 
 function secondsUntil(resetAt: string | null, now = Date.now()): number {
-  if (resetAt === null) return 1;
+  if (resetAt === null) return NO_RESET_RETRY_SECONDS;
   const seconds = Math.ceil((Date.parse(resetAt) - now) / 1000);
   if (!Number.isFinite(seconds) || seconds < 1) return 1;
   return seconds;
+}
+
+// CT-18 (v0.2.23, fixed in v0.2.25): sign-in limits. Every valid request counts
+// against its own address's hour window, whether or not the address belongs to an
+// Operator. The service-wide day window counts only emails actually sent, so a
+// stranger cannot spend it with unknown addresses.
+export async function chargeSignInAddress(
+  env: QuotaBinding,
+  emailHash: string,
+  perAddressHour: number,
+): Promise<boolean> {
+  const hour = hourWindow();
+  const result = await env.QUOTA.getByName(`email:${emailHash}`).apply([
+    { key: `links:${hour.key}`, amount: 1, limit: perAddressHour, reset_at: hour.resetAt, counter: "links" },
+  ]);
+  return result.ok;
+}
+
+export async function chargeSignInEmail(env: QuotaBinding, perDay: number): Promise<boolean> {
+  const day = dayWindow();
+  const result = await env.QUOTA.getByName("auth").apply([
+    { key: `emails:${day.key}`, amount: 1, limit: perDay, reset_at: day.resetAt, counter: "emails" },
+  ]);
+  return result.ok;
+}
+
+// v0.2.29 (CT-21): appeals a UTC day per Operator, in the Operator's own object.
+export async function chargeOperatorAppeal(
+  env: QuotaBinding,
+  operatorId: string,
+  perDay: number,
+): Promise<{ ok: true; refund: () => Promise<void> } | { ok: false; retryAfter: number }> {
+  const day = dayWindow();
+  const charges = [{ key: `appeals:${day.key}`, amount: 1, limit: perDay, reset_at: day.resetAt, counter: "appeals" }];
+  const stub = env.QUOTA.getByName(`operator:${operatorId}`);
+  const result = await stub.apply(charges);
+  if (!result.ok) return { ok: false, retryAfter: result.retry_after };
+  return { ok: true, refund: () => stub.refund(charges) };
+}
+
+// CT-28 (v0.2.24): a plain counter on one UTC hour window in one named object.
+export async function chargeHour(
+  env: QuotaBinding,
+  name: string,
+  limit: number,
+): Promise<{ ok: true } | { ok: false; retryAfter: number }> {
+  const hour = hourWindow();
+  const result = await env.QUOTA.getByName(name).apply([
+    { key: `requests:${hour.key}`, amount: 1, limit, reset_at: hour.resetAt, counter: "requests" },
+  ]);
+  if (!result.ok) return { ok: false, retryAfter: result.retry_after };
+  return { ok: true };
 }

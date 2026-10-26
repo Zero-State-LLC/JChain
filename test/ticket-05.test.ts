@@ -2,11 +2,19 @@ import { applyD1Migrations, createExecutionContext, createMessageBatch, getQueue
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
-import { VALID_PNG } from "./fixtures/bytes";
+import { VALID_WEBP } from "./fixtures/bytes";
 import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, releaseThread, resetAndSeed } from "./harness";
 
 const MISSING_ID = "01900000-0000-7000-8000-000000000099";
-const HIDDEN_STATES = ["pending_review", "rejected", "hidden", "removal_pending", "removed"] as const;
+const HIDDEN_STATES = [
+  "pending_review",
+  "rejected",
+  "hidden",
+  "flagged",
+  "quarantined",
+  "removal_pending",
+  "removed",
+] as const;
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
@@ -28,7 +36,7 @@ describe("visibility", () => {
       "not_found",
     );
     expect((await call(`/v1/assets/${assetId}/content?variant=display`, { bearer: author.credential })).status).toBe(200);
-    await expectError(await call(`/v1/assets/${assetId}/content?variant=display`), 401, "credential_invalid");
+    await expectError(await call(`/v1/assets/${assetId}/content?variant=display`), 404, "not_found");
 
     const caption = "viz-token-05 caption";
     const opened = await expectSuccess(await openThread(author.credential, threadBody(assetId, {
@@ -85,6 +93,132 @@ describe("visibility", () => {
     await expectError(await call(`/v1/assets/${assetId}/content?variant=display`), 404, "not_found");
   });
 
+  it("conceals a published Reply on every read path while its Opening Post is not published", async () => {
+    const author = await enroll();
+    const replier = await enroll("Bea");
+    const remixer = await enroll("Cy");
+    const openingAsset = await readyAsset(author.credential);
+    const replyAsset = await readyAsset(replier.credential);
+    const tipAsset = await readyAsset(remixer.credential);
+    const opened = await expectSuccess(await openThread(author.credential, threadBody(openingAsset, {
+      title: "viz-opening-05 title",
+      caption: "viz-opening-05 caption",
+    })), 201);
+    const threadId = String(opened.thread_id);
+    const openingId = String(opened.post_id);
+    await act(openingId, "approve");
+
+    const token = "viz-reply-05 leak token";
+    const replied = await expectSuccess(await reply(replier.credential, threadId, {
+      text: token,
+      asset_id: replyAsset,
+      alt_text: "reply square",
+      provenance: { source: "human" },
+      rights_attestation: "I made this.",
+      license: "cc0",
+    }), 201);
+    const replyId = String(replied.post_id);
+    await act(replyId, "approve");
+
+    const tip = await expectSuccess(await openThread(remixer.credential, threadBody(tipAsset, {
+      title: "viz-tip-05 title",
+      caption: "viz-tip-05 caption",
+      remix_of_post_id: replyId,
+    })), 201);
+    const tipThread = String(tip.thread_id);
+    await act(String(tip.post_id), "approve");
+
+    // While the Opening Post is published, the Reply shows everywhere.
+    const tipPosts = await expectSuccess(await call(`/v1/threads/${tipThread}/posts`, { bearer: author.credential }));
+    expect((tipPosts.items as Array<Record<string, unknown>>)[0]?.remix_of_post_id).toBe(replyId);
+    expect(await (await call(`/threads/${tipThread}`)).text()).toContain(token);
+    expect(JSON.stringify(await expectSuccess(await call(`/v1/agents/${replier.agentId}/posts`, {
+      bearer: author.credential,
+    })))).toContain(token);
+    expect((await call(`/v1/assets/${replyAsset}/content?variant=display`)).status).toBe(200);
+    const exported = await expectSuccess(await call("/v1/exports", {
+      email: MODERATOR,
+      body: { board_id: BOARD_ID, purpose: "archive" },
+    }), 201);
+    const exportId = String(exported.export_id);
+    expect(JSON.stringify(await expectSuccess(await call(`/v1/exports/${exportId}`, { email: MODERATOR })))).toContain(token);
+    const visibleEvents = await expectSuccess(await call("/v1/events", { bearer: author.credential }));
+    expect(JSON.stringify(visibleEvents.items)).toContain(replyId);
+    // One counted vote puts the Thread on Trending (the voter must be at least a day old).
+    await env.DB.prepare("UPDATE agents SET created_at = '2020-01-01T00:00:00Z' WHERE id = ?").bind(remixer.agentId).run();
+    await env.DB.prepare(
+      "INSERT INTO votes (post_id, agent_id, value, cast_at) VALUES (?, ?, 1, '2026-01-02T00:00:00Z')",
+    ).bind(openingId, remixer.agentId).run();
+    expect(JSON.stringify(await expectSuccess(await call("/v1/trending", { bearer: author.credential })))).toContain(threadId);
+
+    for (const state of HIDDEN_STATES) {
+      await env.DB.prepare("UPDATE posts SET state = ? WHERE id = ?").bind(state, openingId).run();
+      const agentPosts = await expectSuccess(await call(`/v1/agents/${replier.agentId}/posts`, { bearer: author.credential }));
+      expect(JSON.stringify(agentPosts)).not.toContain(token);
+      expect(JSON.stringify(agentPosts)).not.toContain(replyId);
+      const profile = await call(`/agents/${replier.agentId}`);
+      expect(profile.status).toBe(200);
+      expect(await profile.text()).not.toContain(token);
+      const tipItems = (await expectSuccess(await call(`/v1/threads/${tipThread}/posts`, {
+        bearer: author.credential,
+      }))).items as Array<Record<string, unknown>>;
+      expect(tipItems[0]?.remix_of_post_id).toBeNull();
+      expect(tipItems[0]?.ancestry).toEqual([]);
+      const tipPage = await call(`/threads/${tipThread}`);
+      expect(tipPage.status).toBe(200);
+      const tipHtml = await tipPage.text();
+      expect(tipHtml).toContain("viz-tip-05 caption");
+      expect(tipHtml).not.toContain(token);
+      expect(tipHtml).not.toContain(replyId);
+      await expectError(await call(`/v1/assets/${replyAsset}/content?variant=display`), 404, "not_found");
+      await expectError(
+        await call(`/v1/assets/${replyAsset}/content?variant=display`, { bearer: author.credential }),
+        404,
+        "not_found",
+      );
+      const events = await expectSuccess(await call("/v1/events", { bearer: author.credential }));
+      expect((events.items as Array<{ resource_id: string }>).map((item) => item.resource_id)).not.toContain(replyId);
+      const stored = await expectSuccess(await call(`/v1/exports/${exportId}`, { email: MODERATOR }));
+      expect(JSON.stringify(stored)).not.toContain(token);
+      expect(JSON.stringify(stored)).not.toContain(replyId);
+      const fresh = await expectSuccess(await call("/v1/exports", {
+        email: MODERATOR,
+        body: { board_id: BOARD_ID, purpose: "archive" },
+      }), 201);
+      const freshBody = await expectSuccess(await call(`/v1/exports/${String(fresh.export_id)}`, { email: MODERATOR }));
+      expect(JSON.stringify(freshBody)).not.toContain(token);
+      const trending = await expectSuccess(await call("/v1/trending", { bearer: author.credential }));
+      expect(JSON.stringify(trending)).not.toContain(threadId);
+      expect(await (await call("/trending")).text()).not.toContain("viz-opening-05 title");
+      await expectError(await call(`/v1/posts/${replyId}/reactions/plus`, {
+        method: "PUT",
+        bearer: author.credential,
+        headers: { "idempotency-key": crypto.randomUUID() },
+      }), 404, "not_found");
+      // not_found, never forbidden: the same-Operator vote rule must not reveal a concealed Post.
+      await expectError(await call(`/v1/posts/${replyId}/vote`, {
+        method: "PUT",
+        bearer: author.credential,
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: { value: "up" },
+      }), 404, "not_found");
+      await expectError(await reply(remixer.credential, threadId, { text: "viz-05 blocked reply" }), 404, "not_found");
+    }
+
+    await env.DB.prepare("UPDATE posts SET state = 'published' WHERE id = ?").bind(openingId).run();
+    expect(JSON.stringify(await expectSuccess(await call(`/v1/exports/${exportId}`, { email: MODERATOR })))).toContain(token);
+    expect((await call(`/v1/assets/${replyAsset}/content?variant=display`)).status).toBe(200);
+
+    // A locked Thread with a hidden Opening Post answers not_found, not state_conflict.
+    await expectSuccess(await call("/v1/moderation/actions", {
+      email: MODERATOR,
+      body: { target_type: "thread", target_id: threadId, action: "lock", reason_code: "rules" },
+    }));
+    await expectError(await reply(remixer.credential, threadId, { text: "viz-05 locked reply" }), 409, "state_conflict");
+    await env.DB.prepare("UPDATE posts SET state = 'hidden' WHERE id = ?").bind(openingId).run();
+    await expectError(await reply(remixer.credential, threadId, { text: "viz-05 locked hidden reply" }), 404, "not_found");
+  });
+
   it("lets the owner and a moderator preview a pending reuse of a rejected asset", async () => {
     const author = await enroll();
     const other = await enroll("Bea");
@@ -98,9 +232,9 @@ describe("visibility", () => {
       bearer: author.credential,
       headers: { "idempotency-key": crypto.randomUUID() },
       body: {
-        content_type: "image/png",
-        byte_size: VALID_PNG.byteLength,
-        sha256: await sha256HexBytes(VALID_PNG),
+        content_type: "image/webp",
+        byte_size: VALID_WEBP.byteLength,
+        sha256: await sha256HexBytes(VALID_WEBP),
       },
     }));
     expect(again.deduped).toBe(true);
@@ -154,7 +288,8 @@ describe("visibility", () => {
     const firstItems = first.items as Array<Record<string, unknown>>;
     expect(firstItems).toHaveLength(1);
     expect(firstItems[0]?.title).toBe("Newer board title");
-    expect(Object.keys(firstItems[0] ?? {}).sort()).toEqual(["created_at", "thread_id", "title"]);
+    expect(Object.keys(firstItems[0] ?? {}).sort()).toEqual(["created_at", "pinned", "thread_id", "title"]);
+    expect(firstItems[0]?.pinned).toBe(false);
     expect(typeof first.next_cursor).toBe("string");
 
     const second = await expectSuccess(await call(
@@ -247,7 +382,6 @@ describe("moderation actions", () => {
       caption,
     })), 201);
     const postId = String(opened.post_id);
-    const threadId = String(opened.thread_id);
 
     const pendingQueue = await (await call("/moderation", { email: MODERATOR })).text();
     expect(pendingQueue).toContain(`value="reject"`);
@@ -323,8 +457,9 @@ describe("moderation actions", () => {
 
     const restored = await expectSuccess(await act(hideId, "restore"));
     expect(restored.state).toBe("published");
-    expect(restored.event_id).toBe(approved.event_id);
-    expect(await eventCount(hideId)).toBe(1);
+    expect(restored.event_id).toMatch(UUID_V7);
+    expect(restored.event_id).not.toBe(approved.event_id);
+    expect(await eventCount(hideId)).toBe(3);
     expect(await (await call("/boards/beta")).text()).toContain("Hide title");
     expect(await (await call(`/threads/${String(second.thread_id)}`)).text()).toContain("hide-caption-05");
     await expectError(await act(hideId, "restore"), 409, "state_conflict");
@@ -335,16 +470,19 @@ describe("moderation actions", () => {
     const stayed = await env.DB.prepare("SELECT state FROM posts WHERE id = ?").bind(hideId).first<{ state: string }>();
     expect(stayed?.state).toBe("hidden");
 
+    await env.DB.prepare("UPDATE assets SET state = 'ready' WHERE id = ?").bind(assetId).run();
+    await act(hideId, "restore");
     const replyText = "text-only restore words";
-    const textReply = await expectSuccess(await reply(author.credential, threadId, { text: replyText }), 201);
+    const textReply = await expectSuccess(await reply(author.credential, String(second.thread_id), { text: replyText }), 201);
     const textApproved = await expectSuccess(await act(String(textReply.post_id), "approve"));
     await act(String(textReply.post_id), "hide");
     const textRestored = await expectSuccess(await act(String(textReply.post_id), "restore"));
-    expect(textRestored.event_id).toBe(textApproved.event_id);
-    expect(await eventCount(String(textReply.post_id))).toBe(1);
+    expect(textRestored.event_id).toMatch(UUID_V7);
+    expect(textRestored.event_id).not.toBe(textApproved.event_id);
+    expect(await eventCount(String(textReply.post_id))).toBe(3);
     const feed = await (await call("/boards/beta")).text();
     expect(feed).not.toContain(replyText);
-    const page = await (await call(`/threads/${threadId}`)).text();
+    const page = await (await call(`/threads/${String(second.thread_id)}`)).text();
     expect(page).toContain(replyText);
     expect(page).toContain("<h2>Reply</h2>");
   });
@@ -508,14 +646,14 @@ async function readyAsset(credential: string): Promise<string> {
     bearer: credential,
     headers: { "idempotency-key": crypto.randomUUID() },
     body: {
-      content_type: "image/png",
-      byte_size: VALID_PNG.byteLength,
-      sha256: await sha256HexBytes(VALID_PNG),
+      content_type: "image/webp",
+      byte_size: VALID_WEBP.byteLength,
+      sha256: await sha256HexBytes(VALID_WEBP),
     },
   }), 201);
   await expectSuccess(await call(`/v1/uploads/${String(reserved.asset_id)}/content`, {
     method: "PUT",
-    raw: VALID_PNG,
+    raw: VALID_WEBP,
     headers: {
       "idempotency-key": crypto.randomUUID(),
       "upload-token": String(reserved.upload_token),
@@ -543,52 +681,8 @@ async function settle(assetId: string): Promise<void> {
     body: { asset_id: assetId },
   }]);
   if (!worker.queue) throw new Error("queue handler missing");
-  await worker.queue(batch, scriptedEnv(), ctx);
+  await worker.queue(batch, env, ctx);
   await getQueueResult(batch, ctx);
-}
-
-function scriptedEnv(): Env {
-  const payload = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 1]);
-  const handle = {
-    transform() {
-      return handle;
-    },
-    draw() {
-      return handle;
-    },
-    async output() {
-      return {
-        contentType: () => "image/webp",
-        response: () => new Response(payload),
-        image: () => new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(payload);
-            controller.close();
-          },
-        }),
-      };
-    },
-  };
-  const images = new Proxy(env.IMAGES, {
-    get(target, property, receiver) {
-      if (property === "info") {
-        return async (): Promise<ImageInfoResponse> => ({
-          format: "image/png",
-          fileSize: VALID_PNG.byteLength,
-          width: 1,
-          height: 1,
-        });
-      }
-      if (property === "input") return () => handle;
-      return Reflect.get(target, property, receiver);
-    },
-  });
-  return new Proxy(env, {
-    get(target, property, receiver) {
-      if (property === "IMAGES") return images;
-      return Reflect.get(target, property, receiver);
-    },
-  }) as Env;
 }
 
 async function enroll(name = "Ada"): Promise<{ credential: string; agentId: string }> {

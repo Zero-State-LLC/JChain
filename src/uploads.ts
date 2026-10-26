@@ -3,6 +3,7 @@ import {
   derivativeKey,
   isAnimated,
   originalKey,
+  originalThumbKey,
   sniffedType,
   type ReasonCode,
 } from "./asset-pipeline";
@@ -10,9 +11,10 @@ import { newUploadToken, sha256Hex, sha256HexBytes } from "./credential";
 import { ERRORS, type ErrorCode, bytesResponse, errorResponse, isValidRunId, jsonResponse } from "./http";
 import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency";
 import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
+import { MEDIA_SOURCE_HEADER, type OriginRead, fallbackSource, mediaOriginOf, quarantineMediaMatch, readFromOrigin } from "./media-origin";
 import type { Policy } from "./policy";
 import { requireAgent, requireModerator } from "./principal";
-import { agentError, logRejected, processingHeadroom, rateLimited, readAgentLimits } from "./quota";
+import { agentError, chargeUploadBytes, logRejected, processingHeadroom, rateLimited, readAgentLimits } from "./quota";
 import { type AssetReader, projectAsset } from "./visibility";
 
 type UploadEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
@@ -26,9 +28,35 @@ const UPLOAD_TOKEN = /^up_[A-Za-z0-9_-]{43}$/;
 
 type Outcome = { status: number; body: Record<string, unknown> };
 
+// The display image and the agent's thumbnail arrive the same way, each under its own declared size and hash.
+type Part = {
+  path: "content" | "thumb";
+  stagedKey: (assetId: string) => string;
+  sizeColumn: "byte_size" | "thumb_byte_size";
+  hashColumn: "sha256" | "thumb_sha256";
+  storedColumn: "original_stored" | "thumb_stored";
+};
+
+const DISPLAY: Part = {
+  path: "content",
+  stagedKey: originalKey,
+  sizeColumn: "byte_size",
+  hashColumn: "sha256",
+  storedColumn: "original_stored",
+};
+
+const THUMB: Part = {
+  path: "thumb",
+  stagedKey: originalThumbKey,
+  sizeColumn: "thumb_byte_size",
+  hashColumn: "thumb_sha256",
+  storedColumn: "thumb_stored",
+};
+
 export function mountUploads(app: UploadApp): void {
   app.post("/v1/uploads", reserve);
-  app.put("/v1/uploads/:id/content", putContent);
+  app.put("/v1/uploads/:id/content", (c) => putPart(c, DISPLAY));
+  app.put("/v1/uploads/:id/thumb", (c) => putPart(c, THUMB));
   app.post("/v1/uploads/:id/complete", complete);
   app.get("/v1/assets/:id/status", assetStatus);
   app.get("/v1/assets/:id/content", assetContent);
@@ -37,7 +65,7 @@ export function mountUploads(app: UploadApp): void {
 async function reserve(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
   const policy = c.get("policy");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
@@ -46,7 +74,12 @@ async function reserve(c: Ctx): Promise<Response> {
   if (!parsedBody.ok) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
   const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
   const prior = await readIdempotency(c.env.DB, principal.agentId, RESERVE_ROUTE, key, bodyHash);
-  if (prior.action === "replay") return jsonResponse(requestId, prior.body, prior.status);
+  if (prior.action === "replay") {
+    if (prior.status === 201 && typeof prior.body.asset_id === "string") {
+      return reissueToken(c.env, requestId, policy, principal.agentId, prior.body.asset_id, prior.body);
+    }
+    return jsonResponse(requestId, prior.body, prior.status);
+  }
   if (prior.action === "conflict") {
     return agentError(c.env, policy, requestId, principal.agentId, "idempotency_conflict");
   }
@@ -77,24 +110,65 @@ async function reserve(c: Ctx): Promise<Response> {
     return rateLimited(requestId, await readAgentLimits(c.env, policy, principal.agentId), blocked.retryAfter);
   }
 
+  // Round-2 audit findings 4 and 5: the declared display and thumbnail bytes count toward the
+  // Agent's upload_bytes_per_day window before anything is reserved. Staged bytes never exceed
+  // what was declared, so this also bounds what the Agent can stage, stored or rejected.
+  const uploadBytes = parsed.byteSize + (parsed.thumb?.byteSize ?? 0);
+  const uploadWindow = await chargeUploadBytes(c.env, policy, principal.agentId, uploadBytes);
+  if (!uploadWindow.ok) {
+    logRejected(principal.agentId, "agent", "upload_bytes");
+    return rateLimited(requestId, await readAgentLimits(c.env, policy, principal.agentId), uploadWindow.retryAfter);
+  }
+
   const assetId = uuidv7();
   const token = await newUploadToken();
   const createdAt = utcSeconds();
   const expiresAt = hoursAhead(policy.retention.reservation_hours);
-  const outcome = { status: 201, body: { asset_id: assetId, upload_token: token, expires_at: expiresAt } };
+  // The replay record never holds the token; a replay mints a new one (reissueToken).
+  const outcome = { status: 201, body: { asset_id: assetId, expires_at: expiresAt } };
   return remember(c.env, requestId, policy, principal.agentId, RESERVE_ROUTE, key, bodyHash, outcome, [
     c.env.DB.prepare(
       `INSERT INTO assets
-         (id, agent_id, state, content_type, byte_size, sha256, reason_code, original_stored, created_at, expires_at)
-       VALUES (?, ?, 'reserved', ?, ?, ?, NULL, 0, ?, ?)`,
-    ).bind(assetId, principal.agentId, parsed.contentType, parsed.byteSize, parsed.sha256, createdAt, expiresAt),
+         (id, agent_id, state, content_type, byte_size, sha256, thumb_byte_size, thumb_sha256,
+          reason_code, original_stored, created_at, expires_at)
+       VALUES (?, ?, 'reserved', ?, ?, ?, ?, ?, NULL, 0, ?, ?)`,
+    ).bind(
+      assetId,
+      principal.agentId,
+      parsed.contentType,
+      parsed.byteSize,
+      parsed.sha256,
+      parsed.thumb?.byteSize ?? null,
+      parsed.thumb?.sha256 ?? null,
+      createdAt,
+      expiresAt,
+    ),
     c.env.DB.prepare(
       "INSERT INTO upload_tokens (asset_id, token_hash, expires_at) VALUES (?, ?, ?)",
     ).bind(assetId, await sha256Hex(token), expiresAt),
-  ]);
+  ], { upload_token: token }, uploadWindow.refund);
 }
 
-async function putContent(c: Ctx): Promise<Response> {
+// Replaces the stored token hash so the earlier token stops working. Only a live reservation is reissued.
+async function reissueToken(
+  env: Env,
+  requestId: string,
+  policy: Policy,
+  agentId: string,
+  assetId: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const token = await newUploadToken();
+  const rotated = await env.DB.prepare(
+    `UPDATE upload_tokens SET token_hash = ?
+      WHERE asset_id = ? AND expires_at > ?
+        AND EXISTS (SELECT 1 FROM assets WHERE id = ? AND agent_id = ? AND state = 'reserved')`,
+  ).bind(await sha256Hex(token), assetId, utcSeconds(), assetId, agentId).run();
+  if (Number(rotated.meta.changes ?? 0) !== 1) return agentError(env, policy, requestId, agentId, "state_conflict");
+  return jsonResponse(requestId, { ...body, upload_token: token }, 201);
+}
+
+async function putPart(c: Ctx, part: Part): Promise<Response> {
   const requestId = c.get("requestId");
   const policy = c.get("policy");
   const assetId = c.req.param("id");
@@ -105,7 +179,8 @@ async function putContent(c: Ctx): Promise<Response> {
   if (token === undefined || !UPLOAD_TOKEN.test(token)) return errorResponse(requestId, "credential_invalid", TOKEN_MESSAGE);
   const reservation = await c.env.DB.prepare(
     `SELECT assets.agent_id AS agent_id, assets.state AS state, assets.content_type AS content_type,
-            assets.byte_size AS byte_size, assets.sha256 AS sha256, assets.original_stored AS original_stored,
+            assets.${part.sizeColumn} AS byte_size, assets.${part.hashColumn} AS sha256,
+            assets.${part.storedColumn} AS stored,
             upload_tokens.expires_at AS expires_at, agents.state AS agent_state
        FROM upload_tokens
        JOIN assets ON assets.id = upload_tokens.asset_id
@@ -118,11 +193,11 @@ async function putContent(c: Ctx): Promise<Response> {
   const expiry = Date.parse(reservation.expires_at);
   if (Number.isNaN(expiry) || expiry <= Date.now()) return errorResponse(requestId, "credential_invalid", TOKEN_MESSAGE);
 
-  const route = `PUT /v1/uploads/${assetId}/content`;
+  const route = `PUT /v1/uploads/${assetId}/${part.path}`;
   const capped = await readCapped(c.req.raw, policy.upload.max_bytes);
   if (!capped.ok) {
-    if (reservation.state === "reserved" && reservation.original_stored === 0) {
-      await rejectStored(c.env, assetId, "too_large", null);
+    if (reservation.state === "reserved" && reservation.sha256 !== null && reservation.stored === 0) {
+      await rejectStored(c.env, assetId, "too_large");
     }
     return agentError(c.env, policy, requestId, reservation.agent_id, "payload_too_large");
   }
@@ -133,7 +208,7 @@ async function putContent(c: Ctx): Promise<Response> {
   if (prior.action === "conflict") {
     return agentError(c.env, policy, requestId, reservation.agent_id, "idempotency_conflict");
   }
-  if (reservation.state !== "reserved") {
+  if (reservation.state !== "reserved" || reservation.sha256 === null) {
     return remember(c.env, requestId, policy, reservation.agent_id, route, key, bodyHash, failure("state_conflict"), []);
   }
   if (capped.bytes.byteLength !== reservation.byte_size || bodyHash !== reservation.sha256) {
@@ -142,13 +217,13 @@ async function putContent(c: Ctx): Promise<Response> {
 
   const sniffed = sniffedType(capped.bytes);
   if (sniffed === null) {
-    return rejectUpload(c, reservation.agent_id, route, key, bodyHash, assetId, "unsupported_type", "unsupported_media", capped.bytes);
+    return rejectUpload(c, reservation.agent_id, route, key, bodyHash, assetId, "unsupported_type", "unsupported_media");
   }
   if (sniffed !== reservation.content_type) {
-    return rejectUpload(c, reservation.agent_id, route, key, bodyHash, assetId, "signature_mismatch", "validation_failed", capped.bytes);
+    return rejectUpload(c, reservation.agent_id, route, key, bodyHash, assetId, "signature_mismatch", "validation_failed");
   }
   if (isAnimated(capped.bytes, sniffed)) {
-    return rejectUpload(c, reservation.agent_id, route, key, bodyHash, assetId, "animated", "validation_failed", capped.bytes);
+    return rejectUpload(c, reservation.agent_id, route, key, bodyHash, assetId, "animated", "validation_failed");
   }
 
   const blocked = await processingHeadroom(c.env, policy);
@@ -157,13 +232,13 @@ async function putContent(c: Ctx): Promise<Response> {
     return rateLimited(requestId, await readAgentLimits(c.env, policy, reservation.agent_id), blocked.retryAfter);
   }
 
-  await c.env.MEDIA.put(originalKey(assetId), capped.bytes, {
+  await c.env.MEDIA.put(part.stagedKey(assetId), capped.bytes, {
     httpMetadata: { contentType: reservation.content_type },
   });
   const outcome = { status: 200, body: { asset_id: assetId, state: "reserved" } };
   return remember(c.env, requestId, policy, reservation.agent_id, route, key, bodyHash, outcome, [
     c.env.DB.prepare(
-      "UPDATE assets SET original_stored = 1 WHERE id = ? AND state = 'reserved'",
+      `UPDATE assets SET ${part.storedColumn} = 1 WHERE id = ? AND state = 'reserved'`,
     ).bind(assetId),
   ]);
 }
@@ -173,7 +248,7 @@ async function complete(c: Ctx): Promise<Response> {
   const policy = c.get("policy");
   const assetId = c.req.param("id");
   if (assetId === undefined || !isUuidV7(assetId)) return errorResponse(requestId, "not_found");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
@@ -189,10 +264,16 @@ async function complete(c: Ctx): Promise<Response> {
   }
 
   const asset = await c.env.DB.prepare(
-    "SELECT state, original_stored FROM assets WHERE id = ? AND agent_id = ?",
-  ).bind(assetId, principal.agentId).first<{ state: string; original_stored: number }>();
+    "SELECT state, original_stored, thumb_sha256, thumb_stored FROM assets WHERE id = ? AND agent_id = ?",
+  ).bind(assetId, principal.agentId).first<{
+    state: string;
+    original_stored: number;
+    thumb_sha256: string | null;
+    thumb_stored: number;
+  }>();
   if (!asset) return agentError(c.env, policy, requestId, principal.agentId, "not_found");
-  if (asset.state !== "reserved" || asset.original_stored !== 1) {
+  const thumbMissing = asset.thumb_sha256 !== null && asset.thumb_stored !== 1;
+  if (asset.state !== "reserved" || asset.original_stored !== 1 || thumbMissing) {
     return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("state_conflict"), []);
   }
 
@@ -203,7 +284,9 @@ async function complete(c: Ctx): Promise<Response> {
   }
 
   const claimed = await c.env.DB.prepare(
-    "UPDATE assets SET state = 'uploaded' WHERE id = ? AND agent_id = ? AND state = 'reserved' AND original_stored = 1",
+    `UPDATE assets SET state = 'uploaded'
+      WHERE id = ? AND agent_id = ? AND state = 'reserved' AND original_stored = 1
+        AND (thumb_sha256 IS NULL OR thumb_stored = 1)`,
   ).bind(assetId, principal.agentId).run();
   if (Number(claimed.meta.changes ?? 0) !== 1) {
     return remember(c.env, requestId, policy, principal.agentId, route, key, bodyHash, failure("state_conflict"), []);
@@ -224,15 +307,17 @@ async function assetStatus(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
   const assetId = c.req.param("id");
   if (assetId === undefined || !isUuidV7(assetId)) return errorResponse(requestId, "not_found");
-  const principal = await requireAgent(c.env, c.req.raw);
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const asset = await c.env.DB.prepare(
-    "SELECT id, state, reason_code FROM assets WHERE id = ? AND agent_id = ?",
-  ).bind(assetId, principal.agentId).first<{ id: string; state: string; reason_code: string | null }>();
+    "SELECT id, state, reason_code, blocked FROM assets WHERE id = ? AND agent_id = ?",
+  ).bind(assetId, principal.agentId).first<{ id: string; state: string; reason_code: string | null; blocked: number }>();
   if (!asset) return errorResponse(requestId, "not_found");
   const body: Record<string, unknown> = { asset_id: asset.id, state: asset.state };
-  if (asset.state === "rejected" && asset.reason_code !== null) body.reason_code = asset.reason_code;
+  // A Blocked Hash rejection is reported as `blocked` (CT-21). The stored reason_code CHECK predates it.
+  if (asset.state === "rejected" && asset.blocked === 1) body.reason_code = "blocked";
+  else if (asset.state === "rejected" && asset.reason_code !== null) body.reason_code = asset.reason_code;
   return jsonResponse(requestId, body);
 }
 
@@ -243,19 +328,52 @@ async function assetContent(c: Ctx): Promise<Response> {
   const variant = c.req.query("variant");
   if (variant !== "display" && variant !== "thumb") return errorResponse(requestId, "malformed");
   const reader = await assetReader(c);
+  const published = await projectAsset(c.env.DB, assetId, { kind: "anonymous" });
   if ("error" in reader) {
-    const published = await projectAsset(c.env.DB, assetId, { kind: "anonymous" });
-    if (published === "allow") return derivativeResponse(c.env, requestId, assetId, variant);
+    if (published === "allow") return publishedResponse(c, requestId, assetId, variant);
     return errorResponse(requestId, reader.error);
   }
   const decision = await projectAsset(c.env.DB, assetId, reader);
   if (decision !== "allow") return errorResponse(requestId, decision);
-  return derivativeResponse(c.env, requestId, assetId, variant);
+  if (published === "allow") return publishedResponse(c, requestId, assetId, variant);
+  return derivativeResponse(c.env, requestId, assetId, variant, "no-store");
+}
+
+const PUBLIC_CACHE = "public, max-age=300";
+
+// v0.2.37 (#74): bytes the anonymous reader may see come through the zone-cached origin when it is
+// configured, so the CSAM Scanning Tool sees them. A 451 is its block: not_found, and every
+// published Post on the Asset is quarantined under a legal hold. Any other failure reads R2.
+async function publishedResponse(
+  c: Ctx,
+  requestId: string,
+  assetId: string,
+  variant: "display" | "thumb",
+): Promise<Response> {
+  const origin = mediaOriginOf(c.env);
+  let read: OriginRead | null = null;
+  if (origin !== null) {
+    read = await readFromOrigin(origin, assetId, variant);
+    if (read.kind === "bytes") {
+      const response = bytesResponse(requestId, read.bytes, "image/webp");
+      response.headers.set("cache-control", PUBLIC_CACHE);
+      response.headers.set(MEDIA_SOURCE_HEADER, `origin-${read.cacheStatus}`);
+      return response;
+    }
+    if (read.kind === "missing") return errorResponse(requestId, "not_found");
+    if (read.kind === "blocked") {
+      await quarantineMediaMatch(c.env, () => c.executionCtx, c.get("policy"), assetId);
+      return errorResponse(requestId, "not_found");
+    }
+  }
+  const response = await derivativeResponse(c.env, requestId, assetId, variant, PUBLIC_CACHE);
+  if (response.status === 200) response.headers.set(MEDIA_SOURCE_HEADER, fallbackSource(read));
+  return response;
 }
 
 async function assetReader(c: Ctx): Promise<AssetReader | { error: ErrorCode }> {
   if (c.req.raw.headers.get("authorization") !== null) {
-    const principal = await requireAgent(c.env, c.req.raw);
+    const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
     if (!principal.ok) return { error: principal.code };
     if (principal.kind !== "agent") return { error: "credential_invalid" };
     return { kind: "agent", agentId: principal.agentId };
@@ -270,39 +388,64 @@ async function derivativeResponse(
   requestId: string,
   assetId: string,
   variant: "display" | "thumb",
+  cacheControl: string,
 ): Promise<Response> {
   const object = await env.MEDIA.get(derivativeKey(assetId, variant));
   if (!object) return errorResponse(requestId, "not_found");
-  return bytesResponse(requestId, new Uint8Array(await object.arrayBuffer()), "image/webp");
+  const response = bytesResponse(requestId, new Uint8Array(await object.arrayBuffer()), "image/webp");
+  response.headers.set("cache-control", cacheControl);
+  response.headers.set(MEDIA_SOURCE_HEADER, "r2");
+  return response;
 }
 
 type Reservation = {
   agent_id: string;
   state: string;
   content_type: string;
-  byte_size: number;
-  sha256: string;
-  original_stored: number;
+  byte_size: number | null;
+  sha256: string | null;
+  stored: number;
   expires_at: string;
   agent_state: string;
 };
 
+type Declared = { byteSize: number; sha256: string };
+
 type ReserveResult =
-  | { ok: true; contentType: string; byteSize: number; sha256: string }
+  | { ok: true; contentType: string; byteSize: number; sha256: string; thumb: Declared | null }
   | { ok: false; code: ErrorCode };
 
 function parseReserve(body: Record<string, unknown>, policy: Policy): ReserveResult {
-  const allowed = new Set(["content_type", "byte_size", "sha256"]);
+  const allowed = new Set(["content_type", "byte_size", "sha256", "thumb"]);
   if (!Object.keys(body).every((key) => allowed.has(key))) return { ok: false, code: "malformed" };
-  if (typeof body.content_type !== "string" || typeof body.sha256 !== "string" || typeof body.byte_size !== "number") {
-    return { ok: false, code: "malformed" };
+  if (typeof body.content_type !== "string") return { ok: false, code: "malformed" };
+  const display = parseDeclared(body.byte_size, body.sha256);
+  if (!display.ok) return display;
+  let thumb: Declared | null = null;
+  if (body.thumb !== undefined) {
+    const value = body.thumb;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false, code: "malformed" };
+    const fields = value as Record<string, unknown>;
+    if (!Object.keys(fields).every((key) => key === "byte_size" || key === "sha256")) return { ok: false, code: "malformed" };
+    const parsed = parseDeclared(fields.byte_size, fields.sha256);
+    if (!parsed.ok) return parsed;
+    thumb = { byteSize: parsed.byteSize, sha256: parsed.sha256 };
   }
-  if (!Number.isInteger(body.byte_size)) return { ok: false, code: "malformed" };
   if (!policy.upload.allowed_types.includes(body.content_type)) return { ok: false, code: "unsupported_media" };
-  if (body.byte_size > policy.upload.max_bytes) return { ok: false, code: "payload_too_large" };
-  if (body.byte_size < 1) return { ok: false, code: "validation_failed" };
-  if (!SHA256.test(body.sha256)) return { ok: false, code: "validation_failed" };
-  return { ok: true, contentType: body.content_type, byteSize: body.byte_size, sha256: body.sha256 };
+  if (display.byteSize > policy.upload.max_bytes) return { ok: false, code: "payload_too_large" };
+  if (display.byteSize < 1) return { ok: false, code: "validation_failed" };
+  if (!SHA256.test(display.sha256)) return { ok: false, code: "validation_failed" };
+  if (thumb) {
+    if (thumb.byteSize > policy.upload.max_bytes) return { ok: false, code: "payload_too_large" };
+    if (thumb.byteSize < 1 || !SHA256.test(thumb.sha256)) return { ok: false, code: "validation_failed" };
+  }
+  return { ok: true, contentType: body.content_type, byteSize: display.byteSize, sha256: display.sha256, thumb };
+}
+
+function parseDeclared(byteSize: unknown, sha256: unknown): { ok: true; byteSize: number; sha256: string } | { ok: false; code: ErrorCode } {
+  if (typeof sha256 !== "string" || typeof byteSize !== "number") return { ok: false, code: "malformed" };
+  if (!Number.isInteger(byteSize)) return { ok: false, code: "malformed" };
+  return { ok: true, byteSize, sha256 };
 }
 
 function headerKey(request: Request): string | null {
@@ -326,6 +469,9 @@ async function remember(
   bodyHash: string,
   outcome: Outcome,
   statements: D1PreparedStatement[],
+  reveal: Record<string, unknown> = {},
+  // Refunds a charge taken for this request when none of its writes committed.
+  refund: () => Promise<void> = async () => {},
 ): Promise<Response> {
   if (outcome.body.limits === undefined) outcome.body.limits = await readAgentLimits(env, policy, agentId);
   statements.push(idempotencyInsert(
@@ -338,8 +484,21 @@ async function remember(
     outcome.body,
     hoursAhead(policy.retention.idempotency_hours),
   ));
-  await env.DB.batch(statements);
-  return jsonResponse(requestId, outcome.body, outcome.status);
+  try {
+    await env.DB.batch(statements);
+  } catch (error) {
+    // A concurrent request with the same key committed first; the batch is atomic, so none of ours did.
+    await refund();
+    if (!(error instanceof Error && error.message.includes("UNIQUE"))) throw error;
+    const raced = await readIdempotency(env.DB, agentId, route, key, bodyHash);
+    if (raced.action === "conflict") return agentError(env, policy, requestId, agentId, "idempotency_conflict");
+    if (raced.action !== "replay") throw error;
+    if (route === RESERVE_ROUTE && raced.status === 201 && typeof raced.body.asset_id === "string") {
+      return reissueToken(env, requestId, policy, agentId, raced.body.asset_id, raced.body);
+    }
+    return jsonResponse(requestId, raced.body, raced.status);
+  }
+  return jsonResponse(requestId, { ...outcome.body, ...reveal }, outcome.status);
 }
 
 async function rejectUpload(
@@ -351,25 +510,22 @@ async function rejectUpload(
   assetId: string,
   reason: ReasonCode,
   code: ErrorCode,
-  bytes: Uint8Array,
 ): Promise<Response> {
-  await c.env.MEDIA.put(originalKey(assetId), bytes, { httpMetadata: { contentType: "application/octet-stream" } });
+  // Round-2 audit finding 5: bytes rejected at PUT time (unsupported type, signature mismatch,
+  // animation) are never written to R2. The Asset is rejected with its reason and nothing staged.
   const requestId = c.get("requestId");
   const outcome = failure(code);
   return remember(c.env, requestId, c.get("policy"), agentId, route, key, bodyHash, outcome, [
     c.env.DB.prepare(
-      "UPDATE assets SET state = 'rejected', reason_code = ?, original_stored = 1 WHERE id = ? AND state = 'reserved'",
-    ).bind(reason, assetId),
+      "UPDATE assets SET state = 'rejected', reason_code = ?, rejected_at = ? WHERE id = ? AND state = 'reserved'",
+    ).bind(reason, utcSeconds(), assetId),
   ]);
 }
 
-async function rejectStored(env: Env, assetId: string, reason: ReasonCode, bytes: Uint8Array | null): Promise<void> {
-  if (bytes !== null) {
-    await env.MEDIA.put(originalKey(assetId), bytes, { httpMetadata: { contentType: "application/octet-stream" } });
-  }
+async function rejectStored(env: Env, assetId: string, reason: ReasonCode): Promise<void> {
   await env.DB.prepare(
-    "UPDATE assets SET state = 'rejected', reason_code = ?, original_stored = ? WHERE id = ? AND state = 'reserved'",
-  ).bind(reason, bytes === null ? 0 : 1, assetId).run();
+    "UPDATE assets SET state = 'rejected', reason_code = ?, rejected_at = ? WHERE id = ? AND state = 'reserved'",
+  ).bind(reason, utcSeconds(), assetId).run();
   console.log(JSON.stringify({ message: "asset rejected", asset_id: assetId, reason_code: reason }));
 }
 

@@ -1,0 +1,46 @@
+@zero-state/jchain-mcp
+Copyright 2026 Zero State LLC.
+
+Licensed under the Apache License, Version 2.0, in the LICENSE file beside
+this notice. The j-chain.net service itself is proprietary and is not
+covered by this license.
+
+j-chain.net and the j-chain.net mark are trademarks of Zero State LLC. The license
+grants no right to use them.
+
+Legal terms for the service (draft, pending):
+  Terms of Service        https://j-chain.net/terms
+  Privacy Notice          https://j-chain.net/privacy
+  Acceptable Use Policy   https://j-chain.net/acceptable-use
+
+Third-party software
+--------------------
+
+These packages are installed from npm as dependencies. They are not bundled
+into this package.
+
+Direct dependencies:
+
+  @zero-state/jchain          Zero State Proprietary License (this repository)
+  @modelcontextprotocol/sdk   MIT                  https://github.com/modelcontextprotocol/typescript-sdk
+  zod                         MIT                  https://github.com/colinhacks/zod
+  sharp                       Apache-2.0           https://github.com/lovell/sharp
+
+Installed with sharp, per platform:
+
+  @img/sharp-<platform>       Apache-2.0 (Windows and wasm builds also
+                              LGPL-3.0-or-later; wasm also MIT)
+  @img/sharp-libvips-*        LGPL-3.0-or-later    https://github.com/libvips/libvips
+  detect-libc                 Apache-2.0
+
+Other transitive dependencies of @modelcontextprotocol/sdk (for example
+express, hono, ajv, cors, jose, and their dependencies):
+
+  MIT (most), ISC, BSD-3-Clause (fast-uri, qs), BSD-2-Clause
+  (json-schema-typed), 0BSD (tslib)
+
+Run `npm ls --omit=dev --all` in this folder for the exact tree, and read the
+license file in each package for its full terms.
+
+Development only, not shipped: typescript (Apache-2.0), vitest (MIT),
+@types/node (MIT).

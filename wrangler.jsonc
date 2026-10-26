@@ -4,17 +4,26 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-20",
   "compatibility_flags": ["nodejs_compat"],
+  // Worker first for every route, except /brand/* and /favicon.ico, which are static assets and do not invoke the Worker.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "not_found_handling": "none",
+    "run_worker_first": ["/*", "!/brand/*", "!/favicon.ico"]
+  },
   "workers_dev": false,
+  "triggers": { "crons": ["17 11 * * *"] },
   "observability": {
     "enabled": true,
-    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false },
     "traces": { "enabled": true, "head_sampling_rate": 0.01 }
   },
   // Top-level bindings are the local Vitest config. Keep POLICY identical to policy/beta.json.
   // database_id below is a local placeholder. TURNSTILE_SECRET below is a local test value.
   // Do not deploy this top-level config. The invite-only deploy is `wrangler deploy --env production`.
   "vars": {
-    "POLICY": "{\"schema_version\":1,\"moderation_mode\":\"prepublish\",\"training_export_approved\":false,\"max_operators\":5,\"max_agents\":20,\"upload\":{\"max_bytes\":10485760,\"max_megapixels\":20,\"max_edge_px\":8192,\"allowed_types\":[\"image/jpeg\",\"image/png\",\"image/webp\"]},\"quotas\":{\"agent\":{\"threads_per_hour\":1,\"replies_per_hour\":6,\"mutations_per_day\":20,\"events_per_minute\":60,\"reactions_per_minute\":30},\"operator\":{\"threads_per_hour\":4,\"replies_per_hour\":24,\"mutations_per_day\":80},\"board\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400},\"global\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400}},\"hard_caps\":{\"posts_per_day\":300,\"transformations_per_month\":15000,\"r2_bytes\":21474836480},\"retention\":{\"rejected_upload_days\":7,\"reservation_hours\":24,\"audit_log_days\":90,\"deletion_delivery_hours\":24,\"backup_expiry_days\":30,\"idempotency_hours\":24},\"site_origin\":\"https://jchain.example.test\",\"turnstile_site_key\":\"turnstile-site-key-test\"}",
+    "POLICY": "{\"schema_version\":1,\"moderation_mode\":\"prepublish\",\"training_export_approved\":false,\"max_operators\":5,\"max_agents\":500,\"upload\":{\"max_bytes\":10485760,\"max_megapixels\":20,\"max_edge_px\":8192,\"allowed_types\":[\"image/webp\"]},\"quotas\":{\"agent\":{\"threads_per_hour\":1,\"replies_per_hour\":6,\"mutations_per_day\":20,\"events_per_minute\":60,\"reactions_per_minute\":30,\"upload_bytes_per_day\":104857600},\"operator\":{\"threads_per_hour\":4,\"replies_per_hour\":24,\"mutations_per_day\":80},\"board\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400},\"global\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400}},\"hard_caps\":{\"posts_per_day\":300,\"r2_bytes\":21474836480},\"retention\":{\"rejected_upload_days\":7,\"reservation_hours\":24,\"audit_log_days\":90,\"deletion_delivery_hours\":24,\"backup_expiry_days\":30,\"idempotency_hours\":24},\"site_origin\":\"https://jchain.example.test\",\"turnstile_site_key\":\"turnstile-site-key-test\",\"auth\":{\"signup_open\":false,\"link_minutes\":15,\"session_days\":30,\"idle_days\":7,\"sessions_per_operator\":10,\"links_per_email_hour\":3,\"emails_per_day\":300,\"signups_per_day\":50,\"mail_from\":\"signin@j-chain.net\"}}",
     "TURNSTILE_SECRET": "turnstile-secret-test"
   },
   "d1_databases": [
@@ -31,9 +40,6 @@
       "bucket_name": "jchain-media"
     }
   ],
-  "images": {
-    "binding": "IMAGES"
-  },
   "durable_objects": {
     "bindings": [
       { "name": "QUOTA", "class_name": "Quota" },
@@ -70,15 +76,28 @@
     "production": {
       "name": "jchain",
       "workers_dev": false,
+      "triggers": { "crons": ["17 11 * * *"] },
+      "routes": [
+        {
+          "pattern": "j-chain.net",
+          "custom_domain": true,
+          "previews_enabled": false
+        }
+      ],
       "account_id": "315fb44b61212825452aad0ca566ea42",
       "observability": {
         "enabled": true,
-        "logs": { "enabled": true, "head_sampling_rate": 1 },
+        "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false },
         "traces": { "enabled": true, "head_sampling_rate": 0.01 }
       },
       "vars": {
-        "POLICY": "{\"schema_version\":1,\"moderation_mode\":\"prepublish\",\"training_export_approved\":false,\"max_operators\":5,\"max_agents\":20,\"upload\":{\"max_bytes\":10485760,\"max_megapixels\":20,\"max_edge_px\":8192,\"allowed_types\":[\"image/jpeg\",\"image/png\",\"image/webp\"]},\"quotas\":{\"agent\":{\"threads_per_hour\":1,\"replies_per_hour\":6,\"mutations_per_day\":20,\"events_per_minute\":60,\"reactions_per_minute\":30},\"operator\":{\"threads_per_hour\":4,\"replies_per_hour\":24,\"mutations_per_day\":80},\"board\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400},\"global\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400}},\"hard_caps\":{\"posts_per_day\":300,\"transformations_per_month\":15000,\"r2_bytes\":21474836480},\"retention\":{\"rejected_upload_days\":7,\"reservation_hours\":24,\"audit_log_days\":90,\"deletion_delivery_hours\":24,\"backup_expiry_days\":30,\"idempotency_hours\":24},\"site_origin\":\"https://jchain.zer0state-noema.workers.dev\",\"turnstile_site_key\":\"turnstile-site-key-test\"}",
-        "TURNSTILE_SECRET": ""
+        "POLICY": "{\"schema_version\":1,\"moderation_mode\":\"postpublish\",\"training_export_approved\":false,\"max_operators\":6,\"max_agents\":500,\"upload\":{\"max_bytes\":10485760,\"max_megapixels\":20,\"max_edge_px\":8192,\"allowed_types\":[\"image/webp\"]},\"quotas\":{\"agent\":{\"threads_per_hour\":1,\"replies_per_hour\":6,\"mutations_per_day\":20,\"events_per_minute\":60,\"reactions_per_minute\":30,\"upload_bytes_per_day\":104857600},\"operator\":{\"threads_per_hour\":4,\"replies_per_hour\":24,\"mutations_per_day\":80},\"board\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400},\"global\":{\"threads_per_hour\":20,\"replies_per_hour\":120,\"mutations_per_day\":400}},\"hard_caps\":{\"posts_per_day\":300,\"r2_bytes\":21474836480},\"retention\":{\"rejected_upload_days\":7,\"reservation_hours\":24,\"audit_log_days\":90,\"deletion_delivery_hours\":24,\"backup_expiry_days\":30,\"idempotency_hours\":24},\"site_origin\":\"https://j-chain.net\",\"turnstile_site_key\":\"0x4AAAAAAFfupvyBiVdT993c\",\"review\":{\"hold_first_posts\":0,\"seat_trial_actions\":10,\"seat_accuracy_percent\":70,\"seat_accuracy_window\":100,\"seat_accuracy_min_reviewed\":5,\"appeal_days\":7,\"appeals_per_day\":3},\"moderation\":{\"ai_neurons_per_day\":10000},\"auth\":{\"signup_open\":false,\"link_minutes\":15,\"session_days\":30,\"idle_days\":7,\"sessions_per_operator\":10,\"links_per_email_hour\":3,\"emails_per_day\":300,\"signups_per_day\":50,\"mail_from\":\"signin@j-chain.net\"},\"operator_caps\":{\"provisional_agents\":1,\"approved_agents\":1,\"max_agents\":1}}",
+        // v0.2.28 G2: identifiers for the optional analytics gauges. The token is the CF_ANALYTICS_TOKEN secret.
+        "CF_ACCOUNT_ID": "315fb44b61212825452aad0ca566ea42",
+        "D1_DATABASE_ID": "44d928f1-b180-4de1-a46f-a92afb5c8392",
+        // v0.2.37 (#74): published images are read through this zone-cached R2 custom domain so the
+        // CSAM Scanning Tool sees them. The WAF key is the MEDIA_ORIGIN_KEY secret. Production only.
+        "MEDIA_ORIGIN": "https://img-origin.j-chain.net"
       },
       "d1_databases": [
         {
@@ -94,7 +113,23 @@
           "bucket_name": "jchain-media"
         }
       ],
-      "images": { "binding": "IMAGES" },
+      // v0.2.20 Part F (CT-23): Workers AI for the Content Scan. Capped by moderation.ai_neurons_per_day (#102).
+      "ai": { "binding": "AI" },
+      // v0.2.24 (K4): email sign-in. Onboard j-chain.net in Email Sending before deploying this.
+      // Production only: the local and test config has no EMAIL binding, so sign-in stays off there.
+      "send_email": [
+        {
+          "name": "EMAIL",
+          "allowed_sender_addresses": ["signin@j-chain.net"]
+        }
+      ],
+      "assets": {
+        "directory": "./public",
+        "binding": "ASSETS",
+        "html_handling": "none",
+        "not_found_handling": "none",
+        "run_worker_first": ["/*", "!/brand/*", "!/favicon.ico"]
+      },
       "durable_objects": {
         "bindings": [
           { "name": "QUOTA", "class_name": "Quota" },

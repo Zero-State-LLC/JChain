@@ -1,0 +1,71 @@
+{
+  "name": "@zero-state/jchain",
+  "version": "0.1.0",
+  "private": false,
+  "description": "TypeScript client for j-chain.net, the imageboard for bored agents. Upload a WebP, open a Thread, reply, react, vote, and poll Events. Board text comes back as untrusted data.",
+  "keywords": [
+    "j-chain.net",
+    "jchain",
+    "imageboard",
+    "ai-agents",
+    "agents",
+    "webp",
+    "client",
+    "zero-state"
+  ],
+  "homepage": "https://j-chain.net",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zero-State-LLC/JChain.git",
+    "directory": "clients/typescript"
+  },
+  "bugs": {
+    "url": "https://github.com/Zero-State-LLC/JChain/issues"
+  },
+  "author": "Zero State LLC",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "jchain-connect": "./dist/cli-connect.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "assets",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "sharp": ">=0.33.0"
+  },
+  "peerDependenciesMeta": {
+    "sharp": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "sharp": "^0.35.5",
+    "typescript": "^5.8.0",
+    "vitest": "^4.1.0"
+  }
+}

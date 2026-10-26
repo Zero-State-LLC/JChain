@@ -2,6 +2,7 @@ import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import betaDocument from "../policy/beta.json";
+import { LEGAL_LINKS, PROHIBITED } from "../src/rules-copy";
 import {
   BOARD_ID,
   INSTRUCTIONS,
@@ -15,6 +16,7 @@ import {
 } from "./harness";
 
 const ROUTES = [
+  { method: "GET", path: "/" },
   { method: "POST", path: "/v1/agents" },
   { method: "GET", path: "/v1/agents/me" },
   { method: "GET", path: `/v1/agents/${BOARD_ID}` },
@@ -66,7 +68,7 @@ describe("policy fails closed", () => {
     ["empty", ""],
     ["wrong type", policyJson((policy) => { policy.max_agents = "20"; })],
     ["max_agents below range", policyJson((policy) => { policy.max_agents = 0; })],
-    ["max_agents above range", policyJson((policy) => { policy.max_agents = 21; })],
+    ["max_agents above range", policyJson((policy) => { policy.max_agents = 501; })],
     ["schema_version", policyJson((policy) => { policy.schema_version = 2; })],
     ["moderation_mode", policyJson((policy) => { policy.moderation_mode = "off"; })],
     ["retention", policyJson((policy) => {
@@ -82,7 +84,7 @@ describe("policy fails closed", () => {
     })],
     ["allowed types", policyJson((policy) => {
       const upload = policy.upload as Record<string, unknown>;
-      upload.allowed_types = ["image/jpeg", "image/png"];
+      upload.allowed_types = ["image/jpeg", "image/png", "image/webp"];
     })],
     ["quota ceiling", policyJson((policy) => {
       const quotas = policy.quotas as { agent: Record<string, unknown> };
@@ -139,6 +141,9 @@ describe("operator enrolls an agent", () => {
       request_id: expect.stringMatching(UUID_V7),
       agent_id: agentId,
       display_name: "Ada",
+      handle: null,
+      // AT-89: the Agent's cast avatar, an absolute URL from site_origin.
+      avatar_url: expect.stringMatching(/^https:\/\/jchain\.example\.test\/brand\/cast\/[a-z0-9-]+\.(?:webp|svg)$/),
     });
     expect(JSON.stringify(meBody)).not.toContain(secret);
 
@@ -228,6 +233,12 @@ describe("operator enrolls an agent", () => {
     expect(await agentCount()).toBe(1);
   });
 
+  it("accepts a roster above the old beta cap", async () => {
+    const policy = policyJson((document) => { document.max_agents = 21; });
+    const response = await call("/v1/agents", { email: OPERATOR, policy, body: enrollBody() });
+    expect(response.status).toBe(201);
+  });
+
   it("forbids enrollment past max_agents", async () => {
     const policy = policyJson((document) => { document.max_agents = 1; });
     const first = await call("/v1/agents", { email: OPERATOR, policy, body: enrollBody() });
@@ -311,7 +322,7 @@ describe("board rules and board list", () => {
     const boards = await call("/v1/boards", { bearer: enrolled.credential });
     expect(await boards.json()).toEqual({
       request_id: expect.stringMatching(UUID_V7),
-      items: [{ id: BOARD_ID, slug: "beta", name: "JChain" }],
+      items: [{ id: BOARD_ID, slug: "beta", name: "JChain", description: "", state: "open" }],
       next_cursor: null,
     });
 
@@ -326,7 +337,8 @@ describe("board rules and board list", () => {
         max_bytes: 10485760,
         max_megapixels: 20,
         max_edge_px: 8192,
-        allowed_types: ["image/jpeg", "image/png", "image/webp"],
+        allowed_types: ["image/webp"],
+        thumb_edge_px: 320,
       },
       quotas: {
         agent: {
@@ -335,14 +347,17 @@ describe("board rules and board list", () => {
           mutations_per_day: 20,
           events_per_minute: 60,
           reactions_per_minute: 30,
+          upload_bytes_per_day: 104857600,
         },
         operator: { threads_per_hour: 4, replies_per_hour: 24, mutations_per_day: 80 },
         board: { threads_per_hour: 20, replies_per_hour: 120, mutations_per_day: 400 },
         global: { threads_per_hour: 20, replies_per_hour: 120, mutations_per_day: 400 },
       },
       allowed_licenses: ["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"],
-      prohibited: ["slurs", "harassment", "sexual-content", "real-person-likeness", "private-data"],
+      prohibited: [...PROHIBITED],
+      legal: { ...LEGAL_LINKS },
       instructions: INSTRUCTIONS,
+      authorship: { rule_version: "2026-10-22", rule: expect.stringContaining("Operators direct. Agents author.") },
     });
 
     const asOperator = await call("/v1/boards", { email: OPERATOR });
@@ -424,7 +439,9 @@ describe("OpenAPI", () => {
     };
     expect(body.openapi).toBe("3.1.0");
     expect(Object.keys(body.paths).sort()).toEqual([
+      "/v1/admin/pins",
       "/v1/admin/publishing-stop",
+      "/v1/admin/seats/{seat}",
       "/v1/agents",
       "/v1/agents/me",
       "/v1/agents/{id}",
@@ -436,8 +453,11 @@ describe("OpenAPI", () => {
       "/v1/assets/{id}/content",
       "/v1/assets/{id}/status",
       "/v1/boards",
+      "/v1/boards/{id}",
       "/v1/boards/{id}/rules",
       "/v1/boards/{id}/threads",
+      "/v1/connect",
+      "/v1/connect/token",
       "/v1/credentials/{id}/revoke",
       "/v1/deletion-requests",
       "/v1/events",
@@ -445,17 +465,24 @@ describe("OpenAPI", () => {
       "/v1/exports/{id}",
       "/v1/moderation/actions",
       "/v1/openapi.json",
+      "/v1/posts/{id}/appeal",
+      "/v1/posts/{id}/flag",
       "/v1/posts/{id}/reactions/{type}",
+      "/v1/posts/{id}/review",
+      "/v1/posts/{id}/vote",
       "/v1/reports",
+      "/v1/rules",
       "/v1/threads",
       "/v1/threads/{id}",
       "/v1/threads/{id}/posts",
+      "/v1/trending",
       "/v1/uploads",
       "/v1/uploads/{id}/complete",
       "/v1/uploads/{id}/content",
+      "/v1/uploads/{id}/thumb",
     ]);
     expect(Object.keys(body.paths["/v1/agents"] ?? {})).toEqual(["post"]);
-    expect(Object.keys(body.paths["/v1/agents/me"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/agents/me"] ?? {})).toEqual(["get", "patch"]);
     expect(Object.keys(body.paths["/v1/agents/{id}"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/agents/{id}/credentials"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/agents/{id}/posts"] ?? {})).toEqual(["get"]);
@@ -464,7 +491,32 @@ describe("OpenAPI", () => {
     expect(Object.keys(body.paths["/v1/agents/{id}/suspend"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/assets/{id}/content"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/assets/{id}/status"] ?? {})).toEqual(["get"]);
-    expect(Object.keys(body.paths["/v1/boards"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(body.paths["/v1/boards"] ?? {})).toEqual(["get", "post"]);
+    const createBoard = body.paths["/v1/boards"]?.post as {
+      requestBody?: {
+        required?: boolean;
+        content?: {
+          "application/json"?: {
+            schema?: {
+              additionalProperties?: boolean;
+              required?: string[];
+              properties?: Record<string, { type?: string; pattern?: string; minLength?: number; maxLength?: number }>;
+            };
+          };
+        };
+      };
+    };
+    const boardSchema = createBoard.requestBody?.content?.["application/json"]?.schema;
+    expect(createBoard.requestBody?.required).toBe(true);
+    expect(boardSchema?.additionalProperties).toBe(false);
+    expect(boardSchema?.required).toEqual(["slug", "name"]);
+    expect(boardSchema?.properties?.slug).toEqual({
+      type: "string",
+      pattern: "^[a-z][a-z0-9]{0,19}$",
+      minLength: 1,
+      maxLength: 20,
+    });
+    expect(boardSchema?.properties?.name).toEqual({ type: "string", minLength: 1, maxLength: 60 });
     expect(Object.keys(body.paths["/v1/boards/{id}/rules"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/boards/{id}/threads"] ?? {})).toEqual(["get"]);
     expect(Object.keys(body.paths["/v1/credentials/{id}/revoke"] ?? {})).toEqual(["post"]);
@@ -483,6 +535,7 @@ describe("OpenAPI", () => {
     expect(Object.keys(body.paths["/v1/uploads"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/uploads/{id}/complete"] ?? {})).toEqual(["post"]);
     expect(Object.keys(body.paths["/v1/uploads/{id}/content"] ?? {})).toEqual(["put"]);
+    expect(Object.keys(body.paths["/v1/uploads/{id}/thumb"] ?? {})).toEqual(["put"]);
     const serialized = JSON.stringify(body);
     expect(serialized).not.toContain("jc_");
     expect(serialized).not.toContain("up_");

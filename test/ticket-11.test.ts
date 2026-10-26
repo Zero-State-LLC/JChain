@@ -2,8 +2,8 @@ import { applyD1Migrations, createExecutionContext, createMessageBatch, getQueue
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
-import { VALID_PNG } from "./fixtures/bytes";
-import { BOARD_ID, MODERATOR, OPERATOR, call, releaseThread, resetAndSeed } from "./harness";
+import { VALID_WEBP } from "./fixtures/bytes";
+import { BOARD_ID, MODERATOR, OPERATOR, call, releaseThread, pinClock, resetAndSeed } from "./harness";
 
 const MISSING_ID = "01900000-0000-7000-8000-000000000099";
 const INVISIBLE = ["rejected", "hidden", "removal_pending", "removed"] as const;
@@ -12,8 +12,12 @@ beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 });
 
-beforeEach(resetAndSeed);
+beforeEach(async () => {
+  pinClock();
+  await resetAndSeed();
+});
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -186,7 +190,7 @@ describe("remix links", () => {
     expect(hiddenPage).not.toContain("remix");
     expect(hiddenPage).not.toContain("<script>");
     const hiddenRoot = await call(`/threads/${rootThread}`);
-    expect(hiddenRoot.status).toBe(200);
+    expect(hiddenRoot.status).toBe(404);
     expect(await hiddenRoot.text()).not.toContain("remix");
 
     await releaseThread(agent.credential);
@@ -257,16 +261,16 @@ function openThread(credential: string, body: Record<string, unknown>, key: stri
 }
 
 async function readyAsset(credential: string): Promise<string> {
-  const sha256 = await sha256HexBytes(VALID_PNG);
+  const sha256 = await sha256HexBytes(VALID_WEBP);
   const reserved = await expectSuccess(await call("/v1/uploads", {
     bearer: credential,
     headers: { "idempotency-key": crypto.randomUUID() },
-    body: { content_type: "image/png", byte_size: VALID_PNG.byteLength, sha256 },
+    body: { content_type: "image/webp", byte_size: VALID_WEBP.byteLength, sha256 },
   }), 201);
   const assetId = String(reserved.asset_id);
   await expectSuccess(await call(`/v1/uploads/${assetId}/content`, {
     method: "PUT",
-    raw: VALID_PNG,
+    raw: VALID_WEBP,
     headers: { "idempotency-key": crypto.randomUUID(), "upload-token": String(reserved.upload_token) },
   }));
   await expectSuccess(await call(`/v1/uploads/${assetId}/complete`, {
@@ -287,53 +291,8 @@ async function settle(assetId: string): Promise<void> {
     body: { asset_id: assetId },
   }]);
   if (!worker.queue) throw new Error("queue handler missing");
-  await worker.queue(batch, scriptedEnv(), ctx);
+  await worker.queue(batch, env, ctx);
   await getQueueResult(batch, ctx);
-}
-
-function scriptedEnv(): Env {
-  const payload = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 1]);
-  const handle = {
-    transform() {
-      return handle;
-    },
-    draw() {
-      return handle;
-    },
-    async output() {
-      return {
-        contentType: () => "image/webp",
-        response: () => new Response(payload),
-        image: () => new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(payload);
-            controller.close();
-          },
-        }),
-      };
-    },
-  };
-  const images = new Proxy(env.IMAGES, {
-    get(target, property, receiver) {
-      if (property === "info") {
-        return async (): Promise<ImageInfoResponse> => ({
-          format: "image/png",
-          fileSize: VALID_PNG.byteLength,
-          width: 1,
-          height: 1,
-        });
-      }
-      if (property === "input") return () => handle;
-      return Reflect.get(target, property, receiver);
-    },
-  });
-  return new Proxy(env, {
-    get(target, property) {
-      if (property === "IMAGES") return images;
-      const value = Reflect.get(target, property, target) as unknown;
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  }) as Env;
 }
 
 async function sha256HexBytes(bytes: Uint8Array): Promise<string> {

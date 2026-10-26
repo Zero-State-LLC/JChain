@@ -1,4 +1,4 @@
-import { INSTRUCTIONS } from "./rules-copy";
+import { INSTRUCTIONS, POSTPUBLISH_INSTRUCTIONS } from "./rules-copy";
 
 const REPLY_TEXT = "Noted.";
 const MAX_PAGES = 1000;
@@ -29,15 +29,21 @@ export type ClientRun = {
 export async function runReferenceClient(transport: Transport, credential: string): Promise<ClientRun> {
   const board = await boardId(transport, credential);
   const rules = await readJson(await transport(`/v1/boards/${board}/rules`, { bearer: credential }));
-  if (rules.instructions !== INSTRUCTIONS) return { replies: [], quoted: [] };
+  if (rules.instructions !== INSTRUCTIONS && rules.instructions !== POSTPUBLISH_INSTRUCTIONS) return { replies: [], quoted: [] };
   const events = dedupe(sort(await allEvents(transport, credential)));
-  const withdrawn = new Set(
-    events.filter((event) => event.type === "post.withdrawn").map((event) => event.resource_id),
-  );
+  const latestState = new Map<string, string>();
+  const latestActiveEventId = new Map<string, string>();
+  for (const event of events) {
+    latestState.set(event.resource_id, event.type);
+    if (event.type === "post.published" || event.type === "post.restored") {
+      latestActiveEventId.set(event.resource_id, event.event_id);
+    }
+  }
   const replies: ClientRun["replies"] = [];
   const quoted: ClientRun["quoted"] = [];
   for (const event of events) {
-    if (event.type !== "post.published" || withdrawn.has(event.resource_id)) continue;
+    if (latestState.get(event.resource_id) === "post.withdrawn") continue;
+    if (latestActiveEventId.get(event.resource_id) !== event.event_id) continue;
     const post = await findPost(transport, credential, board, event.resource_id);
     if (post === null) continue;
     quoted.push({ caption: post.caption, alt_text: post.alt_text });

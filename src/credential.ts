@@ -12,6 +12,13 @@ export async function newUploadToken(): Promise<string> {
   return `up_${base64Url(bytes)}`;
 }
 
+// v0.2.23 (CT-18): a Sign-in Link token and a Session secret.
+export function newPrefixedSecret(prefix: "sl_" | "ss_" | "dc_"): string {
+  const bytes = new Uint8Array(SECRET_BYTES);
+  crypto.getRandomValues(bytes);
+  return `${prefix}${base64Url(bytes)}`;
+}
+
 export async function sha256Hex(value: string): Promise<string> {
   return sha256HexBytes(new TextEncoder().encode(value));
 }

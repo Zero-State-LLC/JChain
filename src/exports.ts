@@ -14,6 +14,12 @@ type Ctx = Context<AppEnv>;
 const SCHEMA_VERSION = 1;
 const PAGE = 100;
 const INSERT_BATCH = 30;
+// D1 allows 100 bound parameters per statement.
+const ID_BATCH = 80;
+// A Post under legal hold (C-13 item 5) is never exported, whatever its state.
+const EXPORTABLE_POST = `${VISIBLE_POST} AND posts.legal_hold = 0`;
+// An export runs inside the request. Above this many Posts on the Board it is state_conflict.
+export const EXPORT_MAX_POSTS = 5000;
 
 type Purpose = "archive" | "training";
 
@@ -52,6 +58,12 @@ async function createExport(c: Ctx): Promise<Response> {
     return errorResponse(requestId, "training_export_blocked");
   }
 
+  const size = await c.env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM posts JOIN threads ON threads.id = posts.thread_id WHERE threads.board_id = ?",
+  ).bind(request.boardId).first<{ n: number }>();
+  if (Number(size?.n ?? 0) > EXPORT_MAX_POSTS) {
+    return errorResponse(requestId, "state_conflict", `This board has more than ${EXPORT_MAX_POSTS} Posts, the most an export runs in one request.`);
+  }
   const rows = await visiblePosts(c.env.DB, request.boardId);
   const ancestry = await visibleAncestry(c.env.DB, rows.map((row) => row.id));
   const exportedAt = utcSeconds();
@@ -83,7 +95,7 @@ async function readExport(c: Ctx): Promise<Response> {
   ).bind(exportId).first<{ document: string }>();
   if (!row) return errorResponse(requestId, "not_found");
   const header = JSON.parse(row.document) as Record<string, unknown>;
-  const posts = await storedPosts(c.env.DB, exportId);
+  const posts = await stillVisible(c.env.DB, await storedPosts(c.env.DB, exportId));
   return jsonResponse(requestId, { ...header, posts });
 }
 
@@ -135,6 +147,31 @@ async function storedPosts(db: D1Database, exportId: string): Promise<Record<str
   }
 }
 
+// An export is a stored snapshot, but every read goes through the Visibility Projection again:
+// a Post hidden, removed, owner-deleted, or put under legal hold since the export drops out,
+// and remix_of_post_id names the nearest ancestor that is still visible.
+async function stillVisible(
+  db: D1Database,
+  posts: Record<string, unknown>[],
+): Promise<Record<string, unknown>[]> {
+  const ids = [...new Set(posts.map((post) => post.post_id).filter((id): id is string => typeof id === "string"))];
+  const visible = new Set<string>();
+  for (let start = 0; start < ids.length; start += ID_BATCH) {
+    const batch = ids.slice(start, start + ID_BATCH);
+    const placeholders = batch.map(() => "?").join(", ");
+    const listed = await db.prepare(
+      `SELECT posts.id AS id FROM posts WHERE posts.id IN (${placeholders}) AND ${EXPORTABLE_POST}`,
+    ).bind(...batch).all<{ id: string }>();
+    for (const found of listed.results ?? []) visible.add(found.id);
+  }
+  const kept = posts.filter((post) => typeof post.post_id === "string" && visible.has(post.post_id));
+  const ancestry = await visibleAncestry(db, kept.map((post) => String(post.post_id)));
+  return kept.map((post) => ({
+    ...post,
+    remix_of_post_id: ancestry.get(String(post.post_id))?.[0]?.post_id ?? null,
+  }));
+}
+
 async function visiblePosts(db: D1Database, boardId: string): Promise<PostRow[]> {
   const rows: PostRow[] = [];
   let cursor: { createdAt: string; id: string } | null = null;
@@ -163,7 +200,7 @@ async function postPage(
             posts.license AS license, posts.created_at AS created_at
        FROM posts
        JOIN threads ON threads.id = posts.thread_id
-      WHERE threads.board_id = ? AND ${VISIBLE_POST}${cursorSql}
+      WHERE threads.board_id = ? AND ${EXPORTABLE_POST}${cursorSql}
       ORDER BY posts.created_at ASC, posts.id ASC
       LIMIT ?`,
   );

@@ -2,7 +2,7 @@ import { applyD1Migrations, createExecutionContext, createMessageBatch, getQueue
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
-import { VALID_PNG } from "./fixtures/bytes";
+import { VALID_WEBP } from "./fixtures/bytes";
 import { BOARD_ID, MODERATOR, OPERATOR, call, resetAndSeed } from "./harness";
 
 beforeAll(async () => {
@@ -101,6 +101,7 @@ describe("publishing stop", () => {
     expect(before.headers.get("content-security-policy")).toContain("script-src 'none'");
     const html = await before.text();
     expect(html).toContain("<p>Disengaged</p>");
+    expect(html).toContain('<section class="stop" aria-labelledby="publishing-stop">');
     expect(html).toContain('action="/moderation/publishing-stop"');
     expect(html).toContain('name="engaged" value="true"');
     expect(html).toContain('name="engaged" value="false"');
@@ -118,6 +119,7 @@ describe("publishing stop", () => {
     expect(engaged.engaged).toBe(true);
     const after = await (await call("/moderation", { email: MODERATOR })).text();
     expect(after).toContain("<p>Engaged</p>");
+    expect(after).toContain('<section class="stop stop-engaged" aria-labelledby="publishing-stop">');
     expect(after).not.toContain("<p>Disengaged</p>");
   });
 
@@ -131,6 +133,7 @@ describe("publishing stop", () => {
     expect(eventId).not.toBe("");
 
     const replyId = await replyTo(agent.credential, threadId);
+    const otherId = await replyTo(agent.credential, threadId);
     await expectSuccess(await stop(true));
     expect(await postState(postId)).toBe("published");
     expect(await (await call("/boards/beta")).text()).toContain("Visible title");
@@ -150,7 +153,6 @@ describe("publishing stop", () => {
     expect(await postState(postId)).toBe("hidden");
     expect(await eventCount(postId)).toBe(2);
 
-    const otherId = await replyTo(agent.credential, threadId);
     const rejected = await expectSuccess(await act("post", otherId, "reject"));
     expect(rejected.state).toBe("rejected");
     expect(await postState(replyId)).toBe("pending_review");
@@ -173,8 +175,9 @@ describe("publishing stop", () => {
     expect(approved.event_id).not.toBe(eventId);
     const restored = await expectSuccess(await act("post", postId, "restore"));
     expect(restored.state).toBe("published");
-    expect(restored.event_id).toBe(eventId);
-    expect(await eventCount(postId)).toBe(1);
+    expect(restored.event_id).toEqual(expect.any(String));
+    expect(restored.event_id).not.toBe(eventId);
+    expect(await eventCount(postId)).toBe(3);
     expect(await (await call(`/threads/${threadId}`)).text()).toContain("a pending reply");
     expect(await (await call("/boards/beta")).text()).toContain("Visible title");
   });
@@ -332,16 +335,16 @@ async function publishedThread(credential: string): Promise<{ threadId: string; 
 }
 
 async function readyAsset(credential: string): Promise<string> {
-  const sha256 = await sha256HexBytes(VALID_PNG);
+  const sha256 = await sha256HexBytes(VALID_WEBP);
   const reserved = await expectSuccess(await call("/v1/uploads", {
     bearer: credential,
     headers: { "idempotency-key": crypto.randomUUID() },
-    body: { content_type: "image/png", byte_size: VALID_PNG.byteLength, sha256 },
+    body: { content_type: "image/webp", byte_size: VALID_WEBP.byteLength, sha256 },
   }), 201);
   const assetId = String(reserved.asset_id);
   await expectSuccess(await call(`/v1/uploads/${assetId}/content`, {
     method: "PUT",
-    raw: VALID_PNG,
+    raw: VALID_WEBP,
     headers: { "idempotency-key": crypto.randomUUID(), "upload-token": String(reserved.upload_token) },
   }));
   await expectSuccess(await call(`/v1/uploads/${assetId}/complete`, {
@@ -362,52 +365,8 @@ async function settle(assetId: string): Promise<void> {
     body: { asset_id: assetId },
   }]);
   if (!worker.queue) throw new Error("queue handler missing");
-  await worker.queue(batch, scriptedEnv(), ctx);
+  await worker.queue(batch, env, ctx);
   await getQueueResult(batch, ctx);
-}
-
-function scriptedEnv(): Env {
-  const payload = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 1]);
-  const handle = {
-    transform() {
-      return handle;
-    },
-    draw() {
-      return handle;
-    },
-    async output() {
-      return {
-        contentType: () => "image/webp",
-        response: () => new Response(payload),
-        image: () => new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(payload);
-            controller.close();
-          },
-        }),
-      };
-    },
-  };
-  const images = new Proxy(env.IMAGES, {
-    get(target, property, receiver) {
-      if (property === "info") {
-        return async (): Promise<ImageInfoResponse> => ({
-          format: "image/png",
-          fileSize: VALID_PNG.byteLength,
-          width: 1,
-          height: 1,
-        });
-      }
-      if (property === "input") return () => handle;
-      return Reflect.get(target, property, receiver);
-    },
-  });
-  return new Proxy(env, {
-    get(target, property, receiver) {
-      if (property === "IMAGES") return images;
-      return Reflect.get(target, property, receiver);
-    },
-  }) as Env;
 }
 
 async function postState(postId: string): Promise<string> {

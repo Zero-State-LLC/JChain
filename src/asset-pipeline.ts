@@ -1,13 +1,14 @@
-import { isUuidV7 } from "./ids";
+import { blockedMatch, sha256Bytes } from "./blocked-hashes";
+import { isUuidV7, utcSeconds } from "./ids";
 import type { Policy } from "./policy";
-import { chargeDerivativeBytes, chargeTransformations, logRejected } from "./quota";
+import { chargeDerivativeBytes, claimAsset, logRejected, refundAssetBytes, releaseAsset } from "./quota";
+import { type WebpCheck, readWebp } from "./webp";
 
 export const ASSET_QUEUE = "asset-upload";
 export const ASSET_DLQ = "asset-upload-dlq";
 
 const WEBP = "image/webp";
-const QUALITY = 80;
-const THUMB_EDGE = 320;
+export const THUMB_EDGE = 320;
 
 export type ReasonCode =
   | "unsupported_type"
@@ -24,7 +25,6 @@ export type SniffedType = "image/jpeg" | "image/png" | "image/webp";
 type AssetEnv = {
   DB: D1Database;
   MEDIA: R2Bucket;
-  IMAGES: ImagesBinding;
   QUOTA: Env["QUOTA"];
 };
 
@@ -33,14 +33,32 @@ type AssetRow = {
   agent_id: string;
   state: string;
   sha256: string;
+  thumb_sha256: string | null;
 };
 
 export function originalKey(assetId: string): string {
   return `originals/${assetId}`;
 }
 
+export function originalThumbKey(assetId: string): string {
+  return `originals/${assetId}/thumb`;
+}
+
 export function derivativeKey(assetId: string, variant: "display" | "thumb"): string {
   return `derivatives/${assetId}/${variant}`;
+}
+
+// Call before deleting the derivatives: the stored sizes go back to r2_bytes once per Asset.
+export async function refundDerivatives(
+  env: { MEDIA: R2Bucket; QUOTA: Env["QUOTA"] },
+  assetId: string,
+): Promise<void> {
+  let bytes = 0;
+  for (const variant of ["display", "thumb"] as const) {
+    const head = await env.MEDIA.head(derivativeKey(assetId, variant));
+    if (head) bytes += head.size;
+  }
+  if (bytes > 0) await refundAssetBytes(env, assetId, bytes);
 }
 
 export function sniffedType(bytes: Uint8Array): SniffedType | null {
@@ -64,20 +82,25 @@ export function isAnimated(bytes: Uint8Array, type: SniffedType): boolean {
   return false;
 }
 
-export function imageStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(bytes);
-      controller.close();
-    },
-  });
+// Round-2 audit finding 6: a queue may deliver the same message twice at once. Only the delivery
+// that holds the Asset's claim processes it; another gets "busy" and is retried later, when the
+// Asset is already ready (or the claim has lapsed because the holder died).
+export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetId: string): Promise<"done" | "busy"> {
+  const claimed = await claimAsset(env, assetId);
+  if (claimed === null) return "busy";
+  try {
+    await processClaimed(env, policy, assetId);
+  } finally {
+    await releaseAsset(env, assetId, claimed);
+  }
+  return "done";
 }
 
-export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetId: string): Promise<void> {
+async function processClaimed(env: AssetEnv, policy: Policy, assetId: string): Promise<void> {
   const asset = await loadAsset(env.DB, assetId);
   if (!asset) return;
   if (asset.state === "ready") {
-    await env.MEDIA.delete(originalKey(assetId));
+    await env.MEDIA.delete([originalKey(assetId), originalThumbKey(assetId)]);
     return;
   }
   if (asset.state !== "uploaded" && asset.state !== "validating") return;
@@ -86,31 +109,54 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
     "UPDATE assets SET state = 'validating', reason_code = NULL WHERE id = ? AND state IN ('uploaded', 'validating')",
   ).bind(assetId).run();
 
-  const stored = await env.MEDIA.get(originalKey(assetId));
-  if (!stored) {
+  const display = await stagedWebp(env.MEDIA, originalKey(assetId));
+  if (display === null) {
     await rejectAsset(env.DB, assetId, "processing_failed");
     return;
   }
-  const bytes = new Uint8Array(await stored.arrayBuffer());
-
-  let info: ImageInfoResponse;
-  try {
-    info = await env.IMAGES.info(imageStream(bytes));
-  } catch {
-    await rejectAsset(env.DB, assetId, "invalid_image");
+  if (!display.ok) {
+    await rejectAsset(env.DB, assetId, display.reason);
     return;
   }
-  const size = dimensions(info);
-  if (!size) {
-    await rejectAsset(env.DB, assetId, "invalid_image");
-    return;
-  }
-  if (size.width > policy.upload.max_edge_px || size.height > policy.upload.max_edge_px) {
+  if (display.width > policy.upload.max_edge_px || display.height > policy.upload.max_edge_px) {
     await rejectAsset(env.DB, assetId, "edge_too_long");
     return;
   }
-  if (size.width * size.height > policy.upload.max_megapixels * 1_000_000) {
+  if (display.width * display.height > policy.upload.max_megapixels * 1_000_000) {
     await rejectAsset(env.DB, assetId, "too_many_pixels");
+    return;
+  }
+
+  // The agent sends the thumbnail. A display image that already fits the thumbnail box is its own thumbnail.
+  let thumb: Uint8Array = display.bytes;
+  if (asset.thumb_sha256 !== null) {
+    const staged = await stagedWebp(env.MEDIA, originalThumbKey(assetId));
+    if (staged === null) {
+      await rejectAsset(env.DB, assetId, "processing_failed");
+      return;
+    }
+    if (!staged.ok) {
+      await rejectAsset(env.DB, assetId, staged.reason);
+      return;
+    }
+    if (!fitsThumbnail(display, staged)) {
+      await rejectAsset(env.DB, assetId, "invalid_image");
+      return;
+    }
+    thumb = staged.bytes;
+  } else if (Math.max(display.width, display.height) > THUMB_EDGE) {
+    await rejectAsset(env.DB, assetId, "invalid_image");
+    return;
+  }
+
+  // CT-21: exact match against the Blocked Hash list before anything is stored or charged.
+  const displayHash = await sha256Bytes(display.bytes);
+  const thumbHash = await sha256Bytes(thumb);
+  const match = await blockedMatch(env.DB, [asset.sha256, asset.thumb_sha256, displayHash, thumbHash]);
+  if (match) {
+    await env.MEDIA.delete([originalKey(assetId), originalThumbKey(assetId)]);
+    if (match.prohibited) await quarantineBlocked(env.DB, assetId);
+    else await rejectAsset(env.DB, assetId, "processing_failed", true);
     return;
   }
 
@@ -118,29 +164,7 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
     "SELECT id FROM assets WHERE agent_id = ? AND sha256 = ? AND state = 'ready' AND id != ?",
   ).bind(asset.agent_id, asset.sha256, assetId).first<{ id: string }>();
   if (twin) {
-    await env.MEDIA.delete(originalKey(assetId));
-    await rejectAsset(env.DB, assetId, "processing_failed");
-    return;
-  }
-
-  const transformations = await chargeTransformations(env, policy);
-  if (!transformations.ok) {
-    logRejected(asset.agent_id, "global", "transformations");
-    await rejectAsset(env.DB, assetId, "processing_failed");
-    return;
-  }
-
-  let display: Uint8Array;
-  let thumb: Uint8Array;
-  let finished = 0;
-  try {
-    display = await encode(env.IMAGES, bytes, false);
-    finished = 1;
-    thumb = await encode(env.IMAGES, bytes, true);
-    finished = 2;
-  } catch {
-    await transformations.refund(2 - finished);
-    await env.MEDIA.delete([derivativeKey(assetId, "display"), derivativeKey(assetId, "thumb")]);
+    await env.MEDIA.delete([originalKey(assetId), originalThumbKey(assetId)]);
     await rejectAsset(env.DB, assetId, "processing_failed");
     return;
   }
@@ -148,14 +172,16 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
   const displayKey = derivativeKey(assetId, "display");
   const thumbKey = derivativeKey(assetId, "thumb");
   try {
-    await env.MEDIA.put(displayKey, display, { httpMetadata: { contentType: WEBP } });
+    await env.MEDIA.put(displayKey, display.bytes, { httpMetadata: { contentType: WEBP } });
     await env.MEDIA.put(thumbKey, thumb, { httpMetadata: { contentType: WEBP } });
   } catch {
     await env.MEDIA.delete([displayKey, thumbKey]);
     await rejectAsset(env.DB, assetId, "processing_failed");
     return;
   }
-  const bytesCharged = await chargeDerivativeBytes(env, policy, display.byteLength + thumb.byteLength);
+  // Charged once per Asset (finding 7): a retry after a failed D1 write below charges nothing more,
+  // and the bytes stay counted until retention or a deletion refunds them once.
+  const bytesCharged = await chargeDerivativeBytes(env, policy, assetId, display.bytes.byteLength + thumb.byteLength);
   if (!bytesCharged.ok) {
     logRejected(asset.agent_id, "global", "r2_bytes");
     await env.MEDIA.delete([displayKey, thumbKey]);
@@ -163,23 +189,23 @@ export async function processUploadedAsset(env: AssetEnv, policy: Policy, assetI
     return;
   }
   const updated = await env.DB.prepare(
-    "UPDATE assets SET state = 'ready', reason_code = NULL, original_stored = 0 WHERE id = ? AND state = 'validating'",
-  ).bind(assetId).run();
-  if (Number(updated.meta.changes ?? 0) !== 1) {
-    await bytesCharged.refund();
-    await env.MEDIA.delete([displayKey, thumbKey]);
-    return;
-  }
-  await env.MEDIA.delete(originalKey(assetId));
+    `UPDATE assets SET state = 'ready', reason_code = NULL, original_stored = 0, thumb_stored = 0,
+            display_sha256 = ?, derived_thumb_sha256 = ?
+      WHERE id = ? AND state = 'validating'`,
+  ).bind(displayHash, thumbHash, assetId).run();
+  // Another delivery finished this Asset first (its claim lapsed). The derivative keys and the one
+  // r2_bytes charge are shared with it, so this delivery deletes neither and refunds nothing.
+  if (Number(updated.meta.changes ?? 0) !== 1) return;
+  await env.MEDIA.delete([originalKey(assetId), originalThumbKey(assetId)]);
   console.log(JSON.stringify({ message: "asset ready", asset_id: assetId }));
 }
 
 export async function rejectInFlight(db: D1Database, assetId: string): Promise<void> {
   const updated = await db.prepare(
     `UPDATE assets
-        SET state = 'rejected', reason_code = 'processing_failed'
+        SET state = 'rejected', reason_code = 'processing_failed', rejected_at = ?
       WHERE id = ? AND state IN ('reserved', 'uploaded', 'validating')`,
-  ).bind(assetId).run();
+  ).bind(utcSeconds(), assetId).run();
   if (Number(updated.meta.changes ?? 0) === 1) {
     console.log(JSON.stringify({ message: "asset rejected", asset_id: assetId, reason_code: "processing_failed" }));
   }
@@ -194,41 +220,44 @@ export function assetIdFromMessage(body: unknown): string | null {
   return assetId;
 }
 
-async function encode(images: ImagesBinding, bytes: Uint8Array, thumbnail: boolean): Promise<Uint8Array> {
-  let transformer = images.input(imageStream(bytes));
-  if (thumbnail) {
-    transformer = transformer.transform({ width: THUMB_EDGE, height: THUMB_EDGE, fit: "scale-down" });
-  }
-  const result = await transformer.output({ format: WEBP, quality: QUALITY, anim: false });
-  if (result.contentType() !== WEBP) throw new Error("image output was not webp");
-  const encoded = new Uint8Array(await result.response().arrayBuffer());
-  if (encoded.byteLength === 0 || indexOfAscii(encoded, "ANIM") >= 0) {
-    throw new Error("image output was not a static webp");
-  }
-  return encoded;
+async function stagedWebp(media: R2Bucket, key: string): Promise<WebpCheck | null> {
+  const stored = await media.get(key);
+  if (!stored) return null;
+  return readWebp(new Uint8Array(await stored.arrayBuffer()));
 }
 
-function dimensions(info: ImageInfoResponse): { width: number; height: number } | null {
-  if (!("width" in info) || !("height" in info)) return null;
-  if (!Number.isInteger(info.width) || !Number.isInteger(info.height)) return null;
-  if (info.width < 1 || info.height < 1) return null;
-  return { width: info.width, height: info.height };
+// A thumbnail fits the box and keeps the display image's shape, within one pixel of rounding.
+function fitsThumbnail(display: { width: number; height: number }, thumb: { width: number; height: number }): boolean {
+  if (Math.max(thumb.width, thumb.height) > THUMB_EDGE) return false;
+  const scale = Math.min(1, THUMB_EDGE / Math.max(display.width, display.height));
+  return Math.abs(thumb.width - display.width * scale) <= 1 && Math.abs(thumb.height - display.height * scale) <= 1;
 }
 
 async function loadAsset(db: D1Database, assetId: string): Promise<AssetRow | null> {
   return db.prepare(
-    "SELECT id, agent_id, state, sha256 FROM assets WHERE id = ?",
+    "SELECT id, agent_id, state, sha256, thumb_sha256 FROM assets WHERE id = ?",
   ).bind(assetId).first<AssetRow>();
 }
 
-async function rejectAsset(db: D1Database, assetId: string, reason: ReasonCode): Promise<void> {
+async function rejectAsset(db: D1Database, assetId: string, reason: ReasonCode, blocked = false): Promise<void> {
   const updated = await db.prepare(
     `UPDATE assets
-        SET state = 'rejected', reason_code = ?
+        SET state = 'rejected', reason_code = ?, blocked = ?, rejected_at = ?
       WHERE id = ? AND state IN ('uploaded', 'validating')`,
-  ).bind(reason, assetId).run();
+  ).bind(reason, blocked ? 1 : 0, utcSeconds(), assetId).run();
   if (Number(updated.meta.changes ?? 0) === 1) {
-    console.log(JSON.stringify({ message: "asset rejected", asset_id: assetId, reason_code: reason }));
+    const reasonCode = blocked ? "blocked" : reason;
+    console.log(JSON.stringify({ message: "asset rejected", asset_id: assetId, reason_code: reasonCode }));
+  }
+}
+
+// A prohibited match. blocked = 1 marks the Asset for the front of the Moderator queue.
+async function quarantineBlocked(db: D1Database, assetId: string): Promise<void> {
+  const updated = await db.prepare(
+    "UPDATE assets SET state = 'quarantined', blocked = 1, quarantined_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ? AND state IN ('uploaded', 'validating')",
+  ).bind(assetId).run();
+  if (Number(updated.meta.changes ?? 0) === 1) {
+    console.log(JSON.stringify({ message: "asset quarantined", asset_id: assetId, queue_first: true }));
   }
 }
 

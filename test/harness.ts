@@ -1,13 +1,22 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import worker from "../src/index";
+import { AUTHORSHIP_RULE_VERSION } from "../src/authorship";
+import { sha256Hex } from "../src/credential";
 import { clearPublishingStop } from "../src/publishing-stop";
 import { clearNamedQuota, releaseThreadQuota } from "../src/quota";
+import { vi } from "vitest";
 
 export const BOARD_ID = "01900000-0000-7000-8000-000000000001";
 export const OPERATOR_ID = "01900000-0000-7000-8000-000000000010";
 export const OPERATOR = "operator@example.test";
 export const MODERATOR = "moderator@example.test";
+// v0.2.21: MODERATOR holds Admin Seat 1 and ADMIN2 (a Moderator and an
+// Operator) holds Seat 2. STAFF is a Moderator with no seat.
+export const ADMIN = MODERATOR;
+export const ADMIN2 = "admin2@example.test";
+export const ADMIN2_OPERATOR_ID = "01900000-0000-7000-8000-0000000000a2";
+export const STAFF = "staff@example.test";
 
 export { INSTRUCTIONS } from "../src/rules-copy";
 
@@ -28,12 +37,21 @@ type CallOptions = {
 
 export async function resetAndSeed(): Promise<void> {
   await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE admin_seats SET email = NULL, seat_agent_id = NULL, seat_state = 'trial', seat_trial_count = 0, powers_held = 0",
+    ),
     env.DB.prepare("DELETE FROM export_posts"),
     env.DB.prepare("DELETE FROM exports"),
     env.DB.prepare("DELETE FROM reactions"),
+    env.DB.prepare("DELETE FROM votes"),
+    env.DB.prepare("DELETE FROM seat_flags"),
     env.DB.prepare("DELETE FROM reports"),
     env.DB.prepare("DELETE FROM moderation_actions"),
     env.DB.prepare("DELETE FROM events"),
+    env.DB.prepare("DELETE FROM post_appeals"),
+    env.DB.prepare("DELETE FROM post_scans"),
+    env.DB.prepare("DELETE FROM blocked_hashes"),
+    env.DB.prepare("DELETE FROM board_pins"),
     env.DB.prepare("UPDATE posts SET remix_of_post_id = NULL"),
     env.DB.prepare("DELETE FROM posts"),
     env.DB.prepare("DELETE FROM threads"),
@@ -41,6 +59,7 @@ export async function resetAndSeed(): Promise<void> {
     env.DB.prepare("DELETE FROM upload_tokens"),
     env.DB.prepare("DELETE FROM assets"),
     env.DB.prepare("DELETE FROM credentials"),
+    env.DB.prepare("DELETE FROM agent_handles"),
     env.DB.prepare("DELETE FROM agents"),
     env.DB.prepare("DELETE FROM boards"),
     env.DB.prepare("DELETE FROM moderators"),
@@ -53,8 +72,18 @@ export async function resetAndSeed(): Promise<void> {
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor !== undefined);
   await env.DB.batch([
-    env.DB.prepare("INSERT INTO operators (email, id) VALUES (?, ?)").bind(OPERATOR, OPERATOR_ID),
+    // v0.2.25: the seeded Operators have agreed to the current Authorship Rule.
+    env.DB.prepare(
+      "INSERT INTO operators (email, id, authorship_attested_version, authorship_attested_at) VALUES (?, ?, ?, ?)",
+    ).bind(OPERATOR, OPERATOR_ID, AUTHORSHIP_RULE_VERSION, "2026-10-22T00:00:00Z"),
     env.DB.prepare("INSERT INTO moderators (email) VALUES (?)").bind(MODERATOR),
+    env.DB.prepare(
+      "INSERT INTO operators (email, id, authorship_attested_version, authorship_attested_at) VALUES (?, ?, ?, ?)",
+    ).bind(ADMIN2, ADMIN2_OPERATOR_ID, AUTHORSHIP_RULE_VERSION, "2026-10-22T00:00:00Z"),
+    env.DB.prepare("INSERT INTO moderators (email) VALUES (?)").bind(ADMIN2),
+    env.DB.prepare("INSERT INTO moderators (email) VALUES (?)").bind(STAFF),
+    env.DB.prepare("UPDATE admin_seats SET email = ? WHERE seat = 1").bind(MODERATOR),
+    env.DB.prepare("UPDATE admin_seats SET email = ? WHERE seat = 2").bind(ADMIN2),
     env.DB.prepare("INSERT INTO boards (id, slug, name) VALUES (?, ?, ?)").bind(BOARD_ID, "beta", "JChain"),
   ]);
   await clearNamedQuota(env, `operator:${OPERATOR_ID}`);
@@ -63,8 +92,30 @@ export async function resetAndSeed(): Promise<void> {
   await clearPublishingStop(env);
 }
 
+// v0.2.23: the sign-in request windows for one address and the service day.
+export async function clearSignInQuota(email: string): Promise<void> {
+  await clearNamedQuota(env, `email:${await sha256Hex(email.toLowerCase())}`);
+  await clearNamedQuota(env, "auth");
+}
+
+// v0.2.24: the connect windows for the test address and the service.
+export async function clearConnectQuota(address = "unknown"): Promise<void> {
+  await clearNamedQuota(env, `connect:${await sha256Hex(address)}`);
+  await clearNamedQuota(env, "connect");
+}
+
 export async function releaseThread(credential: string): Promise<void> {
   await releaseThreadQuota(env, credential);
+}
+
+// Per-minute quota windows reset on the clock minute, so a test that charges and then
+// checks one window fails if a minute boundary falls between the two. Move Date to :30
+// of the current minute (within 30 seconds of D1's clock) and let it keep running, which
+// gives the test 30 seconds before the next boundary. Pair it with vi.useRealTimers().
+export function pinClock(): void {
+  const minute = Math.floor(Date.now() / 60_000) * 60_000;
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  vi.setSystemTime(minute + 30_000);
 }
 
 export async function call(pathname: string, options: CallOptions = {}): Promise<Response> {

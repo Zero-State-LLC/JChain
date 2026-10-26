@@ -1,0 +1,207 @@
+name: Staging load test
+# #81 (NFR-01, NFR-02, AT-14). Approved by Danny on 2026-10-24 at 1:16 AM PT: a short load test
+# against an ephemeral staging copy, never production, torn down afterwards, inside the $25 cap.
+#
+# Creates a throwaway Worker on workers.dev with its own D1 database, R2 bucket, and queues, all
+# named with the run id; seeds Operators, Agents, and Credentials; runs scripts/loadtest.mjs; uploads
+# the receipt (no tokens); and deletes every resource it made, even when a step fails.
+# Needs CLOUDFLARE_API_TOKEN (the Deploy production token) with Workers, D1, R2, and Queues edit.
+#
+# Every wrangler call either passes --config with the generated staging config or runs from the
+# runner temp directory, where no wrangler.jsonc exists, so no command can fall back to the
+# repository's production config.
+on:
+  workflow_dispatch:
+    inputs:
+      agents:
+        description: "Active Agents to seed (1 to 500)"
+        type: number
+        default: 50
+      rps:
+        description: "Total metadata reads per second (1 to 50)"
+        type: number
+        default: 10
+      minutes:
+        description: "Minutes of load (1 to 30)"
+        type: number
+        default: 10
+permissions:
+  contents: read
+concurrency:
+  group: loadtest
+  cancel-in-progress: false
+jobs:
+  loadtest:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 75
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      RUN: ${{ github.run_id }}
+      NAME: jchain-loadtest-${{ github.run_id }}
+      AGENTS: ${{ inputs.agents }}
+      RPS: ${{ inputs.rps }}
+      MINUTES: ${{ inputs.minutes }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Require the deploy token
+        run: test -n "$CLOUDFLARE_API_TOKEN" || { echo "Set the CLOUDFLARE_API_TOKEN repository secret first."; exit 1; }
+      - name: Check the inputs
+        run: |
+          check() { [[ "$2" =~ ^[0-9]+$ ]] && (( $2 >= $3 && $2 <= $4 )) || { echo "::error::$1 must be an integer from $3 to $4"; exit 1; }; }
+          check agents "$AGENTS" 1 500
+          check rps "$RPS" 1 50
+          check minutes "$MINUTES" 1 30
+          [[ "$NAME" =~ ^jchain-loadtest-[0-9]+$ ]] || { echo "::error::bad staging name $NAME"; exit 1; }
+          WORK="$RUNNER_TEMP/loadtest"
+          mkdir -p "$WORK/cwd"
+          chmod 700 "$WORK"
+          {
+            echo "WORK=$WORK"
+            echo "WR=$GITHUB_WORKSPACE/node_modules/.bin/wrangler"
+          } >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Resolve the account
+        run: echo "CLOUDFLARE_ACCOUNT_ID=$(node scripts/loadtest-config.mjs --print-account-id)" >> "$GITHUB_ENV"
+
+      - name: Create the D1 database, R2 bucket, and queues
+        working-directory: ${{ runner.temp }}/loadtest/cwd
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          "$WR" d1 create "$NAME" > "$WORK/create.log" 2>&1 || { cat "$WORK/create.log"; fail "Could not create D1 database $NAME. The CLOUDFLARE_API_TOKEN needs D1: Edit."; }
+          D1_ID=$("$WR" d1 list --json | jq -r --arg name "$NAME" '.[] | select(.name == $name) | .uuid')
+          [[ "$D1_ID" =~ ^[0-9a-f-]{36}$ ]] || fail "Created $NAME but could not read its id from wrangler d1 list."
+          echo "D1_ID=$D1_ID" >> "$GITHUB_ENV"
+          "$WR" r2 bucket create "$NAME" > "$WORK/create.log" 2>&1 || { cat "$WORK/create.log"; fail "Could not create R2 bucket $NAME. The CLOUDFLARE_API_TOKEN needs Workers R2 Storage: Edit."; }
+          for queue in $(node "$GITHUB_WORKSPACE/scripts/loadtest-config.mjs" --print-queues --run-id "$RUN"); do
+            "$WR" queues create "$queue" > "$WORK/create.log" 2>&1 || { cat "$WORK/create.log"; fail "Could not create queue $queue. The CLOUDFLARE_API_TOKEN needs Queues: Edit."; }
+            echo "created queue $queue"
+          done
+
+      - name: Generate the staging config
+        run: |
+          SUBDOMAIN=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain // empty')
+          [[ "$SUBDOMAIN" =~ ^[a-z0-9-]+$ ]] || { echo "::error::Could not read the account's workers.dev subdomain. The token needs Workers Scripts: Read, and the account needs a workers.dev subdomain."; exit 1; }
+          ORIGIN="https://$NAME.$SUBDOMAIN.workers.dev"
+          node scripts/loadtest-config.mjs --run-id "$RUN" --d1-id "$D1_ID" --origin "$ORIGIN" --agents "$AGENTS" --out "$WORK/wrangler.json"
+          {
+            echo "ORIGIN=$ORIGIN"
+            echo "CONFIG=$WORK/wrangler.json"
+          } >> "$GITHUB_ENV"
+
+      - name: Apply migrations to the scratch database
+        run: '"$WR" d1 migrations apply "$NAME" --remote --config "$CONFIG"'
+
+      - name: Deploy the staging copy
+        run: '"$WR" deploy --config "$CONFIG" --var "BUILD_SHA:${GITHUB_SHA::7}"'
+
+      - name: Wait for /health
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -sSf "$ORIGIN/health" | jq -e '.ok == true' > /dev/null; then echo "healthy after $attempt attempts"; exit 0; fi
+            sleep 10
+          done
+          echo "::error::$ORIGIN/health did not answer within 5 minutes"
+          exit 1
+
+      - name: Seed Operators, Agents, and Credentials
+        # The tokens file holds plaintext Credentials. It stays in the runner temp directory and is
+        # never uploaded. D1 gets only their SHA-256 hashes.
+        run: |
+          node scripts/loadtest.mjs seed --agents "$AGENTS" --sql "$WORK/seed.sql" --tokens "$WORK/tokens.json"
+          "$WR" d1 execute "$NAME" --remote --config "$CONFIG" --file "$WORK/seed.sql"
+
+      - name: Run the load
+        run: |
+          # #164: tail the staging copy for the whole load, so an error has its cause. Only the
+          # outcome, the exception, the error log lines, the path, and the status are kept below;
+          # no header, body, or token is read from the tail.
+          "$WR" tail "$NAME" --config "$CONFIG" --format json > "$WORK/tail.jsonl" 2> "$WORK/tail.err" &
+          echo $! > "$WORK/tail.pid"
+          sleep 8
+          node scripts/loadtest.mjs run --base "$ORIGIN" --tokens "$WORK/tokens.json" \
+            --rps "$RPS" --minutes "$MINUTES" --out loadtest-receipt.json --assets "$WORK/asset-ids.txt"
+
+      - name: Report errors from the tail
+        if: always()
+        run: |
+          test -f "$WORK/tail.pid" && kill "$(cat "$WORK/tail.pid")" 2> /dev/null || true
+          sleep 2
+          test -s "$WORK/tail.jsonl" || { echo "::warning title=Load tail::no tail events captured: $(head -c 300 "$WORK/tail.err" 2> /dev/null)"; exit 0; }
+          total=$(jq -cs 'length' "$WORK/tail.jsonl" 2> /dev/null || echo 0)
+          jq -c 'select((.outcome // "ok") != "ok" or ((.exceptions // []) | length) > 0 or ([(.logs // [])[] | select(.level == "error")] | length) > 0 or ((.event.response.status // 200) >= 500))
+                 | {outcome, status: .event.response.status, path: ((.event.request.url // "") | sub("^https?://[^/]+"; "") | sub("\\?.*$"; "")),
+                    exceptions: [(.exceptions // [])[] | {name, message: ((.message // "") | .[0:300])}],
+                    errors: [(.logs // [])[] | select(.level == "error") | (.message | tostring | .[0:300])]}' "$WORK/tail.jsonl" > "$WORK/tail-errors.jsonl" || true
+          bad=$(wc -l < "$WORK/tail-errors.jsonl")
+          echo "::notice title=Load tail::$total events tailed, $bad with an error"
+          head -n 20 "$WORK/tail-errors.jsonl" | while IFS= read -r line; do
+            echo "::warning title=Load tail error::${line:0:3500}"
+          done
+
+      - name: Annotate the receipt
+        # Logs and artifacts are not always reachable for the reader; the receipt (no tokens)
+        # also lands as an annotation, split so no line passes GitHub's annotation size limit.
+        if: always()
+        run: |
+          test -f loadtest-receipt.json || exit 0
+          jq -c . loadtest-receipt.json | fold -w 3500 | while IFS= read -r part; do
+            echo "::notice title=Load receipt::$part"
+          done
+
+      - name: Upload the receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: loadtest-receipt-${{ github.run_id }}
+          path: loadtest-receipt.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Tear down every staging resource
+        if: always()
+        working-directory: ${{ runner.temp }}
+        run: |
+          [[ "$NAME" =~ ^jchain-loadtest-[0-9]+$ ]] || { echo "::error::refusing to tear down $NAME"; exit 1; }
+          WORK="${WORK:-$RUNNER_TEMP/loadtest}"
+          WR="${WR:-$GITHUB_WORKSPACE/node_modules/.bin/wrangler}"
+          mkdir -p "$WORK"
+          rm -f "$WORK/tokens.json"
+          failed=0
+          absent='not found|not_found|does not exist|doesn.t exist|could not find|couldn.t find|no such|10007|10006|11000'
+          attempt() {
+            local label="$1"; shift
+            local output
+            if output=$("$@" 2>&1); then echo "deleted: $label"; return 0; fi
+            if grep -Eqi "$absent" <<< "$output"; then echo "already absent: $label"; return 0; fi
+            echo "$output"
+            echo "::error::could not delete $label"
+            failed=1
+          }
+          config=()
+          if [[ -n "${CONFIG:-}" && -f "$CONFIG" ]]; then config=(--config "$CONFIG"); fi
+          queues=$(node "$GITHUB_WORKSPACE/scripts/loadtest-config.mjs" --print-queues --run-id "$RUN")
+          # Asset ids from the scratch database, so the bucket can be emptied even if the run died.
+          touch "$WORK/asset-ids.txt"
+          if [[ ${#config[@]} -gt 0 ]]; then
+            "$WR" d1 execute "$NAME" --remote --json "${config[@]}" --command "SELECT id FROM assets" 2> /dev/null \
+              | jq -r '.[0].results[]?.id // empty' >> "$WORK/asset-ids.txt" || true
+          fi
+          # Deleting the Worker drops its consumers too. Removing them first is best effort.
+          for queue in $queues; do
+            "$WR" queues consumer remove "$queue" "$NAME" > /dev/null 2>&1 && echo "removed consumer of $queue" || true
+          done
+          attempt "Worker $NAME" "$WR" delete --name "$NAME" --force
+          for queue in $queues; do
+            attempt "queue $queue" "$WR" queues delete "$queue"
+          done
+          attempt "objects in R2 bucket $NAME" node "$GITHUB_WORKSPACE/scripts/loadtest.mjs" empty-bucket --bucket "$NAME" --assets "$WORK/asset-ids.txt"
+          attempt "R2 bucket $NAME" "$WR" r2 bucket delete "$NAME"
+          attempt "D1 database $NAME" "$WR" d1 delete "$NAME" --skip-confirmation
+          rm -rf "$WORK"
+          exit "$failed"

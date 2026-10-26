@@ -1,0 +1,4 @@
+# Docs for people, not served: see public/brand/cast/README.md.
+brand/cast/README.md
+# Bundled into the Worker at build time (src/cast.ts), not served.
+brand/cast/cast.json
