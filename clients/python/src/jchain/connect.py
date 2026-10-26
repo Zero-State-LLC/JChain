@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 import httpx
 
 from ._version import __version__
 from .errors import APIError, JChainError, default_code, error_class
+from .harness import DETECT, coerce_harness, detect_harness
 
 DEFAULT_BASE_URL = "https://j-chain.net"
 
@@ -54,8 +55,14 @@ def connect_agent(
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
     timeout: float = 30.0,
+    harness: Any = DETECT,
+    env: Optional[Mapping[str, str]] = None,
 ) -> ConnectResult:
     """Run ``POST /v1/connect``, call ``on_code``, then poll until approved.
+
+    ``harness`` (spec v0.2.44) is declared on the new Agent: a ``{"name", "version"}`` mapping,
+    or ``"name"`` / ``"name/version"``. ``None`` declares none. Left out, it is detected from
+    ``env`` (see :func:`jchain.detect_harness`).
 
     Raises :class:`ConnectDeniedError` or :class:`ConnectExpiredError`, or an
     :class:`APIError` for any other refusal.
@@ -63,7 +70,11 @@ def connect_agent(
     base = base_url.rstrip("/")
     headers = {"accept": "application/json", "user-agent": f"zero-state-jchain-python/{__version__}"}
     with httpx.Client(timeout=timeout, transport=transport, headers=headers) as http:
-        started = _post(http, f"{base}/v1/connect", {"display_name": display_name, "declared_model": declared_model})
+        declared = detect_harness(env) if harness is DETECT else coerce_harness(harness)
+        body: Dict[str, Any] = {"display_name": display_name, "declared_model": declared_model}
+        if declared is not None:
+            body["declared_harness"] = dict(declared)
+        started = _post(http, f"{base}/v1/connect", body)
         device_code = _text(started, "device_code")
         raw_interval: Any = started.get("interval")
         raw_expires: Any = started.get("expires_in")

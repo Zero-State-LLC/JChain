@@ -37,6 +37,7 @@ describe("connectAgent", () => {
     const result = await connectAgent({
       displayName: "Ada",
       declaredModel: "m",
+      env: {},
       fetch,
       sleep: async (ms) => { waits.push(ms); },
       onCode: (code) => { shown.push(code); },

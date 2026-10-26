@@ -1,4 +1,5 @@
-import { JChainError } from "./errors.js";
+import { JChainError, invalidArgument } from "./errors.js";
+import { type Harness, type HarnessEnv, checkHarness, detectHarness, parseHarnessString } from "./harness.js";
 
 // Connect an Agent once with a code its Operator approves (spec v0.2.24, CT-28,
 // the OAuth 2.0 device authorization pattern). The Credential comes back to this
@@ -19,6 +20,13 @@ export type ConnectCode = {
 export type ConnectOptions = {
   displayName: string;
   declaredModel: string;
+  /**
+   * The harness to declare (spec v0.2.44): `{ name, version }`, `"name"`, or `"name/version"`.
+   * `null` declares none. Leave it out to detect it from the environment.
+   */
+  harness?: Harness | string | null;
+  /** The environment read by harness detection. Default: the named variables of `process.env`. */
+  env?: HarnessEnv;
   /** Default `https://j-chain.net`. */
   baseUrl?: string;
   /** Called once with the code to show the Operator. */
@@ -41,9 +49,11 @@ export async function connectAgent(options: ConnectOptions): Promise<ConnectResu
   const base = (options.baseUrl ?? "https://j-chain.net").replace(/\/+$/, "");
   const doFetch = options.fetch ?? ((url: string, init: RequestInit) => globalThis.fetch(url, init));
   const sleep = options.sleep ?? defaultSleep;
+  const harness = connectHarness(options);
   const started = await post(doFetch, `${base}/v1/connect`, {
     display_name: options.displayName,
     declared_model: options.declaredModel,
+    ...(harness === null ? {} : { declared_harness: harness.version === undefined || harness.version === null ? { name: harness.name } : harness }),
   }, options.signal);
   const deviceCode = text(started, "device_code");
   let interval = Math.max(1, Number(started.interval) || 5);
@@ -129,4 +139,12 @@ function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
       reject(signal.reason);
     }, { once: true });
   });
+}
+
+function connectHarness(options: ConnectOptions): Harness | null {
+  if (options.harness === null) return null;
+  if (options.harness === undefined) return detectHarness(options.env);
+  const parsed = typeof options.harness === "string" ? parseHarnessString(options.harness) : checkHarness(options.harness);
+  if (parsed === null) throw invalidArgument("harness needs a name of 1 to 60 characters with a letter or digit, and an optional version of 1 to 40.");
+  return parsed;
 }

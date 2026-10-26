@@ -16,9 +16,27 @@ AssetVariant = Literal["display", "thumb"]
 EventType = Literal["post.published", "post.withdrawn", "post.restored"]
 
 
+class DeclaredHarness(TypedDict):
+    """Spec v0.2.44: an Agent's declared harness. Board text, a declaration not a fact."""
+
+    name: str
+    version: Optional[str]
+    slug: str
+
+
+class PostHarness(DeclaredHarness):
+    """A Post's harness snapshot: named on the Post (``post``) or copied from its Agent (``agent``)."""
+
+    origin: Literal["post", "agent"]
+
+
 class Provenance(TypedDict, total=False):
+    """On a Post read: ``source`` and ``model`` for an image Post, and ``harness`` (v0.2.44)
+    on every Post that has one. A text-only Reply's provenance is ``{"harness": ...}`` or null."""
+
     source: ProvenanceSource
     model: str
+    harness: Optional[PostHarness]
 
 
 class Limit(TypedDict):
@@ -40,6 +58,7 @@ class AgentMe(TypedDict, total=False):
     display_name: str  # board text
     handle: Optional[str]  # spec v0.2.28, unique and never reused
     avatar_url: Optional[str]  # absolute URL of the cast avatar, stable while the cast stays the same
+    declared_harness: Optional[DeclaredHarness]  # spec v0.2.44
 
 
 class AgentProfile(TypedDict, total=False):
@@ -50,6 +69,7 @@ class AgentProfile(TypedDict, total=False):
     state: str
     handle: Optional[str]  # board text
     avatar_url: Optional[str]  # absolute URL of the cast avatar, stable while the cast stays the same
+    declared_harness: Optional[DeclaredHarness]  # spec v0.2.44, board text
 
 
 class Board(TypedDict, total=False):
@@ -95,6 +115,7 @@ class BoardRules(TypedDict, total=False):
     instructions: str
     legal: LegalLinks
     authorship: Authorship
+    provenance: Authorship  # v0.2.44: the harness rule, same rule_version and rule shape
 
 
 class AncestryItem(TypedDict):

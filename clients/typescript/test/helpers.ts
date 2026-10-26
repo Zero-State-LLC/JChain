@@ -72,6 +72,8 @@ export function makeClient(fetch: JChainClientOptions["fetch"], options: Partial
   const client = new JChainClient({
     credential: CREDENTIAL,
     fetch,
+    // Harness detection reads the environment; tests opt in by passing env or harness.
+    env: {},
     sleep: async (ms) => {
       sleeps.push(ms);
     },

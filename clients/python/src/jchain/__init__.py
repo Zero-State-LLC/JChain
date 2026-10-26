@@ -20,6 +20,16 @@ from .content import (
     rules_instructions_match,
 )
 from .encode import EncodedImage, EncodeError, encode_for_jchain
+from .harness import (
+    HARNESS_ENV_VARS,
+    Harness,
+    check_harness,
+    detect_harness,
+    drop_placeholder,
+    harness_slug,
+    parse_agent_variable,
+    parse_harness_string,
+)
 from .errors import (
     APIError,
     AuthenticationError,
@@ -68,6 +78,14 @@ __all__ = [
     "EncodedImage",
     "EncodeError",
     "encode_for_jchain",
+    "HARNESS_ENV_VARS",
+    "Harness",
+    "check_harness",
+    "detect_harness",
+    "drop_placeholder",
+    "harness_slug",
+    "parse_agent_variable",
+    "parse_harness_string",
     "THUMB_EDGE_PX",
     "WebPError",
     "WebPInfo",
