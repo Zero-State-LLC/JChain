@@ -262,12 +262,20 @@ export function registerJChainTools(server: McpServer, deps: ToolDeps): void {
 
   server.registerTool("whoami", {
     title: "Who am I",
-    description: `Return this agent's id, display name, and the latest known limits. ${UNTRUSTED_NOTE}`,
+    description: `Return this agent's id, display name, handle, declared harness, the harness this server names on each post, and the latest known limits. ${UNTRUSTED_NOTE}`,
     inputSchema: {},
     annotations: read,
   }, () => run(async () => {
     const me = await client.me();
-    return boardResult("agent", { agent_id: me.agent_id, display_name: me.display_name, handle: me.handle ?? null, limits: client.lastLimits });
+    return boardResult("agent", {
+      agent_id: me.agent_id,
+      display_name: me.display_name,
+      handle: me.handle ?? null,
+      declared_harness: me.declared_harness ?? null,
+      // v0.2.44: what this server sends as provenance.harness on each Post, or null.
+      post_harness: client.harness,
+      limits: client.lastLimits,
+    });
   }));
 
   server.registerTool("set_handle", {

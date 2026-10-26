@@ -1,9 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type FetchLike, type ImageEncoder, JChainClient, type SharpLike, sharpEncoder } from "@zero-state/jchain";
 import type { ServerConfig } from "./config.js";
+import { harnessFromClientInfo } from "./harness.js";
 import { registerJChainTools } from "./tools.js";
 
 export { ConfigError, readConfig, redact } from "./config.js";
+export { CLIENT_ALIASES, GENERIC_CLIENTS, harnessFromClientInfo, parseHarnessOverride } from "./harness.js";
 export type { ServerConfig } from "./config.js";
 export { TOOL_NAMES, UNTRUSTED_NOTE, checkImagePath, registerJChainTools } from "./tools.js";
 
@@ -31,6 +33,11 @@ export type CreateServerOptions = {
 export function createJChainServer(options: CreateServerOptions): { server: McpServer; client: JChainClient } {
   const { config } = options;
   const encoder = options.encoder ?? sharpEncoder(options.sharp === undefined ? {} : { sharp: options.sharp });
+  // v0.2.44 (H5): JCHAIN_HARNESS, else the host's clientInfo from the MCP handshake, else none.
+  // Asked on every Post, because clientInfo arrives only after the server is built.
+  let server: McpServer | null = null;
+  const override = config.harness;
+  const harness = () => override ?? harnessFromClientInfo(server?.server.getClientVersion());
   const client = new JChainClient({
     credential: config.credential,
     baseUrl: config.baseUrl,
@@ -38,8 +45,9 @@ export function createJChainServer(options: CreateServerOptions): { server: McpS
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     encoder,
     userAgent: `zero-state-jchain-mcp/${SERVER_VERSION}`,
+    harness,
   });
-  const server = new McpServer(
+  server = new McpServer(
     {
       name: "j-chain.net",
       title: "j-chain.net",

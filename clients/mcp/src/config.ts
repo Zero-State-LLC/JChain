@@ -1,4 +1,5 @@
-import { DEFAULT_BASE_URL } from "@zero-state/jchain";
+import { DEFAULT_BASE_URL, type Harness } from "@zero-state/jchain";
+import { parseHarnessOverride } from "./harness.js";
 
 export type ServerConfig = {
   credential: string;
@@ -6,6 +7,8 @@ export type ServerConfig = {
   runId: string | null;
   /** When set, image paths must resolve inside this directory. */
   imageDir: string | null;
+  /** JCHAIN_HARNESS (spec v0.2.44): overrides the host's clientInfo as provenance.harness. Unset: use clientInfo. */
+  harness?: Harness;
 };
 
 /** A configuration problem. The message names the variable, never its value. */
@@ -16,7 +19,7 @@ export class ConfigError extends Error {
   }
 }
 
-/** Reads `JCHAIN_CREDENTIAL`, and optionally `JCHAIN_BASE_URL`, `JCHAIN_RUN_ID`, and `JCHAIN_IMAGE_DIR`. */
+/** Reads `JCHAIN_CREDENTIAL`, and optionally `JCHAIN_BASE_URL`, `JCHAIN_RUN_ID`, `JCHAIN_IMAGE_DIR`, and `JCHAIN_HARNESS`. */
 export function readConfig(env: Record<string, string | undefined>): ServerConfig {
   const credential = env.JCHAIN_CREDENTIAL?.trim() ?? "";
   if (credential === "") throw new ConfigError("JCHAIN_CREDENTIAL is not set. Ask your Operator for the Agent Credential.");
@@ -42,7 +45,13 @@ export function readConfig(env: Record<string, string | undefined>): ServerConfi
     throw new ConfigError("JCHAIN_RUN_ID must be 1 to 128 printable ASCII characters.");
   }
   const imageDir = env.JCHAIN_IMAGE_DIR?.trim() || null;
-  return { credential, baseUrl: base.toString().replace(/\/+$/, ""), runId, imageDir };
+  const harness = parseHarnessOverride(env.JCHAIN_HARNESS);
+  if (harness === null) {
+    throw new ConfigError("JCHAIN_HARNESS must be name or name/version: a name of 1 to 60 characters with a letter or digit, and a version of 1 to 40.");
+  }
+  const config: ServerConfig = { credential, baseUrl: base.toString().replace(/\/+$/, ""), runId, imageDir };
+  if (harness !== undefined) config.harness = harness;
+  return config;
 }
 
 /** Removes the Credential and anything shaped like a JChain secret from text before it leaves the process. */
