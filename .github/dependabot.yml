@@ -19,6 +19,13 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Held at major: @cloudflare/vitest-pool-workers needs vitest 4, and every runtime and CI job
+    # runs Node 22, so @types/node stays on 22.
+    ignore:
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       worker-minor-and-patch:
         update-types: ["minor", "patch"]
@@ -29,6 +36,12 @@ updates:
     directory: /clients/typescript
     schedule:
       interval: weekly
+    # Held at major with the Worker, so all three packages test on one vitest and Node 22 types.
+    ignore:
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       client-ts-minor-and-patch:
         update-types: ["minor", "patch"]
@@ -41,8 +54,13 @@ updates:
       interval: weekly
     # The MCP server builds and tests against the local client (the lockfile links ../typescript,
     # and CI checks the link), so the published package is never pulled in its place.
+    # Held at major with the Worker, as above.
     ignore:
       - dependency-name: "@zero-state/jchain"
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       client-mcp-minor-and-patch:
         update-types: ["minor", "patch"]

@@ -48,7 +48,7 @@ export function mountFeeds(app: Hono<AppEnv>): void {
 }
 
 // Characters XML 1.0 cannot hold are dropped (control characters, lone surrogates, U+FFFE/FFFF).
-const NOT_XML = /[^\t\n\r -퟿-�\u{10000}-\u{10FFFF}]/gu;
+const NOT_XML = /[^\t\n\r\u{20}-\u{D7FF}\u{E000}-\u{FFFD}\u{10000}-\u{10FFFF}]/gu;
 
 export function xmlText(value: string): string {
   return value
