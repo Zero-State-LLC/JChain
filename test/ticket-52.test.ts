@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import worker from "../src/index";
 import { VALID_WEBP } from "./fixtures/bytes";
 import { BOARD_ID, MODERATOR, OPERATOR, call, clearConnectQuota, resetAndSeed } from "./harness";
+import { runRetention } from "../src/retention";
 
 // Ticket 52 (v0.2.44): the agent harness in Provenance.
 
@@ -116,6 +117,12 @@ describe("AT-91 an Agent declares a harness", () => {
     await expectError(await call("/v1/connect", {
       body: { display_name: "Bea", declared_model: "m", declared_harness: { name: "\u0000" } },
     }), 422, "validation_failed");
+    // The Operator sees what the agent declared before approving it, as quoted data.
+    const confirm = await (await call(`/operator/connect?code=${String(started.user_code)}`, { email: OPERATOR })).text();
+    expect(confirm).toContain("<dt>Harness</dt><dd>Hermes 0.9</dd>");
+    const bare = await expectSuccess(await call("/v1/connect", { body: { display_name: "Cy", declared_model: "m" } }), 201);
+    const bareConfirm = await (await call(`/operator/connect?code=${String(bare.user_code)}`, { email: OPERATOR })).text();
+    expect(bareConfirm).toContain("<dt>Harness</dt><dd>Not declared</dd>");
     const approved = await call("/operator/connect", {
       email: OPERATOR,
       raw: form({ code: String(started.user_code), decision: "approve" }),
@@ -386,3 +393,25 @@ async function expectSuccess(response: Response, status = 200): Promise<Record<s
   expect(response.status, JSON.stringify(body)).toBe(status);
   return body;
 }
+
+describe("H7 the harness leaves with a removed Post", () => {
+  it("clears the snapshot when a removal finishes, and scrubs a Post removed before this change", async () => {
+    const agent = await enroll("Ada", CLAUDE_CODE);
+    await seedThread(agent.agentId);
+    const pending = "01900000-0000-7000-8000-00000000b0c1";
+    const removed = "01900000-0000-7000-8000-00000000b0c2";
+    for (const [id, state, caption] of [[pending, "removal_pending", "pending words"], [removed, "removed", ""]] as const) {
+      await env.DB.prepare(
+        `INSERT INTO posts (id, thread_id, author_agent_id, asset_id, title, caption, alt_text, provenance_source, provenance_model,
+           harness_name, harness_version, harness_origin, rights_attestation, license, remix_of_post_id, state, created_at)
+         VALUES (?, ?, ?, NULL, NULL, ?, NULL, NULL, NULL, 'Claude Code', '2.3.1', 'agent', NULL, NULL, NULL, ?, '2026-10-25T01:00:00Z')`,
+      ).bind(id, THREAD_ID, agent.agentId, caption, state).run();
+    }
+    await runRetention(env as unknown as Parameters<typeof runRetention>[0], Date.now());
+    for (const id of [pending, removed]) {
+      const row = await env.DB.prepare("SELECT state, caption, harness_name, harness_version, harness_origin FROM posts WHERE id = ?")
+        .bind(id).first<Record<string, unknown>>();
+      expect(row, id).toEqual({ state: "removed", caption: "", harness_name: null, harness_version: null, harness_origin: "none" });
+    }
+  });
+});
