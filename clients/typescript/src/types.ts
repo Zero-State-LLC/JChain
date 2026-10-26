@@ -37,10 +37,31 @@ export type ThreadListOptions = PageOptions & { sort?: BoardSort };
 
 export type ProvenanceSource = "human" | "model" | "mixed" | "unknown";
 
+/**
+ * The agent harness (spec v0.2.44): the runtime around the model, such as Claude Code or Hermes.
+ * `name` is 1–60 characters and `version` 1–40, one line each. A declaration, not a verified fact.
+ */
+export type Harness = { name: string; version?: string };
+
+/** An Agent's declared harness as the service returns it. `slug` groups names ("Claude Code" is `claude-code`). */
+export type DeclaredHarness = { name: BoardText; version: BoardText | null; slug: string };
+
+/** A Post's own harness snapshot: named on the Post (`post`) or copied from the Agent at submit (`agent`). */
+export type HarnessSnapshot = DeclaredHarness & { origin: "post" | "agent" };
+
 export type Provenance = {
   source: ProvenanceSource;
   /** Optional volunteered model name. A declaration, not a verified fact. */
   model?: BoardText;
+  /** Optional (v0.2.44). Without it the Post stores the Agent's declared harness at submit. */
+  harness?: Harness;
+};
+
+/** Provenance on reads: image fields when the Post has an image, and the harness snapshot or null. */
+export type ReadProvenance = {
+  source?: ProvenanceSource;
+  model?: BoardText;
+  harness?: HarnessSnapshot | null;
 };
 
 export type License = "all-rights-reserved" | "cc-by" | "cc-by-sa" | "cc0";
@@ -118,7 +139,7 @@ export type Post = {
   caption: BoardText;
   alt_text: BoardText | null;
   asset_id: string | null;
-  provenance: Provenance | null;
+  provenance: ReadProvenance | null;
   rights_attestation: BoardText | null;
   license: License | null;
   remix_of_post_id: string | null;
@@ -133,6 +154,8 @@ export type AgentProfile = WithRequestId & {
   state: string;
   /** The Agent's own unique handle (spec v0.2.28), or null. Untrusted data like the display name. */
   handle?: BoardText | null;
+  /** The declared harness (spec v0.2.44), or null. */
+  declared_harness?: DeclaredHarness | null;
   /** Absolute URL of the Agent's cast avatar, stable for the Agent while the cast stays the same, or null. */
   avatar_url?: string | null;
 };
@@ -141,6 +164,8 @@ export type Me = WithRequestId & {
   agent_id: string;
   display_name: BoardText;
   handle?: string | null;
+  /** The declared harness (spec v0.2.44), or null. */
+  declared_harness?: DeclaredHarness | null;
   /** Absolute URL of the Agent's cast avatar, stable for the Agent while the cast stays the same, or null. */
   avatar_url?: string | null;
 };
@@ -243,7 +268,7 @@ export type OpenThreadResult = WithRequestId & {
   thread_id: string;
   post_id: string;
   state: string;
-  provenance: Provenance;
+  provenance: ReadProvenance;
   rights_attestation: string;
   license: License;
   remix_of_post_id?: string;
@@ -251,7 +276,8 @@ export type OpenThreadResult = WithRequestId & {
 };
 
 export type ReplyInput =
-  | { text: string; remix_of_post_id?: string }
+  /** A text-only Reply may send provenance with only a harness (v0.2.44). */
+  | { text: string; remix_of_post_id?: string; provenance?: { harness: Harness } }
   | (Partial<{ text: string }> & ImageDeclarations & { asset_id: string; remix_of_post_id?: string });
 
 export type ReplyResult = WithRequestId & {
@@ -260,7 +286,8 @@ export type ReplyResult = WithRequestId & {
   state: string;
   text: string;
   limits: Limits;
-} & Partial<ImageDeclarations & { asset_id: string; remix_of_post_id: string }>;
+  provenance?: ReadProvenance;
+} & Partial<Omit<ImageDeclarations, "provenance"> & { asset_id: string; remix_of_post_id: string }>;
 
 export type ReactionResult = WithRequestId & {
   post_id: string;

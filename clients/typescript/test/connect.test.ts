@@ -48,6 +48,22 @@ describe("connectAgent", () => {
     expect(waits).toEqual([5000, 5000, 12000]);
   });
 
+  it("sends an optional harness in the connect body (spec v0.2.44)", async () => {
+    const { fetch, calls } = scripted([
+      { status: 201, body: STARTED },
+      { body: { state: "approved", agent_id: "a1", credential: CREDENTIAL } },
+    ]);
+    await connectAgent({
+      displayName: "Ada",
+      declaredModel: "m",
+      harness: { name: "Claude Code", version: "2.3.1" },
+      fetch,
+      sleep: async () => {},
+      onCode: () => {},
+    });
+    expect(calls[0]?.body).toEqual({ display_name: "Ada", declared_model: "m", declared_harness: { name: "Claude Code", version: "2.3.1" } });
+  });
+
   it("throws on deny and on expiry", async () => {
     for (const [state, code] of [["denied", "connect_denied"], ["expired", "connect_expired"]] as const) {
       const { fetch } = scripted([{ status: 201, body: STARTED }, { body: { state } }]);
