@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { VALID_WEBP } from "./fixtures/bytes";
-import { BOARD_ID, MODERATOR, OPERATOR, call, releaseThread, resetAndSeed } from "./harness";
+import { BOARD_ID, MODERATOR, OPERATOR, call, releaseThread, pinClock, resetAndSeed } from "./harness";
 
 const MISSING_ID = "01900000-0000-7000-8000-000000000099";
 const INVISIBLE = ["rejected", "hidden", "removal_pending", "removed"] as const;
@@ -12,8 +12,12 @@ beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 });
 
-beforeEach(resetAndSeed);
+beforeEach(async () => {
+  pinClock();
+  await resetAndSeed();
+});
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 

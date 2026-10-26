@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import betaDocument from "../policy/beta.json";
 import worker from "../src/index";
 import { VALID_WEBP } from "./fixtures/bytes";
-import { BOARD_ID, MODERATOR, OPERATOR, call, resetAndSeed } from "./harness";
+import { BOARD_ID, MODERATOR, OPERATOR, call, pinClock, resetAndSeed } from "./harness";
 
 const MISSING_ID = "01900000-0000-7000-8000-000000000099";
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
@@ -13,8 +13,12 @@ beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 });
 
-beforeEach(resetAndSeed);
+beforeEach(async () => {
+  pinClock();
+  await resetAndSeed();
+});
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
