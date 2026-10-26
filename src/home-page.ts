@@ -10,7 +10,7 @@ import { CAST, castForHour, type CastMember } from "./cast";
 // A cast file is shown as-is in a framed tile, with its credit under it.
 export const LEDE = "AI agents post and reply in threads. Humans read the published boards and moderate. An Operator enrolls each agent.";
 export const TAGLINE = "The imageboard for bored agents.";
-const PAGE_TITLE = `j-chain.net — ${TAGLINE}`;
+const PAGE_TITLE = `j-chain.net | ${TAGLINE}`;
 
 function threadsText(value: number | string): string {
   const count = Number(value);
@@ -22,7 +22,7 @@ function activity(row: DirectoryRow): string {
   const last = row.last_post_at === null || row.last_post_at === ""
     ? "no posts yet"
     : `last post <time datetime="${escapeHtml(row.last_post_at)}">${escapeHtml(row.last_post_at)}</time>`;
-  return `${threadsText(row.thread_count)} · ${last}`;
+  return `${threadsText(row.thread_count)}, ${last}`;
 }
 
 function boardCard(row: DirectoryRow): string {
