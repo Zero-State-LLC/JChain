@@ -205,9 +205,12 @@ describe("reactions", () => {
     const ada = await enroll("Ada");
     const { postId } = await publishedThread(ada.credential, "race one", true);
     const policy = agentPolicy({ reactions_per_minute: 1 });
+    // Pin the interleaving that used to flake: the winner takes the only slot, and its D1 batch
+    // waits until the loser's charge is refused, so the loser looks for the winner's row first.
+    const gated = overlapEnv(policy);
     const [first, second] = await Promise.all([
-      react(ada.credential, postId, "plus", "race-one", undefined, policy),
-      react(ada.credential, postId, "plus", "race-one", undefined, policy),
+      reactIn(gated, ada.credential, postId, "plus", "race-one"),
+      reactIn(gated, ada.credential, postId, "plus", "race-one"),
     ]);
     expect([first.status, second.status].every((status) => status === 200 || status === 201)).toBe(true);
     expect(await reactionRows(postId, "plus", ada.agentId)).toBe(1);
@@ -395,6 +398,83 @@ function react(
     headers: { "idempotency-key": key },
     body,
     policy,
+  });
+}
+
+function reactIn(bindings: Env, credential: string, postId: string, type: string, key: string): Promise<Response> {
+  return call(`/v1/posts/${postId}/reactions/${type}`, {
+    method: "PUT",
+    bearer: credential,
+    headers: { "idempotency-key": key },
+    env: bindings,
+  });
+}
+
+// The test bindings with `policy`, pinning one interleaving: the first D1 batch waits until a
+// quota charge has been refused and the refused request has then read the idempotency key once.
+function overlapEnv(policy: string): Env {
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  let refusedAt = false;
+  let batches = 0;
+  const forward = <T extends object>(target: T, property: string | symbol): unknown => {
+    const value = Reflect.get(target, property, target) as unknown;
+    return typeof value === "function" ? value.bind(target) : value;
+  };
+  const watch = (statement: D1PreparedStatement): D1PreparedStatement => new Proxy(statement, {
+    get(target, property) {
+      if (property === "bind") return (...values: unknown[]) => watch(target.bind(...values));
+      if (property !== "first") return forward(target, property);
+      return async (...args: []) => {
+        const row = await target.first(...args);
+        if (refusedAt) open();
+        return row;
+      };
+    },
+  });
+  const db = new Proxy(env.DB, {
+    get(target, property) {
+      if (property === "prepare") {
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          return /FROM idempotency_keys/.test(sql) && /^\s*SELECT/i.test(sql) ? watch(statement) : statement;
+        };
+      }
+      if (property !== "batch") return forward(target, property);
+      return async (statements: D1PreparedStatement[]) => {
+        batches += 1;
+        if (batches === 1) await gate;
+        return target.batch(statements);
+      };
+    },
+  });
+  const quota = new Proxy(env.QUOTA, {
+    get(target, property) {
+      if (property !== "getByName") return forward(target, property);
+      return (name: string) => {
+        const stub = target.getByName(name);
+        return new Proxy(stub, {
+          get(inner, method) {
+            if (method !== "apply") return forward(inner, method);
+            return async (charges: Parameters<typeof stub.apply>[0]) => {
+              const result = await stub.apply(charges);
+              if (!result.ok) refusedAt = true;
+              return result;
+            };
+          },
+        });
+      };
+    },
+  });
+  return new Proxy(env, {
+    get(target, property) {
+      if (property === "POLICY") return policy;
+      if (property === "DB") return db;
+      if (property === "QUOTA") return quota;
+      return forward(target, property);
+    },
   });
 }
 
