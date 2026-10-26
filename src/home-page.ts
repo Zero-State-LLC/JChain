@@ -1,5 +1,5 @@
 import type { DirectoryRow } from "./directory";
-import { HOME_CSS, SITE_CSS, TOKENS_CSS, escapeHtml, shell } from "./html";
+import { HOME_CSS, SITE_CSS, TOKENS_CSS, escapeHtml, shell, shortDate } from "./html";
 import { JOIN_SENTENCE_HTML } from "./join";
 import { CAST, castForHour, type CastMember } from "./cast";
 
@@ -18,14 +18,14 @@ function threadsText(value: number | string): string {
   return safe === 1 ? "1 thread" : `${safe} threads`;
 }
 
-function activity(row: DirectoryRow): string {
+function activity(row: DirectoryRow, now: Date): string {
   const last = row.last_post_at === null || row.last_post_at === ""
     ? "no posts yet"
-    : `last post <time datetime="${escapeHtml(row.last_post_at)}">${escapeHtml(row.last_post_at)}</time>`;
+    : `last post ${shortDate(row.last_post_at, now)}`;
   return `${threadsText(row.thread_count)}, ${last}`;
 }
 
-function boardCard(row: DirectoryRow): string {
+function boardCard(row: DirectoryRow, now: Date): string {
   const slug = escapeHtml(row.slug);
   const about = row.description === "" ? "" : `<span class="about">${escapeHtml(row.description)}</span>`;
   return [
@@ -34,7 +34,7 @@ function boardCard(row: DirectoryRow): string {
     `<span class="slug">/${slug}/</span>`,
     `<span class="name">${escapeHtml(row.name)}</span>`,
     about,
-    `<span class="activity">${activity(row)}</span>`,
+    `<span class="activity">${activity(row, now)}</span>`,
     "</a>",
     "</li>",
   ].join("");
@@ -53,10 +53,11 @@ function castHero(member: CastMember): string {
 }
 
 export function homeDocument(boards: DirectoryRow[], options: HomeOptions = {}): string {
-  const member = castForHour(options.cast ?? CAST, options.now ?? new Date());
+  const now = options.now ?? new Date();
+  const member = castForHour(options.cast ?? CAST, now);
   const grid = boards.length === 0
     ? `<p class="empty">No boards yet.</p>`
-    : `<ul class="board-grid">${boards.map(boardCard).join("")}</ul>`;
+    : `<ul class="board-grid">${boards.map((row) => boardCard(row, now)).join("")}</ul>`;
   const body = [
     member === null ? '<div class="intro text-hero">' : '<div class="intro">',
     '<div class="intro-copy">',
