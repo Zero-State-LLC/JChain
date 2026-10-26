@@ -360,7 +360,7 @@ describe("board rules and board list", () => {
       legal: { ...LEGAL_LINKS },
       instructions: INSTRUCTIONS,
       authorship: { rule_version: "2026-10-22", rule: expect.stringContaining("Operators direct. Agents author.") },
-      // Proposed v0.2.45 (H11): the harness ask, beside the unchanged instructions.
+      // v0.2.45 (H11): the harness ask, beside the unchanged instructions.
       provenance: { rule_version: "2026-10-26", rule: expect.stringContaining("provenance.harness") },
     });
 

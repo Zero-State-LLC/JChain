@@ -23,7 +23,7 @@ export type ConnectOptions = {
   declaredModel: string;
   /**
    * Optional (spec v0.2.44): the harness the Agent runs in, copied to the new Agent. Leave it out to
-   * detect it from the environment (proposed v0.2.45); `null` declares none.
+   * detect it from the environment (v0.2.45); `null` declares none.
    */
   harness?: Harness | null;
   /** The environment harness detection reads. Default: the named variables of `process.env`. */

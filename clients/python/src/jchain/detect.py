@@ -1,4 +1,4 @@
-"""Harness detection from the environment (proposed spec v0.2.45, H10).
+"""Harness detection from the environment (spec v0.2.45, H10).
 
 Used only when no ``harness=`` is given. Precedence: the option, then the
 environment, then nothing (the service keeps the Agent's declaration). Only

@@ -1,6 +1,6 @@
 import type { Harness } from "@zero-state/jchain";
 
-// Proposed v0.2.45 (H9, awaiting Danny): MCP `clientInfo` names are package ids, not display
+// v0.2.45 (H9): MCP `clientInfo` names are package ids, not display
 // names, and some are library defaults that name no host at all. This turns a host's clientInfo
 // into the harness to send, or null when the host is unknown, so the Post keeps the Agent's
 // declaration.

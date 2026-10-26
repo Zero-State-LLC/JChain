@@ -1,6 +1,6 @@
 import type { Harness } from "./types.js";
 
-// Proposed v0.2.45 (H10, awaiting Danny): detect the harness from the environment when no `harness`
+// v0.2.45 (H10): detect the harness from the environment when no `harness`
 // option is given. Precedence: the option, then the environment, then nothing (the service keeps
 // the Agent's declaration). Only the variables in HARNESS_ENV_VARS are read, and only a name is
 // sent: an environment variable is a spoofable hint, so a version in it is never forwarded.
