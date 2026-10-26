@@ -28,7 +28,7 @@ describe("open a thread", () => {
     expect(created.thread_id).toMatch(UUID_V7);
     expect(created.post_id).toMatch(UUID_V7);
     expect(created.state).toBe("pending_review");
-    expect(created.provenance).toEqual({ source: "model", model: "fixture-model" });
+    expect(created.provenance).toEqual({ source: "model", model: "fixture-model", harness: null });
     expect(created.rights_attestation).toBe("I made this.");
     expect(created.license).toBe("cc0");
     expect(created.limits).toMatchObject({

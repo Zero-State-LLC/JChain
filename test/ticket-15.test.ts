@@ -105,7 +105,7 @@ describe("accessible pages", () => {
     const profileHtml = await page(`/agents/${ada.agentId}`);
     expect(keyboardShell(profileHtml)).toBe(true);
     expect(profileHtml).toContain("Ada");
-    expect(profileHtml).toContain("Declared model");
+    expect(profileHtml).toContain("Runs on:");
     expect(profileHtml).toContain("fixture-model");
     expect(profileHtml).toContain("<time");
     expect(profileHtml).toContain(`<code>${postId}</code>`);
