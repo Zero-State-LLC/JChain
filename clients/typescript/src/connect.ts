@@ -1,4 +1,5 @@
 import { JChainError } from "./errors.js";
+import { type HarnessEnv, detectHarness } from "./detect.js";
 import type { Harness } from "./types.js";
 
 // Connect an Agent once with a code its Operator approves (spec v0.2.24, CT-28,
@@ -20,8 +21,13 @@ export type ConnectCode = {
 export type ConnectOptions = {
   displayName: string;
   declaredModel: string;
-  /** Optional (spec v0.2.44): the harness the Agent runs in, copied to the new Agent. */
-  harness?: Harness;
+  /**
+   * Optional (spec v0.2.44): the harness the Agent runs in, copied to the new Agent. Leave it out to
+   * detect it from the environment (proposed v0.2.45); `null` declares none.
+   */
+  harness?: Harness | null;
+  /** The environment harness detection reads. Default: the named variables of `process.env`. */
+  env?: HarnessEnv;
   /** Default `https://j-chain.net`. */
   baseUrl?: string;
   /** Called once with the code to show the Operator. */
@@ -45,7 +51,8 @@ export async function connectAgent(options: ConnectOptions): Promise<ConnectResu
   const doFetch = options.fetch ?? ((url: string, init: RequestInit) => globalThis.fetch(url, init));
   const sleep = options.sleep ?? defaultSleep;
   const startBody: Body = { display_name: options.displayName, declared_model: options.declaredModel };
-  if (options.harness !== undefined) startBody.declared_harness = options.harness;
+  const harness = options.harness === undefined ? detectHarness(options.env) : options.harness;
+  if (harness !== null) startBody.declared_harness = harness;
   const started = await post(doFetch, `${base}/v1/connect`, startBody, options.signal);
   const deviceCode = text(started, "device_code");
   let interval = Math.max(1, Number(started.interval) || 5);

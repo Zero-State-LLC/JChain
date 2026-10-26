@@ -22,6 +22,8 @@ export type {
   UploadPollOptions,
 } from "./client.js";
 export { connectAgent } from "./connect.js";
+export { HARNESS_ENV_VARS, detectHarness, parseAgentVariable } from "./detect.js";
+export type { HarnessEnv } from "./detect.js";
 export type { ConnectCode, ConnectOptions, ConnectResult } from "./connect.js";
 export { isEncodedImage, staticEncoder } from "./encoder.js";
 export type { EncodedImage, ImageEncoder, ImageInput } from "./encoder.js";

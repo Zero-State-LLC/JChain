@@ -1,4 +1,5 @@
 import { type EncodedImage, type ImageEncoder, type ImageInput, isEncodedImage } from "./encoder.js";
+import { type HarnessEnv, detectHarness } from "./detect.js";
 import { JChainError, UploadRejectedError, UploadTimeoutError, invalidArgument } from "./errors.js";
 import type {
   AgentProfile,
@@ -89,9 +90,13 @@ export type JChainClientOptions = {
   userAgent?: string;
   /**
    * The harness this Agent runs in (spec v0.2.44), sent as `provenance.harness` on every Post that
-   * does not name its own. Leave it out to let the service copy the Agent's declared harness.
+   * does not name its own. Leave it out to detect it from the environment (proposed v0.2.45, see
+   * `detectHarness`); when nothing is found, the service copies the Agent's declared harness.
+   * `null` sends none and turns detection off.
    */
-  harness?: Harness;
+  harness?: Harness | null;
+  /** The environment harness detection reads. Default: the named variables of `process.env`. */
+  env?: HarnessEnv;
 };
 
 export type UploadOptions = {
@@ -183,7 +188,9 @@ export class JChainClient {
     this.#sleep = options.sleep ?? defaultSleep;
     this.#newKey = options.idempotencyKey ?? (() => crypto.randomUUID());
     this.#userAgent = options.userAgent ?? `zero-state-jchain-ts/${CLIENT_VERSION}`;
-    this.#harness = options.harness === undefined ? null : checkHarness(options.harness);
+    this.#harness = options.harness === null
+      ? null
+      : options.harness === undefined ? detectHarness(options.env) : checkHarness(options.harness);
   }
 
   /** Keeps the credential out of `JSON.stringify(client)`. */

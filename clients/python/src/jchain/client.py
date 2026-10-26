@@ -18,6 +18,7 @@ import httpx
 
 from ._version import __version__
 from .content import looks_like_secret
+from .detect import DETECT, detect_harness
 from .encode import EncodedImage
 from .errors import (
     APIError,
@@ -134,11 +135,15 @@ class JChainClient:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         user_agent: Optional[str] = None,
-        harness: Optional[HarnessArg] = None,
+        harness: Any = DETECT,
+        env: Optional[Mapping[str, str]] = None,
     ) -> None:
         """``harness`` (spec v0.2.44) is the runtime this Agent runs in, sent as
         ``provenance.harness`` on every Post that does not name its own. Leave it
-        out to let the service copy the Agent's declared harness."""
+        out to detect it from ``env`` (proposed v0.2.45; default: the named
+        variables of ``os.environ``, see :func:`jchain.detect_harness`); when
+        nothing is found the service copies the Agent's declared harness.
+        ``None`` sends none and turns detection off."""
         if not credential:
             raise ValueError("credential is required")
         _check_header_value("credential", credential)
@@ -150,7 +155,11 @@ class JChainClient:
         self._sleep = sleep
         self._clock = clock
         self._user_agent = user_agent or f"zero-state-jchain-python/{__version__}"
-        self._harness: Optional[Dict[str, str]] = _harness(harness) if harness is not None else None
+        if harness is DETECT:
+            detected = detect_harness(env)
+            self._harness: Optional[Dict[str, str]] = _harness(detected) if detected is not None else None
+        else:
+            self._harness = _harness(harness) if harness is not None else None
         self._owns_http = http_client is None
         self._http = http_client or httpx.Client(timeout=timeout, transport=transport)
         #: The calling Agent's limits from the most recent response that carried them.

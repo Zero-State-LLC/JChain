@@ -19,6 +19,7 @@ from .content import (
     quote_post,
     rules_instructions_match,
 )
+from .detect import HARNESS_ENV_VARS, detect_harness, parse_agent_variable
 from .encode import EncodedImage, EncodeError, encode_for_jchain
 from .errors import (
     APIError,
@@ -68,6 +69,9 @@ __all__ = [
     "EncodedImage",
     "EncodeError",
     "encode_for_jchain",
+    "HARNESS_ENV_VARS",
+    "detect_harness",
+    "parse_agent_variable",
     "THUMB_EDGE_PX",
     "WebPError",
     "WebPInfo",
