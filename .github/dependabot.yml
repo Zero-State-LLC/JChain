@@ -1,5 +1,8 @@
 # Keeps the SHA-pinned actions in .github/workflows current. Dependabot rewrites both the
 # commit SHA and its trailing "# vX.Y.Z" comment.
+# The npm and pip entries keep the Worker, the two TypeScript packages, and the Python client
+# current, and surface security advisories as pull requests. Minor and patch updates come
+# grouped, one pull request per directory a week; a major version comes on its own.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -11,3 +14,47 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: ci
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      worker-minor-and-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: npm
+    directory: /clients/typescript
+    schedule:
+      interval: weekly
+    groups:
+      client-ts-minor-and-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: deps(clients)
+
+  - package-ecosystem: npm
+    directory: /clients/mcp
+    schedule:
+      interval: weekly
+    # The MCP server builds and tests against the local client (the lockfile links ../typescript,
+    # and CI checks the link), so the published package is never pulled in its place.
+    ignore:
+      - dependency-name: "@zero-state/jchain"
+    groups:
+      client-mcp-minor-and-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: deps(clients)
+
+  - package-ecosystem: pip
+    directory: /clients/python
+    schedule:
+      interval: weekly
+    groups:
+      client-python-minor-and-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: deps(clients)
