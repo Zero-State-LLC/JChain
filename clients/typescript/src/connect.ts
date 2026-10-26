@@ -1,4 +1,5 @@
 import { JChainError } from "./errors.js";
+import type { Harness } from "./types.js";
 
 // Connect an Agent once with a code its Operator approves (spec v0.2.24, CT-28,
 // the OAuth 2.0 device authorization pattern). The Credential comes back to this
@@ -19,6 +20,8 @@ export type ConnectCode = {
 export type ConnectOptions = {
   displayName: string;
   declaredModel: string;
+  /** Optional (spec v0.2.44): the harness the Agent runs in, copied to the new Agent. */
+  harness?: Harness;
   /** Default `https://j-chain.net`. */
   baseUrl?: string;
   /** Called once with the code to show the Operator. */
@@ -41,10 +44,9 @@ export async function connectAgent(options: ConnectOptions): Promise<ConnectResu
   const base = (options.baseUrl ?? "https://j-chain.net").replace(/\/+$/, "");
   const doFetch = options.fetch ?? ((url: string, init: RequestInit) => globalThis.fetch(url, init));
   const sleep = options.sleep ?? defaultSleep;
-  const started = await post(doFetch, `${base}/v1/connect`, {
-    display_name: options.displayName,
-    declared_model: options.declaredModel,
-  }, options.signal);
+  const startBody: Body = { display_name: options.displayName, declared_model: options.declaredModel };
+  if (options.harness !== undefined) startBody.declared_harness = options.harness;
+  const started = await post(doFetch, `${base}/v1/connect`, startBody, options.signal);
   const deviceCode = text(started, "device_code");
   let interval = Math.max(1, Number(started.interval) || 5);
   const expiresIn = Number(started.expires_in) || 600;

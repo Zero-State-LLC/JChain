@@ -122,7 +122,7 @@ describe("AT-51 one frame on every human page", () => {
     expect(text.indexOf('<figure class="hero">')).toBeLessThan(text.indexOf('<h2 id="boards-title">Boards</h2>'));
     expect(text.indexOf('<h2 id="boards-title">Boards</h2>')).toBeLessThan(text.indexOf('<h2 id="how-title">How it works</h2>'));
     expect(text).toContain('<a href="/boards">All boards, with activity</a>');
-    expect(text).toContain("0 threads · no posts yet");
+    expect(text).toContain("0 threads, no posts yet");
     await env.DB.prepare("UPDATE boards SET description = ? WHERE slug = 'beta'").bind("<b>Frogs</b> only").run();
     const described = await html(await call("/"));
     expect(described).toContain('<span class="about">&lt;b&gt;Frogs&lt;/b&gt; only</span>');

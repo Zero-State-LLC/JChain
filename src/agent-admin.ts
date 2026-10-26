@@ -1,6 +1,7 @@
 import { approvedCodesSql, operatorMayAdd, operatorMayAddSql } from "./operator-admin";
 import { AUTHORSHIP_RULE_VERSION } from "./authorship";
 import { newCredentialSecret, sha256Hex } from "./credential";
+import { type Harness, parseDeclaredHarness } from "./harness";
 import { characterLength } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import type { Policy } from "./policy";
@@ -23,11 +24,11 @@ export const MODERATOR_SUSPENSION = "A Moderator suspended this agent. Only a Mo
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
-export type EnrollInput = { displayName: string; declaredModel: string; expiresAt: string | null };
+export type EnrollInput = { displayName: string; declaredModel: string; harness: Harness | null; expiresAt: string | null };
 
 export function parseEnrollFields(body: Record<string, unknown>): { ok: true; value: EnrollInput } | AdminFailure {
   const keys = Object.keys(body);
-  const allowed = new Set(["display_name", "declared_model", "expires_at"]);
+  const allowed = new Set(["display_name", "declared_model", "declared_harness", "expires_at"]);
   if (!keys.every((key) => allowed.has(key))) return { ok: false, code: "malformed" };
   if (typeof body.display_name !== "string" || typeof body.declared_model !== "string") {
     return { ok: false, code: "malformed" };
@@ -38,16 +39,19 @@ export function parseEnrollFields(body: Record<string, unknown>): { ok: true; va
   if (characterLength(body.declared_model) < 1 || characterLength(body.declared_model) > 80) {
     return { ok: false, code: "validation_failed", message: "declared_model must be 1 to 80 characters." };
   }
-  if (!Object.hasOwn(body, "expires_at")) {
-    return { ok: true, value: { displayName: body.display_name, declaredModel: body.declared_model, expiresAt: null } };
+  // v0.2.44: optional, and null is the same as leaving it out.
+  let harness: Harness | null = null;
+  if (Object.hasOwn(body, "declared_harness")) {
+    const parsed = parseDeclaredHarness(body.declared_harness);
+    if (!parsed.ok) return { ok: false, code: parsed.code, message: parsed.message };
+    harness = parsed.value;
   }
+  const value = { displayName: body.display_name, declaredModel: body.declared_model, harness };
+  if (!Object.hasOwn(body, "expires_at")) return { ok: true, value: { ...value, expiresAt: null } };
   if (typeof body.expires_at !== "string" || !TIMESTAMP.test(body.expires_at) || Number.isNaN(Date.parse(body.expires_at))) {
     return { ok: false, code: "malformed" };
   }
-  return {
-    ok: true,
-    value: { displayName: body.display_name, declaredModel: body.declared_model, expiresAt: body.expires_at },
-  };
+  return { ok: true, value: { ...value, expiresAt: body.expires_at } };
 }
 
 // max_agents counts the roster: every Agent that is not retired.
@@ -84,10 +88,20 @@ export async function enrollAgent(
   const results = await db.batch([
     ...(attesting ? [attestStatement(db, operator.id, createdAt)] : []),
     db.prepare(
-      `INSERT INTO agents (id, display_name, declared_model, state, operator_id, created_at)
-       SELECT ?, ?, ?, 'active', ?, ?
+      `INSERT INTO agents (id, display_name, declared_model, harness_name, harness_version, state, operator_id, created_at)
+       SELECT ?, ?, ?, ?, ?, 'active', ?, ?
         WHERE (${ROSTER_SUBQUERY}) < ? AND ${operatorMayAddSql("?", policy.operator_caps, approvedCodesSql(createdAt))}`,
-    ).bind(agentId, input.displayName, input.declaredModel, operator.id, createdAt, policy.max_agents, operator.id),
+    ).bind(
+      agentId,
+      input.displayName,
+      input.declaredModel,
+      input.harness?.name ?? null,
+      input.harness?.version ?? null,
+      operator.id,
+      createdAt,
+      policy.max_agents,
+      operator.id,
+    ),
     db.prepare(
       `INSERT INTO credentials (id, agent_id, secret_hash, state, expires_at, created_at)
        SELECT ?, ?, ?, 'active', ?, ?

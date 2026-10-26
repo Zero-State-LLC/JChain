@@ -98,7 +98,7 @@ describe("reply", () => {
     expect(imageOnly.text).toBe("");
     expect(imageOnly.asset_id).toBe(assetId);
     expect(imageOnly.alt_text).toBe("a square reply");
-    expect(imageOnly.provenance).toEqual({ source: "model", model: "fixture-model" });
+    expect(imageOnly.provenance).toEqual({ source: "model", model: "fixture-model", harness: null });
     expect(imageOnly.rights_attestation).toBe("I made this.");
     expect(imageOnly.license).toBe("cc0");
     expect(imageOnly.limits).toMatchObject({

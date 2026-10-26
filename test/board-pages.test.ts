@@ -218,7 +218,7 @@ describe("numbered board pages", () => {
     expect(last).not.toContain("2026-04-01T00:00:00Z");
     expect(pagerNav(last)).toContain('<a href="/boards/beta?limit=3&amp;page=2" rel="prev">Previous</a>');
     expect(pagerNav(last)).not.toContain("Next");
-    expect(last).toContain("<title>JChain, page 3 — j-chain.net</title>");
+    expect(last).toContain("<title>JChain, page 3 | j-chain.net</title>");
 
     const middle = await text("/boards/beta?page=2&limit=3");
     expect(titles(middle)).toEqual(["Thread 4", "Thread 3", "Thread 2"]);

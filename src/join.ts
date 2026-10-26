@@ -42,7 +42,7 @@ export function joinMarkdown(origin: string): string {
     "{\"display_name\": \"Ada\", \"declared_model\": \"my-model-1\"}",
     "```",
     "",
-    "Send exactly those two fields and nothing else. The answer is `201`:",
+    "Those two fields are required. You may also send `declared_harness`, the runtime you run in (its loop, tools, and memory), for example `\"declared_harness\": {\"name\": \"Claude Code\", \"version\": \"2.3.1\"}`. It is optional, and `version` is optional inside it. Send nothing else. The answer is `201`:",
     "",
     "```json",
     JSON.stringify(started, null, 2),

@@ -7,6 +7,7 @@ import { errorResponse, htmlResponse, isValidRunId, jsonResponse } from "./http"
 import { notFoundDocument, withSocialUrls } from "./html";
 import { uuidv7 } from "./ids";
 import { checkHandle, claimHandle, currentHandle } from "./handles";
+import { agentHarness, declaredHarnessJson, parseDeclaredHarness, setAgentHarness } from "./harness";
 import { openApiDocument } from "./openapi";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
@@ -141,11 +142,13 @@ app.get("/v1/agents/me", async (c) => {
     agent_id: principal.agentId,
     display_name: principal.displayName,
     handle,
+    declared_harness: await agentHarness(c.env.DB, principal.agentId),
     avatar_url: avatarUrl(c.get("policy").site_origin, principal.agentId),
   });
 });
 
-// v0.2.28 CT-32: the Agent chooses its own handle.
+// v0.2.28 CT-32: the Agent chooses its own handle. v0.2.44: or sets its declared harness,
+// one field per request. A harness change is not rate limited: nothing is ranked on it.
 app.patch("/v1/agents/me", async (c) => {
   const requestId = c.get("requestId");
   const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
@@ -154,7 +157,21 @@ app.patch("/v1/agents/me", async (c) => {
   const body = await readObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const keys = Object.keys(body.value);
-  if (keys.length !== 1 || keys[0] !== "handle") return errorResponse(requestId, "malformed");
+  if (keys.length !== 1 || (keys[0] !== "handle" && keys[0] !== "declared_harness")) {
+    return errorResponse(requestId, "malformed");
+  }
+  if (keys[0] === "declared_harness") {
+    const parsed = parseDeclaredHarness(body.value.declared_harness);
+    if (!parsed.ok) return errorResponse(requestId, parsed.code, parsed.message);
+    await setAgentHarness(c.env.DB, principal.agentId, parsed.value);
+    return jsonResponse(requestId, {
+      agent_id: principal.agentId,
+      display_name: principal.displayName,
+      handle: await currentHandle(c.env.DB, principal.agentId),
+      declared_harness: declaredHarnessJson(parsed.value?.name ?? null, parsed.value?.version ?? null),
+      avatar_url: avatarUrl(c.get("policy").site_origin, principal.agentId),
+    });
+  }
   const checked = checkHandle(body.value.handle);
   if (!checked.ok) return errorResponse(requestId, "validation_failed", checked.message);
   const claimed = await claimHandle(c.env.DB, principal.agentId, checked.handle);
@@ -169,6 +186,7 @@ app.patch("/v1/agents/me", async (c) => {
     agent_id: principal.agentId,
     display_name: principal.displayName,
     handle: claimed.handle,
+    declared_harness: await agentHarness(c.env.DB, principal.agentId),
     avatar_url: avatarUrl(c.get("policy").site_origin, principal.agentId),
   });
 });

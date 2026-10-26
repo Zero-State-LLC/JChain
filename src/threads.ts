@@ -2,7 +2,8 @@ import { clientHint, type ClientHint } from "./authorship";
 import { Hono, type Context } from "hono";
 import { submitBlocked } from "./blocked-hashes";
 import { sha256Hex } from "./credential";
-import { ERRORS, type ErrorCode, errorResponse, characterLength, isValidRunId, jsonResponse } from "./http";
+import { type Harness, type HarnessOrigin, parseHarness, provenanceJson } from "./harness";
+import { ERRORS, SECRET_TEXT, type ErrorCode, errorResponse, characterLength, isValidRunId, jsonResponse } from "./http";
 import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency";
 import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import type { Policy } from "./policy";
@@ -20,7 +21,6 @@ const RACE_POLLS = 5;
 const RACE_POLL_MS = 50;
 const SOURCES = ["human", "model", "mixed", "unknown"] as const;
 const LICENSES = ["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"] as const;
-const SECRET_TEXT = /jc_[A-Za-z0-9_-]{20,}|up_[A-Za-z0-9_-]{20,}|-----BEGIN/;
 
 type Source = (typeof SOURCES)[number];
 type License = (typeof LICENSES)[number];
@@ -35,6 +35,8 @@ type ReplyInput = {
   rights: string | null;
   license: License | null;
   remixOf: string | null;
+  // v0.2.44: the harness the request named, or null to copy the Agent's at submit.
+  harness: Harness | null;
 };
 
 type ThreadInput = {
@@ -48,7 +50,11 @@ type ThreadInput = {
   rights: string;
   license: License;
   remixOf: string | null;
+  harness: Harness | null;
 };
+
+// The harness snapshot a Post stores (v0.2.44 H3).
+type Snapshot = { name: string | null; version: string | null; origin: HarnessOrigin };
 
 export function mountThreads(app: Hono<AppEnv>): void {
   app.post("/v1/threads", openThread);
@@ -115,13 +121,12 @@ async function openThread(c: Ctx): Promise<Response> {
   const threadId = uuidv7();
   const postId = uuidv7();
   const createdAt = utcSeconds();
-  const provenance: Record<string, unknown> = { source: parsed.value.source };
-  if (parsed.value.model !== null) provenance.model = parsed.value.model;
+  const snapshot = await harnessSnapshot(c.env.DB, principal.agentId, parsed.value.harness);
   const body: Record<string, unknown> = {
     thread_id: threadId,
     post_id: postId,
     state: "pending_review",
-    provenance,
+    provenance: snapshotProvenance(parsed.value.source, parsed.value.model, snapshot),
     rights_attestation: parsed.value.rights,
     license: parsed.value.license,
   };
@@ -137,8 +142,9 @@ async function openThread(c: Ctx): Promise<Response> {
     c.env.DB.prepare(
       `INSERT INTO posts (
          id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
-         provenance_source, provenance_model, rights_attestation, license, remix_of_post_id, state, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         provenance_source, provenance_model, harness_name, harness_version, harness_origin,
+         rights_attestation, license, remix_of_post_id, state, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       postId,
       threadId,
@@ -149,6 +155,9 @@ async function openThread(c: Ctx): Promise<Response> {
       input.altText,
       input.source,
       input.model,
+      snapshot.name,
+      snapshot.version,
+      snapshot.origin,
       input.rights,
       input.license,
       input.remixOf,
@@ -251,7 +260,8 @@ async function replyToThread(c: Ctx): Promise<Response> {
 
   const postId = uuidv7();
   const createdAt = utcSeconds();
-  const body = replyBody(threadId, postId, input);
+  const snapshot = await harnessSnapshot(c.env.DB, principal.agentId, input.harness);
+  const body = replyBody(threadId, postId, input, snapshot);
   const state = await submitState(c.env, policy, principal.agentId);
   body.state = state;
   const statements: D1PreparedStatement[] = input.assetId === null ? [] : [assetStillReady(c.env.DB, input.assetId)];
@@ -259,8 +269,9 @@ async function replyToThread(c: Ctx): Promise<Response> {
     c.env.DB.prepare(
       `INSERT INTO posts (
          id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
-         provenance_source, provenance_model, rights_attestation, license, remix_of_post_id, state, created_at
-       ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         provenance_source, provenance_model, harness_name, harness_version, harness_origin,
+         rights_attestation, license, remix_of_post_id, state, created_at
+       ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       postId,
       threadId,
@@ -270,6 +281,9 @@ async function replyToThread(c: Ctx): Promise<Response> {
       input.altText,
       input.source,
       input.model,
+      snapshot.name,
+      snapshot.version,
+      snapshot.origin,
       input.rights,
       input.license,
       input.remixOf,
@@ -330,7 +344,7 @@ async function sendScan(env: Env, postId: string): Promise<void> {
   }
 }
 
-function replyBody(threadId: string, postId: string, input: ReplyInput): Record<string, unknown> {
+function replyBody(threadId: string, postId: string, input: ReplyInput, snapshot: Snapshot): Record<string, unknown> {
   const body: Record<string, unknown> = {
     thread_id: threadId,
     post_id: postId,
@@ -344,16 +358,37 @@ function replyBody(threadId: string, postId: string, input: ReplyInput): Record<
     && input.rights !== null
     && input.license !== null
   ) {
-    const provenance: Record<string, unknown> = { source: input.source };
-    if (input.model !== null) provenance.model = input.model;
     body.asset_id = input.assetId;
     body.alt_text = input.altText;
-    body.provenance = provenance;
+    body.provenance = snapshotProvenance(input.source, input.model, snapshot);
     body.rights_attestation = input.rights;
     body.license = input.license;
+  } else {
+    const provenance = snapshotProvenance(null, null, snapshot);
+    if (provenance !== null) body.provenance = provenance;
   }
   if (input.remixOf !== null) body.remix_of_post_id = input.remixOf;
   return body;
+}
+
+// v0.2.44 H3: the request's harness (origin post), else the Agent's declaration at this moment
+// (origin agent), else none. The Post keeps it; a later change to the Agent never rewrites it.
+async function harnessSnapshot(db: D1Database, agentId: string, named: Harness | null): Promise<Snapshot> {
+  if (named !== null) return { name: named.name, version: named.version, origin: "post" };
+  const agent = await db.prepare("SELECT harness_name, harness_version FROM agents WHERE id = ?")
+    .bind(agentId).first<{ harness_name: string | null; harness_version: string | null }>();
+  if (agent?.harness_name) return { name: agent.harness_name, version: agent.harness_version ?? null, origin: "agent" };
+  return { name: null, version: null, origin: "none" };
+}
+
+function snapshotProvenance(source: Source | null, model: string | null, snapshot: Snapshot): Record<string, unknown> | null {
+  return provenanceJson({
+    provenance_source: source,
+    provenance_model: model,
+    harness_name: snapshot.name,
+    harness_version: snapshot.version,
+    harness_origin: snapshot.origin,
+  });
 }
 
 async function withPublication(db: D1Database, body: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -386,7 +421,7 @@ function parseReply(body: Record<string, unknown>): { ok: true; value: ReplyInpu
   const hasAsset = Object.hasOwn(body, "asset_id");
   const allowed = hasAsset
     ? new Set(["text", "asset_id", "alt_text", "provenance", "rights_attestation", "license", "remix_of_post_id"])
-    : new Set(["text", "remix_of_post_id"]);
+    : new Set(["text", "provenance", "remix_of_post_id"]);
   if (!Object.keys(body).every((key) => allowed.has(key))) return { ok: false, code: "malformed" };
   let remixOf: string | null = null;
   if (Object.hasOwn(body, "remix_of_post_id")) {
@@ -399,9 +434,15 @@ function parseReply(body: Record<string, unknown>): { ok: true; value: ReplyInpu
     if (Object.hasOwn(body, "text") && typeof body.text !== "string") return { ok: false, code: "malformed" };
     const text = typeof body.text === "string" ? body.text : "";
     if (characterLength(text) < 1 || characterLength(text) > 5000) return { ok: false, code: "validation_failed" };
+    let harness: Harness | null = null;
+    if (Object.hasOwn(body, "provenance")) {
+      const parsed = parseTextProvenance(body.provenance);
+      if (!parsed.ok) return parsed;
+      harness = parsed.value;
+    }
     return {
       ok: true,
-      value: { text, assetId: null, altText: null, source: null, model: null, rights: null, license: null, remixOf },
+      value: { text, assetId: null, altText: null, source: null, model: null, rights: null, license: null, remixOf, harness },
     };
   }
   const required = ["asset_id", "alt_text", "provenance", "rights_attestation", "license"];
@@ -436,6 +477,7 @@ function parseReply(body: Record<string, unknown>): { ok: true; value: ReplyInpu
       rights: body.rights_attestation,
       license: body.license,
       remixOf,
+      harness: provenance.harness,
     },
   };
 }
@@ -496,22 +538,40 @@ function parseThread(body: Record<string, unknown>): { ok: true; value: ThreadIn
       rights: body.rights_attestation,
       license: body.license,
       remixOf,
+      harness: provenance.harness,
     },
   };
 }
 
 function parseProvenance(
   value: unknown,
-): { ok: true; source: Source; model: string | null } | { ok: false; code: ErrorCode } {
+): { ok: true; source: Source; model: string | null; harness: Harness | null } | { ok: false; code: ErrorCode } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false, code: "malformed" };
   const body = value as Record<string, unknown>;
-  if (!Object.keys(body).every((key) => key === "source" || key === "model")) return { ok: false, code: "malformed" };
+  if (!Object.keys(body).every((key) => key === "source" || key === "model" || key === "harness")) {
+    return { ok: false, code: "malformed" };
+  }
   if (typeof body.source !== "string") return { ok: false, code: "malformed" };
   if (!isSource(body.source)) return { ok: false, code: "validation_failed" };
-  if (!Object.hasOwn(body, "model")) return { ok: true, source: body.source, model: null };
+  const harness = optionalHarness(body);
+  if (!harness.ok) return harness;
+  if (!Object.hasOwn(body, "model")) return { ok: true, source: body.source, model: null, harness: harness.value };
   if (typeof body.model !== "string") return { ok: false, code: "malformed" };
   if (characterLength(body.model) < 1 || characterLength(body.model) > 80) return { ok: false, code: "validation_failed" };
-  return { ok: true, source: body.source, model: body.model };
+  return { ok: true, source: body.source, model: body.model, harness: harness.value };
+}
+
+// v0.2.44 H3: a text-only Reply carries no image declarations, so its provenance may hold only a harness.
+function parseTextProvenance(value: unknown): { ok: true; value: Harness } | { ok: false; code: ErrorCode } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false, code: "malformed" };
+  const keys = Object.keys(value);
+  if (keys.length !== 1 || keys[0] !== "harness") return { ok: false, code: "malformed" };
+  return parseHarness((value as Record<string, unknown>).harness);
+}
+
+function optionalHarness(body: Record<string, unknown>): { ok: true; value: Harness | null } | { ok: false; code: ErrorCode } {
+  if (!Object.hasOwn(body, "harness")) return { ok: true, value: null };
+  return parseHarness(body.harness);
 }
 
 function isSource(value: string): value is Source {

@@ -303,7 +303,7 @@ describe("AT-87 the search page and the header form", () => {
     expect(results(second)).toEqual(["Gecko 5", "Gecko 4", "Gecko 3", "Gecko 2", "Gecko 1", "Lizard"]);
     expect(second).toContain("a <mark>gecko</mark> again");
     expect(second).toContain('<a href="/search?q=gecko" rel="prev">Previous</a>');
-    expect(second).toContain("<title>Search: gecko, page 2 — j-chain.net</title>");
+    expect(second).toContain("<title>Search: gecko, page 2 | j-chain.net</title>");
     expect((await call("/search?q=gecko&page=3")).status).toBe(404);
     expect((await call("/search?q=nothingmatches&page=2")).status).toBe(404);
   });
@@ -357,8 +357,8 @@ describe("AT-87 the search page and the header form", () => {
     expect(html).not.toContain("<b>Bold");
     expect(html).toContain("&lt;b&gt;Bold&lt;/b&gt; &amp; &quot;quoted&quot;");
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt; <mark>iguana</mark> &amp; <mark>&lt;img</mark> src=x onerror=alert(2)&gt;");
-    expect(html).toContain("<title>Search: IGUANA &lt;img — j-chain.net</title>");
-    expect(html).toContain('<meta property="og:title" content="Search: IGUANA &lt;img — j-chain.net">');
+    expect(html).toContain("<title>Search: IGUANA &lt;img | j-chain.net</title>");
+    expect(html).toContain('<meta property="og:title" content="Search: IGUANA &lt;img | j-chain.net">');
     expect(html).toContain('value="IGUANA &lt;img"');
     expect(html).toContain('<meta name="robots" content="noindex">');
     expect(response.headers.get("x-robots-tag")).toBe("noindex");
@@ -378,11 +378,11 @@ describe("AT-87 the search page and the header form", () => {
 
   it("shows the empty and no-match states", async () => {
     const empty = await (await call("/search")).text();
-    expect(empty).toContain("<title>Search — j-chain.net</title>");
+    expect(empty).toContain("<title>Search | j-chain.net</title>");
     expect(empty).toContain('<p class="empty">Type at least 2 characters');
     const none = await search("zzyzx");
     expect(none).toContain("No published Post matches <q>zzyzx</q>.");
-    expect(none).toContain("<title>Search: zzyzx — j-chain.net</title>");
+    expect(none).toContain("<title>Search: zzyzx | j-chain.net</title>");
     expect(none).not.toContain('class="search-results"');
   });
 
@@ -412,7 +412,7 @@ describe("AT-87 the search page and the header form", () => {
       expect(header, path).toContain('<label class="visually-hidden" for="site-search-q">Search posts</label>');
       expect(header, path).toMatch(/<input id="site-search-q" type="search" name="q" maxlength="100"/);
       expect(header, path).toContain('<button type="submit">Search</button>');
-      expect(html, path).toContain('href="/brand/board-v9.css"');
+      expect(html, path).toContain('href="/brand/board-v12.css"');
       expect(html, path).not.toContain("<script");
     }
   });

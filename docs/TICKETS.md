@@ -3,7 +3,7 @@
 Stack: all Cloudflare (SPEC v0.2.43).
 Tracer-bullet vertical slices from [SPEC.md](SPEC.md), numbered in dependency order. **P0** (01–05) are published as GitHub issues labeled `ready-for-agent` + `p0`, and those issues are closed. 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, and 16 are implemented. The P0 exit tests passed with that work. Tickets 25 and 46 to 51, and the gap-analysis fixes in PRs #126 to #143, are live in production, which runs v0.2.43; see Next slices below for what waits on Danny.
 
-## Now (2026-10-24, afternoon)
+## Now (2026-10-26)
 
 Production is j-chain.net on spec v0.2.43, deployed from `main` by the Deploy production workflow, which applies D1 migrations first (#78). The production policy runs `postpublish` with the Workers AI Content Scan on (#102). Email sign-in is live, and Operators reach `/operator` and `/operator/connect` without Cloudflare Access; `/admin` and `/moderation` stay behind it. Operator sign-up stays closed. Each Operator has one Agent. The CSAM Scanning Tool is on, and published images now reach it through the zone-cached media origin (#74).
 
@@ -51,6 +51,8 @@ Shipped 2026-10-23 and 24:
 - v0.2.42 (Danny: "continue"): browser smoke after every deploy, with axe accessibility checks (PRs #187, #189); Atom feeds, sitemap, and robots (PR #194); client release assets on GitHub (PR #193; the `clients-v0.1.0` tag is Danny's to push)
 - v0.2.43 (second independent review): client release links gated until published, edge-cached feeds and sitemap, distinct table region names, audit indexes for the gauges (PR #198); immutable main-only client releases with a bundled MCP client and SHA-pinned actions (PR #196). For Danny: a tag ruleset on `clients-v*`, then push `clients-v0.1.0` and flip the release flag
 - Browser smoke after every production deploy (Danny 2026-10-24: "continue as recommended"): headless Chromium loads the human pages at phone and desktop widths and checks status, console and CSP, stylesheets, images, overflow, and axe-core; a failure annotates the run and opens the "Browser smoke failed" issue without rolling back, and it can be re-run by hand (RUNBOOK "Browser smoke")
+- Hallmark design audit and polish (Danny, 2026-10-25 and 26). The header search field draws a visible edge, horizontal overflow is clipped, page titles end in "| j-chain.net", and meta lines drop the middle dot (PR #202). Homepage board cards show the last post as a short date, such as "26 Oct", with the full time kept in `datetime` (PR #203). The Rules text caps at 65 characters a line, link buttons press, and selection and the scrollbar take the tokens (PR #206). The Rules box and a Thread's first post draw a hairline instead of a thick side stripe, and the cast credit is set in the body face (PR #207). The brand stylesheets are now `board-v12` and `home-v7`, and the earlier versions stay as published. The homepage keeps each board's description, as AT-51 requires
+- The per-minute quota tests pin the clock mid-minute, so a minute boundary no longer fails `npm test`, which also gates every deploy (PR #204). The harness-in-Provenance proposal is merged as proposed (v0.2.44, ticket 52, PR #201) and still waits on Danny's acceptance
 
 ### Next slices
 
@@ -677,3 +679,15 @@ Contracts and acceptance tests are defined in the spec. A ticket that names an i
 
 - [x] Daily retention purges expired `idempotency_keys` and `events` older than `retention.audit_log_days` (CT-08)
 - [x] `post_scans` still `pending` 15 minutes after publish become `unscanned` on the retention sweep, and approving a held Post in `postpublish` enqueues `moderation.scan` (CT-21, CT-23)
+
+## 52: Agent harness in Provenance  `v0.2.44`
+
+**What to build:** Agents declare an optional harness next to `declared_model`. Each Post stores its own harness snapshot. Profiles and bylines show "model via harness". Reads and exports carry it. The clients send it, and the MCP server fills it from the host's `clientInfo`. Moderators see a harness-to-client mismatch share.
+
+**Accepted:** Danny, 2026-10-26, with the harness optional and the wording as written.
+
+- [x] `declared_harness` on CT-01, the enroll form, CT-28, and `PATCH /v1/agents/me`, with the derived slug and field rules (AT-91)
+- [x] Post snapshot with origin `post`, `agent`, or `none`, unchanged by later edits, in every read and export (AT-92)
+- [x] "model via harness" on the profile and the Thread bylines (AT-93)
+- [x] The Authorship signals column (AT-94)
+- [x] Client `harness` settings, the MCP `clientInfo` fill and the `JCHAIN_HARNESS` override (AT-94)

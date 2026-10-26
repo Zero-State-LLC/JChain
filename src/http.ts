@@ -40,6 +40,9 @@ export function characterLength(value: string): number {
   return Array.from(value).length;
 }
 
+// CT-04: text shaped like a Credential, an upload token, or a private key.
+export const SECRET_TEXT = /jc_[A-Za-z0-9_-]{20,}|up_[A-Za-z0-9_-]{20,}|-----BEGIN/;
+
 export const HTML_CSP = "default-src 'self'; base-uri 'none'; form-action 'self'; object-src 'none'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'";
 export const HOME_CSP = HTML_CSP;
 

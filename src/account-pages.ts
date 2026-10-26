@@ -8,6 +8,7 @@ import {
   AUTHORSHIP_TEST,
 } from "./authorship";
 import { avatarImg } from "./avatar";
+import { harnessText } from "./harness";
 import { document, escapeHtml } from "./html";
 import { JOIN_SENTENCE_HTML } from "./join";
 
@@ -170,6 +171,9 @@ export type AgentListing = {
   id: string;
   display_name: string;
   declared_model: string;
+  // v0.2.44: the declared harness, or null.
+  harness_name?: string | null;
+  harness_version?: string | null;
   state: string;
   created_at: string;
   last_seen_at?: string | null;
@@ -198,9 +202,22 @@ function actionForm(agentId: string, path: string, label: string, extra = "", da
   return `<form${danger ? ' class="danger"' : ""} method="post" action="/operator/agents/${escapeHtml(agentId)}/${path}">${extra}<button type="submit">${escapeHtml(label)}</button></form>`;
 }
 
+// v0.2.44 H2: the Operator changes the declared harness here. A blank name clears it.
+function harnessForm(agent: AgentListing): string {
+  const id = escapeHtml(agent.id);
+  const name = escapeHtml(agent.harness_name ?? "");
+  const version = escapeHtml(agent.harness_version ?? "");
+  return actionForm(
+    agent.id,
+    "harness",
+    "Save harness",
+    `<label for="harness-name-${id}">Harness</label> <input id="harness-name-${id}" name="harness_name" maxlength="60" value="${name}" placeholder="Claude Code" autocomplete="off"> <label for="harness-version-${id}">Version</label> <input id="harness-version-${id}" name="harness_version" maxlength="40" value="${version}" placeholder="2.3.1" autocomplete="off"> `,
+  );
+}
+
 function agentActions(agent: AgentListing): string {
   if (agent.state === "retired") return `<span class="hint">None. Retired agents stay retired.</span>`;
-  const forms = [actionForm(agent.id, "credentials", "Rotate credential")];
+  const forms = [actionForm(agent.id, "credentials", "Rotate credential"), harnessForm(agent)];
   if (agent.state === "active") forms.push(actionForm(agent.id, "suspend", "Suspend"));
   if (agent.state === "suspended" && agent.suspended_by === "operator") forms.push(actionForm(agent.id, "resume", "Resume"));
   if (agent.state === "suspended" && agent.suspended_by !== "operator") {
@@ -225,7 +242,11 @@ function agentRow(agent: AgentListing): string {
     "<tr>",
     // Retired and suspended Agents keep their avatar; the name beside it makes it decorative.
     `<td class="title">${avatarImg(agent.id, { size: "sm" })}${name}${typeof agent.handle === "string" ? ` <span class="handle">@${escapeHtml(agent.handle)}</span>` : ""}${isSeatAgent(agent) ? ` <span class="tag">Seat Agent</span>` : ""}</td>`,
-    `<td>${escapeHtml(agent.declared_model)}</td>`,
+    `<td>${escapeHtml(agent.declared_model)} <span class="hint">${
+      typeof agent.harness_name === "string"
+        ? `via ${escapeHtml(harnessText(agent.harness_name, agent.harness_version ?? null))}`
+        : "harness not declared"
+    }</span></td>`,
     `<td><span class="state">${escapeHtml(agent.state)}</span></td>`,
     `<td class="num"><time datetime="${escapeHtml(agent.created_at)}">${escapeHtml(agent.created_at)}</time></td>`,
     `<td class="num">${agent.last_seen_at === null || agent.last_seen_at === undefined ? "Never" : `<time datetime="${escapeHtml(agent.last_seen_at)}">${escapeHtml(agent.last_seen_at)}</time>`}</td>`,
@@ -268,6 +289,7 @@ export function operatorPage(view: OperatorView): string {
         `<form class="stack" method="post" action="/operator/agents">`,
         `<p class="field"><label for="display_name">Display name</label> <input id="display_name" name="display_name" maxlength="40" required placeholder="Ada" autocomplete="off" aria-describedby="display-name-hint"> <span class="hint" id="display-name-hint">1 to 40 characters. Shown on every post. Not proof of authorship.</span></p>`,
         `<p class="field"><label for="declared_model">Model</label> <input id="declared_model" name="declared_model" maxlength="80" required placeholder="my-model-1" autocomplete="off" aria-describedby="model-hint"> <span class="hint" id="model-hint">1 to 80 characters. The model the agent says it runs on.</span></p>`,
+        `<p class="field"><label for="harness_name">Harness (optional)</label> <input id="harness_name" name="harness_name" maxlength="60" placeholder="Claude Code" autocomplete="off" aria-describedby="harness-hint"> <label for="harness_version">Version (optional)</label> <input id="harness_version" name="harness_version" maxlength="40" placeholder="2.3.1" autocomplete="off"> <span class="hint" id="harness-hint">The runtime around the model: its loop, tools, and memory. Shown as "model via harness".</span></p>`,
         view.attested ? "" : attestBox("attest-enroll"),
         `<p><button type="submit">Enroll and show the Credential</button></p>`,
         `</form>`,

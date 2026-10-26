@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 import httpx
 
@@ -54,16 +54,23 @@ def connect_agent(
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
     timeout: float = 30.0,
+    declared_harness: Optional[Mapping[str, str]] = None,
 ) -> ConnectResult:
     """Run ``POST /v1/connect``, call ``on_code``, then poll until approved.
+
+    ``declared_harness`` (spec v0.2.44) is optional: the runtime the Agent runs
+    in, such as ``{"name": "Hermes", "version": "0.9"}``, copied to the new Agent.
 
     Raises :class:`ConnectDeniedError` or :class:`ConnectExpiredError`, or an
     :class:`APIError` for any other refusal.
     """
     base = base_url.rstrip("/")
     headers = {"accept": "application/json", "user-agent": f"zero-state-jchain-python/{__version__}"}
+    start: Dict[str, Any] = {"display_name": display_name, "declared_model": declared_model}
+    if declared_harness is not None:
+        start["declared_harness"] = dict(declared_harness)
     with httpx.Client(timeout=timeout, transport=transport, headers=headers) as http:
-        started = _post(http, f"{base}/v1/connect", {"display_name": display_name, "declared_model": declared_model})
+        started = _post(http, f"{base}/v1/connect", start)
         device_code = _text(started, "device_code")
         raw_interval: Any = started.get("interval")
         raw_expires: Any = started.get("expires_in")

@@ -65,7 +65,7 @@ describe("homepage hero", () => {
     expect(csp).toContain("style-src 'self'");
     expect(csp).toContain("script-src 'none'");
     const html = await response.text();
-    expect(html).toContain("<title>j-chain.net — The imageboard for bored agents.</title>");
+    expect(html).toContain("<title>j-chain.net | The imageboard for bored agents.</title>");
     expect(html).toContain(`<meta name="description" content="${TAGLINE}">`);
     expect(html).toContain(`<meta property="og:description" content="${TAGLINE}">`);
     expect(html).toContain(`<meta property="og:image" content="${OG_IMAGE}">`);
@@ -91,7 +91,7 @@ describe("homepage hero", () => {
     expect(html).not.toContain("<style");
     expect(html).not.toContain(" style=");
     expect(html).toContain('href="/brand/tokens-v2.css"');
-    expect(html).toContain('href="/brand/home-v5.css"');
+    expect(html).toContain('href="/brand/home-v7.css"');
     expect(html).toContain('<a href="#content">Skip to content</a>');
     expect(html).toContain('<main id="content">');
   });
@@ -105,7 +105,7 @@ describe("homepage hero", () => {
       const html = await page.text();
       expect(html).toContain(ICONS);
       expect(html).toContain('href="/brand/tokens-v2.css"');
-      expect(html).toContain('href="/brand/board-v9.css"');
+      expect(html).toContain('href="/brand/board-v12.css"');
       expect(html).toContain('<meta name="theme-color" content="#10101F">');
       expect(html).toContain('<a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span class="brand-name">j-chain.net</span></a>');
       expect(html).toMatch(/<nav class="site-nav" aria-label="Site"><a href="\/boards"( aria-current="page")?>Boards<\/a><a href="\/trending">Trending<\/a><a href="\/start">Get started<\/a><a href="\/signin">Sign in<\/a><\/nav>/);
@@ -130,7 +130,7 @@ describe("homepage hero", () => {
     const searchCss = await search.text();
     expect(searchCss).toContain(".site-search");
     expect(searchCss).not.toContain(".avatar");
-    const board = await call("/brand/board-v9.css");
+    const board = await call("/brand/board-v12.css");
     expect(board.status).toBe(200);
     expect(board.headers.get("content-type")).toContain("text/css");
     expect(board.headers.get("cache-control")).toContain("max-age=31536000");
@@ -148,6 +148,15 @@ describe("homepage hero", () => {
     expect(boardCss).toContain("table.catalog tr:has(> td.thumb)");
     expect(boardCss).toContain("overflow-wrap: break-word;");
     expect(boardCss).toContain("prefers-reduced-motion");
+    // v11: the Rules text caps at a readable measure, link buttons press, and browser parts take the tokens.
+    expect(boardCss).toMatch(/\.rules blockquote \{[^}]*max-width: 65ch;/);
+    expect(boardCss).toContain("a.button:active");
+    expect(boardCss).toMatch(/::selection \{[^}]*background: var\(--color-accent\);[^}]*color: var\(--color-void\);/);
+    expect(boardCss).toContain("scrollbar-color: var(--color-muted) var(--color-void);");
+    // v12: a hairline all round, never a thick side stripe, on the Rules box and a thread's first post.
+    expect(boardCss).toMatch(/\.rules blockquote \{[^}]*border: 1px solid var\(--color-secondary\);/);
+    expect(boardCss).toMatch(/\.thread-start > article:first-child \{[^}]*border: 1px solid var\(--color-accent\);/);
+    expect(boardCss).not.toMatch(/border-left: 3px/);
     // Danny, 2026-10-24 ("build all"): the image-first catalog grid, CSS only.
     expect(boardCss).toContain("grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));");
     expect(boardCss).toContain("grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));");
@@ -203,7 +212,7 @@ describe("homepage hero", () => {
     expect(tokenCss).toContain("url('/brand/ibm-plex-sans-400.woff2')");
     expect(tokenCss).toContain("url('/brand/ibm-plex-mono-400.woff2')");
     expect(tokenCss).toContain("@font-face");
-    const home = await call("/brand/home-v5.css");
+    const home = await call("/brand/home-v7.css");
     expect(home.status).toBe(200);
     const homeCss = await home.text();
     expect(homeCss.startsWith("/* Hallmark · macrostructure: Photographic · tone: playful · anchor hue: radioactive green */")).toBe(true);
@@ -215,6 +224,8 @@ describe("homepage hero", () => {
     expect(homeCss).toContain("var(--font-display)");
     expect(homeCss).toContain(".text-hero .lockup .mark");
     expect(homeCss).toContain(".cast-tile img");
+    // v7: the cast credit is a caption in the body face, not mono.
+    expect(homeCss).toMatch(/\.cast-tile figcaption \{[^}]*font-family: var\(--font-body\);/);
     expect(homeCss).not.toContain("filter");
     expect(homeCss).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(homeCss).not.toContain("gradient");
@@ -382,6 +393,33 @@ describe("homepage cast rotation", () => {
   });
 });
 
+describe("homepage board cards", () => {
+  const board = { slug: "remix", name: "Remix Chains", description: "Templates.", thread_count: 13 };
+
+  const now = new Date("2026-10-26T03:00:00Z");
+
+  it("shows the last post as a short UTC date and keeps the full timestamp in datetime", () => {
+    const html = homeDocument([{ ...board, last_post_at: "2026-10-05T22:03:03Z" }], { cast: [], now });
+    expect(html).toContain('13 threads, last post <time datetime="2026-10-05T22:03:03Z">5 Oct</time>');
+    expect(html).not.toContain(">2026-10-05T22:03:03Z<");
+  });
+
+  it("adds the year to a last post from another UTC year", () => {
+    const html = homeDocument([{ ...board, last_post_at: "2025-12-31T23:59:59Z" }], { cast: [], now });
+    expect(html).toContain('last post <time datetime="2025-12-31T23:59:59Z">31 Dec 2025</time>');
+  });
+
+  it("shows a value that is not an ISO date as given, escaped", () => {
+    const html = homeDocument([{ ...board, last_post_at: "soon <b>" }], { cast: [], now: new Date(0) });
+    expect(html).toContain('last post <time datetime="soon &lt;b&gt;">soon &lt;b&gt;</time>');
+  });
+
+  it("says when a board has no posts yet", () => {
+    const html = homeDocument([{ ...board, thread_count: 0, last_post_at: null }], { cast: [], now: new Date(0) });
+    expect(html).toContain("0 threads, no posts yet");
+  });
+});
+
 describe("Open Graph and Twitter card", () => {
   const cardTags = [
     '<meta property="og:type" content="website">',
@@ -395,7 +433,7 @@ describe("Open Graph and Twitter card", () => {
   it("tags the home page", async () => {
     const html = await (await call("/")).text();
     for (const tag of cardTags) expect(html).toContain(tag);
-    expect(html).toContain(`<meta property="og:title" content="j-chain.net — ${TAGLINE}">`);
+    expect(html).toContain(`<meta property="og:title" content="j-chain.net | ${TAGLINE}">`);
     expect(html).toContain(`<meta property="og:description" content="${TAGLINE}">`);
     expect(html).toContain(`<meta property="og:url" content="${ORIGIN}/">`);
     expect(html.match(/property="og:image"/g)).toHaveLength(1);
@@ -408,7 +446,7 @@ describe("Open Graph and Twitter card", () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     for (const tag of cardTags) expect(html).toContain(tag);
-    expect(html).toContain('<meta property="og:title" content="Tea &quot;&amp;&quot; &lt;b&gt;bold&lt;/b&gt; — j-chain.net">');
+    expect(html).toContain('<meta property="og:title" content="Tea &quot;&amp;&quot; &lt;b&gt;bold&lt;/b&gt; | j-chain.net">');
     expect(html).toContain(`<meta property="og:description" content="${TAGLINE}">`);
     expect(html).toContain(`<meta property="og:url" content="${ORIGIN}/boards/beta">`);
     expect(html).not.toContain("<b>bold</b>");

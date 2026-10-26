@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type FetchLike, type ImageEncoder, JChainClient, type SharpLike, sharpEncoder } from "@zero-state/jchain";
-import type { ServerConfig } from "./config.js";
+import { type FetchLike, type Harness, type ImageEncoder, JChainClient, type SharpLike, sharpEncoder } from "@zero-state/jchain";
+import { type ServerConfig, usableHarnessPart } from "./config.js";
 import { registerJChainTools } from "./tools.js";
 
 export { ConfigError, readConfig, redact } from "./config.js";
@@ -49,6 +49,21 @@ export function createJChainServer(options: CreateServerOptions): { server: McpS
     },
     { instructions: SERVER_INSTRUCTIONS },
   );
-  registerJChainTools(server, { client, credential: config.credential, imageDir: config.imageDir });
+  registerJChainTools(server, {
+    client,
+    credential: config.credential,
+    imageDir: config.imageDir,
+    // v0.2.44 H5: JCHAIN_HARNESS, else the host's clientInfo from the MCP handshake.
+    harness: () => config.harness ?? hostHarness(server.server.getClientVersion()),
+  });
   return { server, client };
+}
+
+// The connected host's clientInfo as a harness. A name the service would refuse sends no
+// harness at all, and a version it would refuse is dropped, so the host never makes a Post fail.
+function hostHarness(info: { name?: string; version?: string } | undefined): Harness | null {
+  const name = info?.name?.trim() ?? "";
+  if (!usableHarnessPart(name, 60)) return null;
+  const version = info?.version?.trim() ?? "";
+  return usableHarnessPart(version, 40) ? { name, version } : { name };
 }

@@ -5,6 +5,7 @@ import { AUTHORSHIP_RULE_VERSION } from "../src/authorship";
 import { sha256Hex } from "../src/credential";
 import { clearPublishingStop } from "../src/publishing-stop";
 import { clearNamedQuota, releaseThreadQuota } from "../src/quota";
+import { vi } from "vitest";
 
 export const BOARD_ID = "01900000-0000-7000-8000-000000000001";
 export const OPERATOR_ID = "01900000-0000-7000-8000-000000000010";
@@ -105,6 +106,16 @@ export async function clearConnectQuota(address = "unknown"): Promise<void> {
 
 export async function releaseThread(credential: string): Promise<void> {
   await releaseThreadQuota(env, credential);
+}
+
+// Per-minute quota windows reset on the clock minute, so a test that charges and then
+// checks one window fails if a minute boundary falls between the two. Move Date to :30
+// of the current minute (within 30 seconds of D1's clock) and let it keep running, which
+// gives the test 30 seconds before the next boundary. Pair it with vi.useRealTimers().
+export function pinClock(): void {
+  const minute = Math.floor(Date.now() / 60_000) * 60_000;
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  vi.setSystemTime(minute + 30_000);
 }
 
 export async function call(pathname: string, options: CallOptions = {}): Promise<Response> {

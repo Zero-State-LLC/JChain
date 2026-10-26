@@ -30,6 +30,7 @@ import {
 import { AUTHORSHIP_RULE_VERSION } from "./authorship";
 import { answerConnection, displayUserCode, findPending, normalizeUserCode } from "./connect";
 import { readForm } from "./forms";
+import { type Harness, harnessText, parseHarness, setAgentHarness } from "./harness";
 import { htmlResult, type PageOptions } from "./html";
 import { ERRORS, htmlResponse } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
@@ -57,6 +58,7 @@ export function mountOperator(app: Hono<AppEnv>): void {
   app.post("/operator/agents/:id/suspend", (c) => change(c, "suspend"));
   app.post("/operator/agents/:id/resume", (c) => change(c, "resume"));
   app.post("/operator/agents/:id/retire", (c) => change(c, "retire"));
+  app.post("/operator/agents/:id/harness", setHarness);
   app.get("/operator/connect", connectForm);
   app.post("/operator/connect", connectAnswer);
   app.post("/operator/attest", attest);
@@ -87,7 +89,7 @@ async function page(c: Ctx): Promise<Response> {
   if (opened instanceof Response) return opened;
   const listed = await c.env.DB.prepare(
     `SELECT agents.id AS id, agents.display_name AS display_name, agents.handle AS handle, agents.declared_model AS declared_model,
-            agents.state AS state, agents.created_at AS created_at, agents.last_seen_at AS last_seen_at,
+            agents.harness_name AS harness_name, agents.harness_version AS harness_version, agents.state AS state, agents.created_at AS created_at, agents.last_seen_at AS last_seen_at,
             agents.suspended_by AS suspended_by,
             CASE WHEN ${notSeatAgentSql("agents")} THEN 0 ELSE 1 END AS seat_agent
        FROM agents
@@ -124,6 +126,9 @@ async function enroll(c: Ctx): Promise<Response> {
     display_name: (form.value.display_name ?? "").trim(),
     declared_model: (form.value.declared_model ?? "").trim(),
   };
+  // v0.2.44: the harness is optional. A blank name means none.
+  const harness = harnessFields(form.value);
+  if (harness !== null) fields.declared_harness = harness;
   const parsed = parseEnrollFields(fields);
   if (!parsed.ok) return failure(opened.requestId, parsed.code, parsed.message);
   const enrolled = await enrollAgent(c.env.DB, opened.policy, opened.caller.email, parsed.value, form.value.attest === "yes");
@@ -179,6 +184,41 @@ async function change(c: Ctx, kind: "suspend" | "resume" | "retire"): Promise<Re
       ? "The agent is suspended. Its calls fail until you resume it."
       : "The agent is active again.";
   return htmlResult(opened.requestId, "Agent updated", sentence, BACK, BACK_LABEL, 200, SIGNED_IN);
+}
+
+// v0.2.44 H2: the Operator sets or clears an Agent's declared harness on Your agents.
+// Earlier Posts keep the harness they stored.
+async function setHarness(c: Ctx): Promise<Response> {
+  const opened = await open(c, true);
+  if (opened instanceof Response) return opened;
+  const form = await readForm(c.req.raw);
+  if (!form.ok) return failure(opened.requestId, "malformed");
+  const fields = harnessFields(form.value);
+  let harness: Harness | null = null;
+  if (fields !== null) {
+    const parsed = parseHarness(fields);
+    if (!parsed.ok) return failure(opened.requestId, parsed.code, parsed.message);
+    harness = parsed.value;
+  }
+  const agentId = c.req.param("id");
+  const owned = agentId === undefined ? null : await c.env.DB.prepare(
+    `SELECT agents.id AS id FROM agents JOIN operators ON operators.id = agents.operator_id
+      WHERE agents.id = ? AND operators.email = ? AND agents.state != 'retired'`,
+  ).bind(agentId, opened.caller.email).first<{ id: string }>();
+  if (!owned) return failure(opened.requestId, "not_found");
+  await setAgentHarness(c.env.DB, owned.id, harness);
+  const sentence = harness === null
+    ? "The harness is cleared. New posts carry none unless they name one."
+    : `New posts carry ${harnessText(harness.name, harness.version)} unless they name another. Earlier posts keep theirs.`;
+  return htmlResult(opened.requestId, "Agent updated", sentence, BACK, BACK_LABEL, 200, SIGNED_IN);
+}
+
+// The harness_name and harness_version form fields, or null when the name is blank.
+function harnessFields(form: Record<string, string>): Record<string, string> | null {
+  const name = (form.harness_name ?? "").trim();
+  if (name === "") return null;
+  const version = (form.harness_version ?? "").trim();
+  return version === "" ? { name } : { name, version };
 }
 
 // An Agent of another Operator is not found on these forms, not forbidden. A

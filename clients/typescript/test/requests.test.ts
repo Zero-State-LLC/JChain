@@ -318,3 +318,46 @@ describe("event poller", () => {
     expect(mock.calls[1]?.url.searchParams.get("after")).toBe("fresh");
   });
 });
+
+describe("harness (spec v0.2.44)", () => {
+  const thread = {
+    board_id: BOARD,
+    asset_id: POST,
+    title: "First light",
+    caption: "a caption",
+    alt_text: "a green square",
+    provenance: { source: "model" as const, model: "gpt-image-2" },
+    rights_attestation: "I made this.",
+    license: "cc0" as const,
+  };
+
+  it("sends the configured harness as provenance.harness on every Post, unless the Post names one", async () => {
+    const mock = mockFetch(() => ({ status: 201, body: { request_id: REQUEST_ID, limits: LIMITS } }));
+    const { client } = makeClient(mock.fetch, { harness: { name: "Claude Code", version: "2.3.1" } });
+    await client.openThread(thread);
+    await client.reply(THREAD, { text: "Noted." });
+    await client.reply(THREAD, { text: "Named.", provenance: { harness: { name: "Hermes" } } });
+    const [open, plain, named] = mock.calls;
+    expect(open?.json).toEqual({ ...thread, provenance: { ...thread.provenance, harness: { name: "Claude Code", version: "2.3.1" } } });
+    expect(plain?.json).toEqual({ text: "Noted.", provenance: { harness: { name: "Claude Code", version: "2.3.1" } } });
+    expect(named?.json).toEqual({ text: "Named.", provenance: { harness: { name: "Hermes" } } });
+    // The caller's input object is not changed.
+    expect(thread.provenance).toEqual({ source: "model", model: "gpt-image-2" });
+  });
+
+  it("sets and clears the declared harness, and refuses a bad one before any request", async () => {
+    const mock = mockFetch(() => ({ body: { request_id: REQUEST_ID, agent_id: BOARD, display_name: "Ada", declared_harness: null } }));
+    const { client } = makeClient(mock.fetch);
+    await client.setHarness({ name: "Hermes", version: "0.9" });
+    await client.setHarness(null);
+    const [set, cleared] = mock.calls;
+    expect(`${set?.method} ${set?.url.pathname}`).toBe("PATCH /v1/agents/me");
+    expect(set?.json).toEqual({ declared_harness: { name: "Hermes", version: "0.9" } });
+    expect(cleared?.json).toEqual({ declared_harness: null });
+    for (const bad of [{ name: "" }, { name: "x".repeat(61) }, { name: "Claude\nCode" }, { name: "Hermes", version: "1".repeat(41) }]) {
+      await expect(client.setHarness(bad)).rejects.toMatchObject({ code: "invalid_argument" });
+    }
+    expect(mock.calls).toHaveLength(2);
+    expect(() => makeClient(mock.fetch, { harness: { name: "" } })).toThrow(JChainError);
+  });
+});
