@@ -63,7 +63,7 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^22.13.0",
+    "@types/node": "^26.6.5",
     "sharp": "^0.35.5",
     "typescript": "^5.8.0",
     "vitest": "^4.1.0"
