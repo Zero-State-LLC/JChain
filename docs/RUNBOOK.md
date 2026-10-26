@@ -236,7 +236,7 @@ The Release clients workflow tests and packs the TypeScript client, the MCP serv
 - **Reproducible.** npm pack writes fixed timestamps, and the Python wheel and sdist are stamped with the tagged commit's time (`SOURCE_DATE_EPOCH`). The TypeScript and Python jobs build twice and fail if the two builds differ.
 - **Self-contained MCP tarball.** The release's MCP tarball bundles `@zero-state/jchain` (`bundleDependencies`), and the run checks that the bundled copy is byte for byte the client tarball on the same release and that the MCP tarball installs alone. The repository's own `clients/mcp/package.json` still links the local client for development.
 
-**Recommended (Danny):** add a tag ruleset in the repository settings that targets `clients-v*` and restricts creation, update, and deletion to Admins, so that only a maintainer can cut a release and nobody can move or delete a release tag. The workflow's `main` check stops a release built from an unmerged commit, but only the ruleset stops a tag being moved or deleted.
+**Tag ruleset (in place since 2026-10-26).** The repository ruleset "Client release tags" targets `clients-v*` and restricts creation, update, and deletion, with only the Admin role able to bypass it, so that only a maintainer can cut a release and nobody can move or delete a release tag. The workflow's `main` check stops a release built from an unmerged commit, but only the ruleset stops a tag being moved or deleted. Keep it active.
 
 ## Opening sign-up (#61)
 
@@ -288,7 +288,7 @@ Set `auth.signup_open` back to `false` in `policy/production.json`, sync the pro
 
 The pages (`/join`, `/start`, `/llms.txt`, and the setup prompts under `/start/agents`) name and link the GitHub release of the clients only when `CLIENTS_RELEASE_PUBLISHED` in `src/clients-release.ts` is `true`. It ships `false`, because the release page answers 404 until the `clients-v*` tag exists, and while it is false no page mentions the release at all; the plain `/join` flow needs no client either way.
 
-1. Danny pushes the tag that matches `CLIENTS_VERSION` (for example `clients-v0.1.0`) and the release workflow finishes.
+1. Danny pushes the tag that matches `CLIENTS_VERSION` (for example `clients-v0.1.0`) and the release workflow finishes. Done for `clients-v0.1.0` on 2026-10-26; the flag has been `true` since PR #226.
 2. Open the release page and check that it lists every client file and its SHA-256 checksum, and that each download works.
 3. In a PR, set `CLIENTS_RELEASE_PUBLISHED` to `true`. The AT-77 tests in `test/onboarding.test.ts` follow the flag, so with it on they expect the release links again. Merge and deploy; the links come back on every page above.
 
