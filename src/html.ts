@@ -9,6 +9,21 @@ export function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// A short UTC date for people ("25 Oct", or "25 Oct 2025" outside the current UTC year);
+// the full timestamp stays in datetime. Anything that is not an ISO date is shown as given.
+export function shortDate(value: string, now: Date): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  const month = match === null ? undefined : MONTHS[Number(match[2]) - 1];
+  let shown = value;
+  if (match !== null && month !== undefined) {
+    shown = `${Number(match[3])} ${month}`;
+    if (Number(match[1]) !== now.getUTCFullYear()) shown += ` ${match[1]}`;
+  }
+  return `<time datetime="${escapeHtml(value)}">${escapeHtml(shown)}</time>`;
+}
+
 export const SITE_ICONS =
   '<link rel="icon" href="/brand/favicon-v2.ico" sizes="any"><link rel="icon" type="image/svg+xml" href="/brand/mark-v2.svg"><link rel="apple-touch-icon" href="/brand/mark-v2-180.png">';
 
@@ -57,7 +72,8 @@ export const TOKENS_CSS = "/brand/tokens-v2.css";
 // v9 (2026-10-24) adds the framed Agent avatars to v8.
 // v10 (2026-10-25) clips horizontal overflow and gives the header search field a visible edge.
 export const SITE_CSS = "/brand/board-v10.css";
-export const HOME_CSS = "/brand/home-v5.css";
+// home-v6 (2026-10-26) sets the board-card last post date at the activity line's size.
+export const HOME_CSS = "/brand/home-v6.css";
 
 export const PAGE_STYLES = FONT_PRELOADS + stylesheet(TOKENS_CSS) + stylesheet(SITE_CSS);
 

@@ -91,7 +91,7 @@ describe("homepage hero", () => {
     expect(html).not.toContain("<style");
     expect(html).not.toContain(" style=");
     expect(html).toContain('href="/brand/tokens-v2.css"');
-    expect(html).toContain('href="/brand/home-v5.css"');
+    expect(html).toContain('href="/brand/home-v6.css"');
     expect(html).toContain('<a href="#content">Skip to content</a>');
     expect(html).toContain('<main id="content">');
   });
@@ -203,7 +203,7 @@ describe("homepage hero", () => {
     expect(tokenCss).toContain("url('/brand/ibm-plex-sans-400.woff2')");
     expect(tokenCss).toContain("url('/brand/ibm-plex-mono-400.woff2')");
     expect(tokenCss).toContain("@font-face");
-    const home = await call("/brand/home-v5.css");
+    const home = await call("/brand/home-v6.css");
     expect(home.status).toBe(200);
     const homeCss = await home.text();
     expect(homeCss.startsWith("/* Hallmark · macrostructure: Photographic · tone: playful · anchor hue: radioactive green */")).toBe(true);
@@ -379,6 +379,33 @@ describe("homepage cast rotation", () => {
       { file: "ok-hero.webp", name: "Ok", alt: "An ok Wojak.", ...ok, width: 1600, height: 1280 },
       { file: "ok.svg", name: "Svg", alt: "A vector Wojak.", ...ok, width: 180, height: 179 },
     ]);
+  });
+});
+
+describe("homepage board cards", () => {
+  const board = { slug: "remix", name: "Remix Chains", description: "Templates.", thread_count: 13 };
+
+  const now = new Date("2026-10-26T03:00:00Z");
+
+  it("shows the last post as a short UTC date and keeps the full timestamp in datetime", () => {
+    const html = homeDocument([{ ...board, last_post_at: "2026-10-05T22:03:03Z" }], { cast: [], now });
+    expect(html).toContain('13 threads, last post <time datetime="2026-10-05T22:03:03Z">5 Oct</time>');
+    expect(html).not.toContain(">2026-10-05T22:03:03Z<");
+  });
+
+  it("adds the year to a last post from another UTC year", () => {
+    const html = homeDocument([{ ...board, last_post_at: "2025-12-31T23:59:59Z" }], { cast: [], now });
+    expect(html).toContain('last post <time datetime="2025-12-31T23:59:59Z">31 Dec 2025</time>');
+  });
+
+  it("shows a value that is not an ISO date as given, escaped", () => {
+    const html = homeDocument([{ ...board, last_post_at: "soon <b>" }], { cast: [], now: new Date(0) });
+    expect(html).toContain('last post <time datetime="soon &lt;b&gt;">soon &lt;b&gt;</time>');
+  });
+
+  it("says when a board has no posts yet", () => {
+    const html = homeDocument([{ ...board, thread_count: 0, last_post_at: null }], { cast: [], now: new Date(0) });
+    expect(html).toContain("0 threads, no posts yet");
   });
 });
 
