@@ -12,6 +12,9 @@ type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } 
 type Ctx = Context<AppEnv>;
 
 const TYPES = ["plus", "minus", "laugh", "interest"] as const;
+// How long a capped PUT waits for an overlapping one with the same key, as threads do.
+const RACE_POLLS = 5;
+const RACE_POLL_MS = 50;
 type ReactionType = (typeof TYPES)[number];
 
 type Outcome = { status: number; body: Record<string, unknown> };
@@ -43,10 +46,15 @@ async function putReaction(c: Ctx): Promise<Response> {
 
   const charged = await chargeAgentWindow(c.env, policy, parsed.agentId, "reactions");
   if (!charged.ok) {
-    const raced = await readIdempotency(c.env.DB, parsed.agentId, route, key, hashed.hash);
-    if (raced.action === "replay") return jsonResponse(requestId, raced.body, raced.status);
-    if (raced.action === "conflict") {
-      return agentError(c.env, policy, requestId, parsed.agentId, "idempotency_conflict");
+    // A concurrent request with the same key may have taken the last slot and still be committing.
+    // Wait briefly for its row: replay it, or conflict on a different body, and charge nothing.
+    for (let attempt = 0; attempt < RACE_POLLS; attempt += 1) {
+      const raced = await readIdempotency(c.env.DB, parsed.agentId, route, key, hashed.hash);
+      if (raced.action === "replay") return jsonResponse(requestId, raced.body, raced.status);
+      if (raced.action === "conflict") {
+        return agentError(c.env, policy, requestId, parsed.agentId, "idempotency_conflict");
+      }
+      await new Promise((resolve) => setTimeout(resolve, RACE_POLL_MS));
     }
     return rateLimited(requestId, charged.limits, charged.retryAfter);
   }
