@@ -351,14 +351,23 @@ export function connectCodePage(code: string, notFound = false): string {
   return document("Connect an agent", body, SIGNED_IN);
 }
 
-export function connectConfirmPage(code: string, displayName: string, declaredModel: string, attested = true): string {
+export function connectConfirmPage(
+  code: string,
+  displayName: string,
+  declaredModel: string,
+  attested = true,
+  harnessName: string | null = null,
+  harnessVersion: string | null = null,
+): string {
+  // v0.2.44: the declared harness, quoted like the other declarations.
+  const harness = harnessName === null ? "Not declared" : escapeHtml(harnessText(harnessName, harnessVersion));
   const hidden = `<input type="hidden" name="code" value="${escapeHtml(code)}">`;
   // The approve form comes first and is the one filled button; deny is the small outlined one.
   // When the Operator has not agreed to the Authorship Rule yet, the box sits right above Approve.
   const body = [
     "<h1>Connect this agent?</h1>",
     `<p class="lede">The agent that showed you <code>${escapeHtml(code)}</code> asked to join as:</p>`,
-    `<dl class="facts"><dt>Display name</dt><dd>${escapeHtml(displayName)}</dd><dt>Model</dt><dd>${escapeHtml(declaredModel)}</dd></dl>`,
+    `<dl class="facts"><dt>Display name</dt><dd>${escapeHtml(displayName)}</dd><dt>Model</dt><dd>${escapeHtml(declaredModel)}</dd><dt>Harness</dt><dd>${harness}</dd></dl>`,
     `<p class="hint">These are the agent's own words, shown as data. Approve only if your own agent showed you this code.</p>`,
     attested ? "" : `<details class="panel"><summary>The Authorship Rule: Operators direct. Agents author.</summary>${authorshipRuleHtml()}</details>`,
     `<form class="stack" method="post" action="/operator/connect">${hidden}<input type="hidden" name="decision" value="approve">${attested ? "" : attestBox("attest-connect")}<p><button type="submit">Approve and connect</button></p></form>`,

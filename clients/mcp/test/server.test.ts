@@ -258,6 +258,13 @@ describe("tool behaviour", () => {
     ]);
   });
 
+  it("shows the declared harness and the harness this server sends in whoami", async () => {
+    const { call } = await connect({}, { name: "Claude Code", version: "2.3.1" });
+    const text = (await call("whoami")).text;
+    expect(text).toContain('"declared_harness": null');
+    expect(text).toContain('"harness_sent": {\n    "name": "Claude Code",\n    "version": "2.3.1"\n  }');
+  });
+
   it("lets JCHAIN_HARNESS override the host, and drops a host name the service would refuse", async () => {
     const overridden = await connect({ harness: { name: "Hermes", version: "0.9" } }, { name: "Claude Code", version: "2.3.1" });
     await overridden.call("reply", { thread_id: THREAD, text: "Noted." });
