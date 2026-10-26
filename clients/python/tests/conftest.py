@@ -72,6 +72,15 @@ class Clock:
         return self.now
 
 
+@pytest.fixture(autouse=True)
+def _no_harness_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Harness detection reads the environment; tests opt in with ``env=`` or ``harness=``."""
+    from jchain import HARNESS_ENV_VARS
+
+    for key in HARNESS_ENV_VARS:
+        monkeypatch.delenv(key, raising=False)
+
+
 @pytest.fixture
 def server() -> Server:
     return Server()

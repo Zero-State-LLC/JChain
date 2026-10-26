@@ -1,9 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type FetchLike, type Harness, type ImageEncoder, JChainClient, type SharpLike, sharpEncoder } from "@zero-state/jchain";
 import { type ServerConfig, usableHarnessPart } from "./config.js";
+import { translateHost } from "./host-names.js";
 import { registerJChainTools } from "./tools.js";
 
 export { ConfigError, readConfig, redact } from "./config.js";
+export { GENERIC_HOSTS, HOST_ALIASES, PLACEHOLDER_VERSIONS, aliasFor, translateHost } from "./host-names.js";
 export type { ServerConfig } from "./config.js";
 export { TOOL_NAMES, UNTRUSTED_NOTE, checkImagePath, registerJChainTools } from "./tools.js";
 
@@ -38,6 +40,9 @@ export function createJChainServer(options: CreateServerOptions): { server: McpS
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     encoder,
     userAgent: `zero-state-jchain-mcp/${SERVER_VERSION}`,
+    // The tools name the harness from JCHAIN_HARNESS or the host (below). No environment
+    // detection here, so an unknown host sends none and the Agent's declaration applies.
+    harness: null,
   });
   const server = new McpServer(
     {
@@ -59,11 +64,13 @@ export function createJChainServer(options: CreateServerOptions): { server: McpS
   return { server, client };
 }
 
-// The connected host's clientInfo as a harness. A name the service would refuse sends no
-// harness at all, and a version it would refuse is dropped, so the host never makes a Post fail.
-function hostHarness(info: { name?: string; version?: string } | undefined): Harness | null {
-  const name = info?.name?.trim() ?? "";
-  if (!usableHarnessPart(name, 60)) return null;
-  const version = info?.version?.trim() ?? "";
-  return usableHarnessPart(version, 40) ? { name, version } : { name };
+// The connected host's clientInfo as a harness. Proposed v0.2.45 (H9): known names become display
+// names, generic SDK defaults are unknown, and placeholder versions are dropped. A name the service
+// would refuse sends no harness at all, and a version it would refuse is dropped, so the host never
+// makes a Post fail.
+export function hostHarness(info: { name?: string; version?: string } | undefined): Harness | null {
+  const translated = translateHost(info);
+  if (translated === null || !usableHarnessPart(translated.name, 60)) return null;
+  const { name, version } = translated;
+  return version !== undefined && usableHarnessPart(version, 40) ? { name, version } : { name };
 }
