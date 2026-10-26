@@ -17,18 +17,19 @@ CREATED = {"thread_id": THREAD, "post_id": "p", "state": "published", "limits": 
 
 
 def test_parses_claude_codes_ai_agent_shape() -> None:
-    assert parse_agent_variable("claude-code_2-1-308_agent") == {"name": "Claude Code", "version": "2.1.308"}
-    assert parse_agent_variable("claude-code_2-1-261_harness") == {"name": "Claude Code", "version": "2.1.261"}
-    assert parse_agent_variable("claude-code/2.1.0") == {"name": "Claude Code", "version": "2.1.0"}
+    assert parse_agent_variable("claude-code_2-1-308_agent") == {"name": "Claude Code"}
+    assert parse_agent_variable("claude-code_2-1-261_harness") == {"name": "Claude Code"}
+    assert parse_agent_variable("claude-code/2.1.0") == {"name": "Claude Code"}
+    assert parse_agent_variable("Claude-Code") == {"name": "Claude Code"}
 
 
 def test_order_ai_agent_agent_then_markers() -> None:
-    assert parse_agent_variable("goose@1.9.0") == {"name": "goose", "version": "1.9.0"}
+    assert parse_agent_variable("goose@1.9.0") == {"name": "goose"}
     assert parse_agent_variable("my-loop@0.0.0") == {"name": "my-loop"}
-    assert detect_harness({"AI_AGENT": "first@1", "AGENT": "second@2", "CLAUDECODE": "1"}) == {"name": "first", "version": "1"}
-    assert detect_harness({"AGENT": "second@2", "CLAUDECODE": "1"}) == {"name": "second", "version": "2"}
+    assert detect_harness({"AI_AGENT": "first@1", "AGENT": "second@2", "CLAUDECODE": "1"}) == {"name": "first"}
+    assert detect_harness({"AGENT": "second@2", "CLAUDECODE": "1"}) == {"name": "second"}
     assert detect_harness({"CLAUDECODE": "1", "CODEX_THREAD_ID": "t"}) == {"name": "Claude Code"}
-    assert detect_harness({"CODEX_THREAD_ID": "t", "CODEX_VERSION": "0.50.0"}) == {"name": "Codex", "version": "0.50.0"}
+    assert detect_harness({"CODEX_THREAD_ID": "t", "CODEX_VERSION": "0.50.0"}) == {"name": "Codex"}
     assert detect_harness({"CODEX_SESSION_ID": "s"}) == {"name": "Codex"}
     assert detect_harness({"CLAUDECODE": "0"}) is None
     assert detect_harness({}) is None
@@ -53,7 +54,7 @@ def test_reads_only_the_named_variables(monkeypatch: pytest.MonkeyPatch) -> None
     assert seen and all(key in HARNESS_ENV_VARS for key in seen)
     assert detect_harness({"AI_AGENT": "jc_" + "a" * 30, "CLAUDECODE": "1"}) == {"name": "Claude Code"}
     monkeypatch.setenv("AI_AGENT", "claude-code_2-1-308_agent")
-    assert detect_harness() == {"name": "Claude Code", "version": "2.1.308"}
+    assert detect_harness() == {"name": "Claude Code"}
 
 
 def test_precedence_in_the_client(make_client: Callable[..., JChainClient], server: Server) -> None:
@@ -64,7 +65,7 @@ def test_precedence_in_the_client(make_client: Callable[..., JChainClient], serv
     make_client(harness=None, env={"CLAUDECODE": "1"}).reply(THREAD, "d")
     assert [json.loads(r.content) for r in server.requests] == [
         {"text": "a", "provenance": {"harness": {"name": "Hermes", "version": "0.9"}}},
-        {"text": "b", "provenance": {"harness": {"name": "Claude Code", "version": "2.1.308"}}},
+        {"text": "b", "provenance": {"harness": {"name": "Claude Code"}}},
         {"text": "c"},
         {"text": "d"},
     ]

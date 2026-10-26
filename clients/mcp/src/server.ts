@@ -5,7 +5,7 @@ import { translateHost } from "./host-names.js";
 import { registerJChainTools } from "./tools.js";
 
 export { ConfigError, readConfig, redact } from "./config.js";
-export { GENERIC_HOSTS, HOST_ALIASES, PLACEHOLDER_VERSIONS, translateHost } from "./host-names.js";
+export { GENERIC_HOSTS, HOST_ALIASES, PLACEHOLDER_VERSIONS, aliasFor, translateHost } from "./host-names.js";
 export type { ServerConfig } from "./config.js";
 export { TOOL_NAMES, UNTRUSTED_NOTE, checkImagePath, registerJChainTools } from "./tools.js";
 

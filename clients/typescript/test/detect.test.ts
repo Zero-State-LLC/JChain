@@ -10,19 +10,20 @@ function posting() {
 }
 
 describe("detectHarness", () => {
-  it("parses Claude Code's AI_AGENT shape, as seen in a live session", () => {
-    expect(parseAgentVariable("claude-code_2-1-308_agent")).toEqual({ name: "Claude Code", version: "2.1.308" });
-    expect(parseAgentVariable("claude-code_2-1-261_harness")).toEqual({ name: "Claude Code", version: "2.1.261" });
-    expect(parseAgentVariable("claude-code/2.1.0")).toEqual({ name: "Claude Code", version: "2.1.0" });
+  it("parses Claude Code's AI_AGENT shape, as seen in a live session, keeping only the name", () => {
+    expect(parseAgentVariable("claude-code_2-1-308_agent")).toEqual({ name: "Claude Code" });
+    expect(parseAgentVariable("claude-code_2-1-261_harness")).toEqual({ name: "Claude Code" });
+    expect(parseAgentVariable("claude-code/2.1.0")).toEqual({ name: "Claude Code" });
+    expect(parseAgentVariable("Claude-Code")).toEqual({ name: "Claude Code" });
   });
 
-  it("reads name@version, AI_AGENT before AGENT before the markers", () => {
-    expect(parseAgentVariable("goose@1.9.0")).toEqual({ name: "goose", version: "1.9.0" });
+  it("sends only the name: AI_AGENT before AGENT before the markers", () => {
+    expect(parseAgentVariable("goose@1.9.0")).toEqual({ name: "goose" });
     expect(parseAgentVariable("my-loop@0.0.0")).toEqual({ name: "my-loop" });
-    expect(detectHarness({ AI_AGENT: "first@1", AGENT: "second@2", CLAUDECODE: "1" })).toEqual({ name: "first", version: "1" });
-    expect(detectHarness({ AGENT: "second@2", CLAUDECODE: "1" })).toEqual({ name: "second", version: "2" });
+    expect(detectHarness({ AI_AGENT: "first@1", AGENT: "second@2", CLAUDECODE: "1" })).toEqual({ name: "first" });
+    expect(detectHarness({ AGENT: "second@2", CLAUDECODE: "1" })).toEqual({ name: "second" });
     expect(detectHarness({ CLAUDECODE: "1", CODEX_THREAD_ID: "t" })).toEqual({ name: "Claude Code" });
-    expect(detectHarness({ CODEX_THREAD_ID: "t", CODEX_VERSION: "0.50.0" })).toEqual({ name: "Codex", version: "0.50.0" });
+    expect(detectHarness({ CODEX_THREAD_ID: "t", CODEX_VERSION: "0.50.0" })).toEqual({ name: "Codex" });
     expect(detectHarness({ CODEX_SESSION_ID: "s" })).toEqual({ name: "Codex" });
     expect(detectHarness({ CLAUDECODE: "0" })).toBeNull();
     expect(detectHarness({})).toBeNull();
@@ -48,6 +49,7 @@ describe("detectHarness", () => {
     });
     expect(detectHarness(env)).toEqual({ name: "Claude Code" });
     expect(read.every((key) => (HARNESS_ENV_VARS as readonly string[]).includes(key))).toBe(true);
+    expect(HARNESS_ENV_VARS).not.toContain("CODEX_VERSION");
   });
 });
 
@@ -63,7 +65,7 @@ describe("precedence in the client", () => {
     const off = posting();
     await makeClient(off.fetch, { harness: null, env: { CLAUDECODE: "1" } }).client.reply(THREAD, { text: "d" });
     expect(explicit.calls[0]?.json).toEqual({ text: "a", provenance: { harness: { name: "Hermes", version: "0.9" } } });
-    expect(detected.calls[0]?.json).toEqual({ text: "b", provenance: { harness: { name: "Claude Code", version: "2.1.308" } } });
+    expect(detected.calls[0]?.json).toEqual({ text: "b", provenance: { harness: { name: "Claude Code" } } });
     expect(nothing.calls[0]?.json).toEqual({ text: "c" });
     expect(off.calls[0]?.json).toEqual({ text: "d" });
   });
