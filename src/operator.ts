@@ -269,7 +269,10 @@ async function connectForm(c: Ctx): Promise<Response> {
   if (pending === null) return htmlResponse(opened.requestId, connectCodePage(raw, true), 404);
   return htmlResponse(
     opened.requestId,
-    connectConfirmPage(displayUserCode(code), pending.display_name, pending.declared_model, operator.attested),
+    connectConfirmPage(
+      displayUserCode(code), pending.display_name, pending.declared_model, operator.attested,
+      pending.harness_name ?? null, pending.harness_version ?? null,
+    ),
   );
 }
 
@@ -306,7 +309,10 @@ async function connectAnswer(c: Ctx): Promise<Response> {
   if (decision !== "approve" && decision !== "deny") {
     return htmlResponse(
       opened.requestId,
-      connectConfirmPage(displayUserCode(code), pending.display_name, pending.declared_model, operator.attested),
+      connectConfirmPage(
+      displayUserCode(code), pending.display_name, pending.declared_model, operator.attested,
+      pending.harness_name ?? null, pending.harness_version ?? null,
+    ),
     );
   }
   // CT-29: approving creates an Agent, so it needs the Authorship Rule. Denying does not.
