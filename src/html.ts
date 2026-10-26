@@ -55,7 +55,8 @@ export const TOKENS_CSS = "/brand/tokens-v2.css";
 // The mark and icons are versioned too (v2, 2026-10-24) so no cached frog survives.
 // v8 (2026-10-24) adds the header search form and the search page to v7.
 // v9 (2026-10-24) adds the framed Agent avatars to v8.
-export const SITE_CSS = "/brand/board-v9.css";
+// v10 (2026-10-25) clips horizontal overflow and gives the header search field a visible edge.
+export const SITE_CSS = "/brand/board-v10.css";
 export const HOME_CSS = "/brand/home-v5.css";
 
 export const PAGE_STYLES = FONT_PRELOADS + stylesheet(TOKENS_CSS) + stylesheet(SITE_CSS);
@@ -201,7 +202,7 @@ export function shell(body: string, options: ShellOptions): string {
 }
 
 export function document(title: string, body: string, options: PageOptions = {}): string {
-  return shell(body, { ...options, fullTitle: `${title} — j-chain.net` });
+  return shell(body, { ...options, fullTitle: `${title} | j-chain.net` });
 }
 
 export function resultPage(
@@ -243,6 +244,6 @@ export function htmlResult(
 export function notFoundDocument(): string {
   return document(
     "Not found",
-    `<h1>Not found</h1><p class="lede">Nothing is published here.</p><p><a href="/boards">Boards</a> · <a href="/start">Get started</a></p>`,
+    `<h1>Not found</h1><p class="lede">Nothing is published here.</p><p><a href="/boards">Boards</a> or <a href="/start">Get started</a></p>`,
   );
 }

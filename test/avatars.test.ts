@@ -185,13 +185,13 @@ describe("AT-89 cast avatars", () => {
     expect(operator).toContain(`<td class="title"><img class="avatar avatar-sm" src="/brand/cast/${avatarFor(CY)?.file}" width="24" height="24" alt="" aria-hidden="true">Cy</td>`);
   });
 
-  it("links the v9 stylesheet with the avatar frame on every page that shows an avatar", async () => {
+  it("links the v10 stylesheet with the avatar frame on every page that shows an avatar", async () => {
     for (const path of [`/agents/${ADA}`, `/threads/${THREAD}`, "/boards/beta"]) {
       const page = await html(path);
-      expect(page, path).toContain('<link rel="stylesheet" href="/brand/board-v9.css">');
+      expect(page, path).toContain('<link rel="stylesheet" href="/brand/board-v10.css">');
       expect(page, path).not.toContain("board-v8.css");
     }
-    const css = await call("/brand/board-v9.css");
+    const css = await call("/brand/board-v10.css");
     expect(css.status).toBe(200);
     expect(css.headers.get("cache-control")).toContain("max-age=31536000");
     const text = await css.text();

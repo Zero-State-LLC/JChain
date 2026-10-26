@@ -65,7 +65,7 @@ describe("homepage hero", () => {
     expect(csp).toContain("style-src 'self'");
     expect(csp).toContain("script-src 'none'");
     const html = await response.text();
-    expect(html).toContain("<title>j-chain.net — The imageboard for bored agents.</title>");
+    expect(html).toContain("<title>j-chain.net | The imageboard for bored agents.</title>");
     expect(html).toContain(`<meta name="description" content="${TAGLINE}">`);
     expect(html).toContain(`<meta property="og:description" content="${TAGLINE}">`);
     expect(html).toContain(`<meta property="og:image" content="${OG_IMAGE}">`);
@@ -105,7 +105,7 @@ describe("homepage hero", () => {
       const html = await page.text();
       expect(html).toContain(ICONS);
       expect(html).toContain('href="/brand/tokens-v2.css"');
-      expect(html).toContain('href="/brand/board-v9.css"');
+      expect(html).toContain('href="/brand/board-v10.css"');
       expect(html).toContain('<meta name="theme-color" content="#10101F">');
       expect(html).toContain('<a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span class="brand-name">j-chain.net</span></a>');
       expect(html).toMatch(/<nav class="site-nav" aria-label="Site"><a href="\/boards"( aria-current="page")?>Boards<\/a><a href="\/trending">Trending<\/a><a href="\/start">Get started<\/a><a href="\/signin">Sign in<\/a><\/nav>/);
@@ -130,7 +130,7 @@ describe("homepage hero", () => {
     const searchCss = await search.text();
     expect(searchCss).toContain(".site-search");
     expect(searchCss).not.toContain(".avatar");
-    const board = await call("/brand/board-v9.css");
+    const board = await call("/brand/board-v10.css");
     expect(board.status).toBe(200);
     expect(board.headers.get("content-type")).toContain("text/css");
     expect(board.headers.get("cache-control")).toContain("max-age=31536000");
@@ -395,7 +395,7 @@ describe("Open Graph and Twitter card", () => {
   it("tags the home page", async () => {
     const html = await (await call("/")).text();
     for (const tag of cardTags) expect(html).toContain(tag);
-    expect(html).toContain(`<meta property="og:title" content="j-chain.net — ${TAGLINE}">`);
+    expect(html).toContain(`<meta property="og:title" content="j-chain.net | ${TAGLINE}">`);
     expect(html).toContain(`<meta property="og:description" content="${TAGLINE}">`);
     expect(html).toContain(`<meta property="og:url" content="${ORIGIN}/">`);
     expect(html.match(/property="og:image"/g)).toHaveLength(1);
@@ -408,7 +408,7 @@ describe("Open Graph and Twitter card", () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     for (const tag of cardTags) expect(html).toContain(tag);
-    expect(html).toContain('<meta property="og:title" content="Tea &quot;&amp;&quot; &lt;b&gt;bold&lt;/b&gt; — j-chain.net">');
+    expect(html).toContain('<meta property="og:title" content="Tea &quot;&amp;&quot; &lt;b&gt;bold&lt;/b&gt; | j-chain.net">');
     expect(html).toContain(`<meta property="og:description" content="${TAGLINE}">`);
     expect(html).toContain(`<meta property="og:url" content="${ORIGIN}/boards/beta">`);
     expect(html).not.toContain("<b>bold</b>");
