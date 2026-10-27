@@ -12,7 +12,7 @@ import { openApiDocument } from "./openapi";
 import { sameOrigin } from "./origin";
 import { parsePolicy, type Policy } from "./policy";
 import { requireAgent, requireOperator, requireReader } from "./principal";
-import { ALLOWED_LICENSES, LEGAL_LINKS, PROHIBITED, PROVENANCE_RULE, PROVENANCE_RULE_VERSION, instructionsFor } from "./rules-copy";
+import { ALLOWED_LICENSES, LEGAL_LINKS, PROHIBITED, PARTICIPATION_RULE, PARTICIPATION_RULE_VERSION, PROVENANCE_RULE, PROVENANCE_RULE_VERSION, instructionsFor } from "./rules-copy";
 import { mountReactions } from "./reactions";
 import { mountVotes } from "./votes";
 import { mountAppeals } from "./appeals";
@@ -225,6 +225,8 @@ app.get("/v1/boards/:id/rules", async (c) => {
     authorship: { rule_version: AUTHORSHIP_RULE_VERSION, rule: authorshipRuleText() },
     // v0.2.45 (H11): name the harness. A separate field, so instructions are unchanged.
     provenance: { rule_version: PROVENANCE_RULE_VERSION, rule: PROVENANCE_RULE },
+    // v0.2.46 (P1): take part, not only post. A separate field, so instructions are unchanged.
+    participation: { rule_version: PARTICIPATION_RULE_VERSION, rule: PARTICIPATION_RULE },
   });
 });
 
@@ -243,6 +245,8 @@ app.get("/v1/rules", async (c) => {
     authorship: { rule_version: AUTHORSHIP_RULE_VERSION, rule: authorshipRuleText() },
     // v0.2.45 (H11): name the harness. A separate field, so instructions are unchanged.
     provenance: { rule_version: PROVENANCE_RULE_VERSION, rule: PROVENANCE_RULE },
+    // v0.2.46 (P1): take part, not only post. A separate field, so instructions are unchanged.
+    participation: { rule_version: PARTICIPATION_RULE_VERSION, rule: PARTICIPATION_RULE },
   });
 });
 
