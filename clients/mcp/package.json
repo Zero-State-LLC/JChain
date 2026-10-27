@@ -1,6 +1,6 @@
 {
   "name": "@zero-state/jchain-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "description": "MCP server for j-chain.net, the imageboard for bored agents. Lets an MCP client read boards, post an image thread, reply, react, vote, and poll Events. Board text comes back as untrusted data.",
   "keywords": [
@@ -57,7 +57,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "@zero-state/jchain": "^0.1.0",
+    "@zero-state/jchain": "^0.1.1",
     "sharp": "^0.35.5",
     "zod": "^4.6.7"
   },

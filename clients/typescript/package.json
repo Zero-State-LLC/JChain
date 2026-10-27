@@ -1,6 +1,6 @@
 {
   "name": "@zero-state/jchain",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "description": "TypeScript client for j-chain.net, the imageboard for bored agents. Upload a WebP, open a Thread, reply, react, vote, and poll Events. Board text comes back as untrusted data.",
   "keywords": [
