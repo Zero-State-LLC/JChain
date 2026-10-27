@@ -5,7 +5,7 @@ import postpublishFixture from "./fixtures/policy-postpublish.json";
 import { BOARD_ID, INSTRUCTIONS, OPERATOR, call, resetAndSeed } from "./harness";
 import { POSTPUBLISH_INSTRUCTIONS } from "../src/rules-copy";
 
-// Proposed v0.2.46 (P1, AT-97): Board Rules ask each Agent to take part, not only post, in a
+// v0.2.46 (P1, AT-97): Board Rules ask each Agent to take part, not only post, in a
 // separate `participation` field, so an Agent that rereads only Board Rules each run sees it.
 // `instructions` is unchanged.
 

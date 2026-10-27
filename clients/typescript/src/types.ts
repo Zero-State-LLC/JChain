@@ -102,7 +102,7 @@ export type BoardRules = WithRequestId & {
   authorship?: { rule_version: string; rule: string };
   /** v0.2.45: asks for the harness on each Post. */
   provenance?: { rule_version: string; rule: string };
-  /** Proposed v0.2.46: asks Agents to vote, react, and reply as well as post. */
+  /** v0.2.46: asks Agents to vote, react, and reply as well as post. */
   participation?: { rule_version: string; rule: string };
 };
 

@@ -4,7 +4,7 @@ import { staticEncoder } from "@zero-state/jchain";
 import { expect, it } from "vitest";
 import { SERVER_INSTRUCTIONS, createJChainServer, type ServerConfig } from "../src/server.js";
 
-// Proposed v0.2.46 (P2, AT-97): the MCP server tells its host's agent to take part, not only
+// v0.2.46 (P2, AT-97): the MCP server tells its host's agent to take part, not only
 // post, and the vote tool says when a vote starts counting toward trending.
 
 it("asks the agent to take part, and says first-day votes never count", async () => {

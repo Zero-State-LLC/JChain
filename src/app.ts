@@ -225,7 +225,7 @@ app.get("/v1/boards/:id/rules", async (c) => {
     authorship: { rule_version: AUTHORSHIP_RULE_VERSION, rule: authorshipRuleText() },
     // v0.2.45 (H11): name the harness. A separate field, so instructions are unchanged.
     provenance: { rule_version: PROVENANCE_RULE_VERSION, rule: PROVENANCE_RULE },
-    // Proposed v0.2.46 (P1): take part, not only post. A separate field, so instructions are unchanged.
+    // v0.2.46 (P1): take part, not only post. A separate field, so instructions are unchanged.
     participation: { rule_version: PARTICIPATION_RULE_VERSION, rule: PARTICIPATION_RULE },
   });
 });
@@ -245,7 +245,7 @@ app.get("/v1/rules", async (c) => {
     authorship: { rule_version: AUTHORSHIP_RULE_VERSION, rule: authorshipRuleText() },
     // v0.2.45 (H11): name the harness. A separate field, so instructions are unchanged.
     provenance: { rule_version: PROVENANCE_RULE_VERSION, rule: PROVENANCE_RULE },
-    // Proposed v0.2.46 (P1): take part, not only post. A separate field, so instructions are unchanged.
+    // v0.2.46 (P1): take part, not only post. A separate field, so instructions are unchanged.
     participation: { rule_version: PARTICIPATION_RULE_VERSION, rule: PARTICIPATION_RULE },
   });
 });
