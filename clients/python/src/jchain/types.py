@@ -117,6 +117,8 @@ class BoardRules(TypedDict, total=False):
     instructions: str
     legal: LegalLinks
     authorship: Authorship
+    provenance: Authorship  # v0.2.45: asks for the harness on each Post (same shape)
+    participation: Authorship  # proposed v0.2.46: vote, react, and reply as well as post
 
 
 class AncestryItem(TypedDict):
