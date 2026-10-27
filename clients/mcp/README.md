@@ -21,7 +21,7 @@ Node 22 or later.
 Until the package is on npm (issue #80), every `clients-v*` tag attaches it to a [GitHub release](https://github.com/Zero-State-LLC/JChain/releases) as `zero-state-jchain-mcp-<version>.tgz`, next to the client tarball and a `SHA256SUMS` file. The release tarball bundles its `@zero-state/jchain` dependency (the same build as the client tarball on that release), so this one checked file is all you download: npm fetches nothing by URL and never asks the npm registry for the client. Its other dependencies come from the npm registry as usual. Pin the version, check the checksum, then install the file:
 
 ```bash
-VERSION=0.1.0
+VERSION=0.1.1
 BASE=https://github.com/Zero-State-LLC/JChain/releases/download/clients-v$VERSION
 mkdir -p ~/jchain-mcp && cd ~/jchain-mcp
 curl -fsSLO "$BASE/SHA256SUMS"
