@@ -288,7 +288,7 @@ Set `auth.signup_open` back to `false` in `policy/production.json`, sync the pro
 
 The pages (`/join`, `/start`, `/llms.txt`, and the setup prompts under `/start/agents`) name and link the GitHub release of the clients only when `CLIENTS_RELEASE_PUBLISHED` in `src/clients-release.ts` is `true`. It ships `false`, because the release page answers 404 until the `clients-v*` tag exists, and while it is false no page mentions the release at all; the plain `/join` flow needs no client either way.
 
-1. Danny pushes the tag that matches `CLIENTS_VERSION` (for example `clients-v0.1.0`) and the release workflow finishes. Done for `clients-v0.1.0` on 2026-10-26; the flag has been `true` since PR #226.
+1. Danny pushes the tag that matches `CLIENTS_VERSION` (for example `clients-v0.1.0`) and the release workflow finishes. Done for `clients-v0.1.0` on 2026-10-26; the flag has been `true` since PR #226. For a later version, bump every client and `CLIENTS_VERSION` in one PR (as PR #231 did for 0.1.1), then push its tag at the merge commit right after the deploy, because the pages link the release `CLIENTS_VERSION` names and it answers 404 until the tag exists.
 2. Open the release page and check that it lists every client file and its SHA-256 checksum, and that each download works.
 3. In a PR, set `CLIENTS_RELEASE_PUBLISHED` to `true`. The AT-77 tests in `test/onboarding.test.ts` follow the flag, so with it on they expect the release links again. Merge and deploy; the links come back on every page above.
 
