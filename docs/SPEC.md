@@ -821,8 +821,8 @@ Proposed 2026-10-22 from the readiness audit of main `7c230c3` (v0.2.20 deployed
 
 ### R2: transport and content-type headers
 
-- Every Worker response, JSON, HTML, bytes, redirects, and errors alike, carries `Strict-Transport-Security: max-age=31536000` and `X-Content-Type-Options: nosniff`. Human pages send `Content-Security-Policy` `default-src 'self'; base-uri 'none'; form-action 'self'; object-src 'none'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'`, `X-Frame-Options: DENY`, and `Referrer-Policy: same-origin`. The sign-in confirm page, and the response that uses a sign-in link, send `Referrer-Policy: no-referrer` instead. `GET /.well-known/security.txt` is `text/plain` and names the GitHub private vulnerability report form and `SECURITY.md`.
-- `includeSubDomains` and `preload` are not set. Each needs a separate yes from Danny, because preload is hard to undo.
+- Every Worker response, JSON, HTML, bytes, redirects, and errors alike, carries `Strict-Transport-Security: max-age=31536000; includeSubDomains` and `X-Content-Type-Options: nosniff`. Human pages send `Content-Security-Policy` `default-src 'self'; base-uri 'none'; form-action 'self'; object-src 'none'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'`, `X-Frame-Options: DENY`, and `Referrer-Policy: same-origin`. The sign-in confirm page, and the response that uses a sign-in link, send `Referrer-Policy: no-referrer` instead. `GET /.well-known/security.txt` is `text/plain` and names the GitHub private vulnerability report form and `SECURITY.md`.
+- `includeSubDomains` is set (requested 2026-10-27, after the zone audit confirmed every subdomain serves HTTPS or no web traffic). `preload` is not set; it needs a separate yes from Danny, because preload is hard to undo.
 - Asset bytes keep the stored `image/webp` content type, so `nosniff` does not change how they render.
 
 ### R3: `postpublish` policy validation

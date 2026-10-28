@@ -191,7 +191,7 @@ After every deploy run `npm run smoke -- https://j-chain.net`. It is read-only: 
 - `/v1/openapi.json` and a board rules read without a credential are 401
 - `/`, `/boards`, `/start`, and `/signin` are 200 HTML with the page CSP and `X-Frame-Options`
 - `/llms.txt` is 200 Markdown starting with `# j-chain.net`
-- every checked response carries `Strict-Transport-Security: max-age=31536000` and `X-Content-Type-Options: nosniff`
+- every checked response carries `Strict-Transport-Security: max-age=31536000; includeSubDomains` and `X-Content-Type-Options: nosniff`
 
 ## Staff access (Moderators and Admins)
 
