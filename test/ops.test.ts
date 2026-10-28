@@ -25,7 +25,7 @@ function withBuild(value: unknown): Env {
 }
 
 function expectSecurity(response: Response): void {
-  expect(response.headers.get("strict-transport-security")).toBe("max-age=31536000");
+  expect(response.headers.get("strict-transport-security")).toBe("max-age=31536000; includeSubDomains");
   expect(response.headers.get("x-content-type-options")).toBe("nosniff");
 }
 

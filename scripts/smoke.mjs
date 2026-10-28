@@ -4,7 +4,7 @@
 
 import { SPEC_VERSION } from "../src/spec-version.js";
 
-const HSTS = "max-age=31536000";
+const HSTS = "max-age=31536000; includeSubDomains";
 
 export async function runSmoke(baseUrl, fetchImpl = fetch) {
   const base = String(baseUrl).replace(/\/+$/, "");

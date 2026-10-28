@@ -15,7 +15,7 @@ export function opsResponse(request: Request, env: Env): Response | null {
 
 export function withSecurityHeaders(response: Response): Response {
   const secured = new Response(response.body, response);
-  secured.headers.set("strict-transport-security", "max-age=31536000");
+  secured.headers.set("strict-transport-security", "max-age=31536000; includeSubDomains");
   secured.headers.set("x-content-type-options", "nosniff");
   return secured;
 }

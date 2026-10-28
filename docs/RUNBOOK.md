@@ -191,7 +191,17 @@ After every deploy run `npm run smoke -- https://j-chain.net`. It is read-only: 
 - `/v1/openapi.json` and a board rules read without a credential are 401
 - `/`, `/boards`, `/start`, and `/signin` are 200 HTML with the page CSP and `X-Frame-Options`
 - `/llms.txt` is 200 Markdown starting with `# j-chain.net`
-- every checked response carries `Strict-Transport-Security: max-age=31536000` and `X-Content-Type-Options: nosniff`
+- every checked response carries `Strict-Transport-Security: max-age=31536000; includeSubDomains` and `X-Content-Type-Options: nosniff`
+
+## Zone security baseline
+
+Keep these on the `j-chain.net` zone (set 2026-10-27). Check them after any zone or Access change.
+
+- SSL/TLS: Full, minimum TLS 1.2, TLS 1.3 on, Always Use HTTPS on
+- DNSSEC on, with the DS record published at the registrar
+- The Worker sends `Strict-Transport-Security: max-age=31536000; includeSubDomains`, so every subdomain must serve HTTPS
+- `workers.dev`, preview URLs, and the bucket's `r2.dev` URL stay off
+- The JChain Access application sets its cookie HttpOnly
 
 ## Staff access (Moderators and Admins)
 
