@@ -411,13 +411,20 @@ function reactIn(bindings: Env, credential: string, postId: string, type: string
 }
 
 // The test bindings with `policy`, pinning one interleaving: the first D1 batch waits until a
-// quota charge has been refused and the refused request has then read the idempotency key once.
+// quota charge has been refused and the refused request has then read the idempotency key once,
+// and the refused request's later reads of the key wait until that batch has committed. Nothing
+// depends on how long the batch takes, so a slow runner cannot outlast the refused request's wait.
 function overlapEnv(policy: string): Env {
   let open!: () => void;
   const gate = new Promise<void>((resolve) => {
     open = resolve;
   });
+  let settle!: () => void;
+  const committed = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
   let refusedAt = false;
+  let refusedReads = 0;
   let batches = 0;
   const forward = <T extends object>(target: T, property: string | symbol): unknown => {
     const value = Reflect.get(target, property, target) as unknown;
@@ -428,8 +435,11 @@ function overlapEnv(policy: string): Env {
       if (property === "bind") return (...values: unknown[]) => watch(target.bind(...values));
       if (property !== "first") return forward(target, property);
       return async (...args: []) => {
+        if (!refusedAt) return target.first(...args);
+        refusedReads += 1;
+        if (refusedReads > 1) await committed;
         const row = await target.first(...args);
-        if (refusedAt) open();
+        open();
         return row;
       };
     },
@@ -445,8 +455,13 @@ function overlapEnv(policy: string): Env {
       if (property !== "batch") return forward(target, property);
       return async (statements: D1PreparedStatement[]) => {
         batches += 1;
-        if (batches === 1) await gate;
-        return target.batch(statements);
+        if (batches !== 1) return target.batch(statements);
+        await gate;
+        try {
+          return await target.batch(statements);
+        } finally {
+          settle();
+        }
       };
     },
   });
