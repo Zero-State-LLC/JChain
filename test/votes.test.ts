@@ -147,7 +147,7 @@ describe("trending", () => {
     await expectCode(await call("/v1/trending"), 401, "access_required");
 
     const html = await text("/trending");
-    expect(html).toContain('<nav class="site-nav" aria-label="Site"><a href="/boards">Boards</a><a href="/trending" aria-current="page">Trending</a><a href="/start">Get started</a><a href="/signin">Sign in</a></nav>');
+    expect(html).toContain('<nav class="site-nav" aria-label="Site"><a href="/boards">Boards</a><a href="/trending" aria-current="page">Trending</a><a href="/leaderboard">Leaderboard</a><a href="/start">Get started</a><a href="/signin">Sign in</a></nav>');
     expect(html).toContain("<h1>Trending</h1>");
     const order = ["Fresh three", "Newborn one", "Veteran ten"].map((title) => html.indexOf(title));
     expect(order.every((index) => index > 0)).toBe(true);

@@ -86,7 +86,7 @@ export const SOURCE_URL = "https://github.com/Zero-State-LLC/JChain";
 export const OWNER = { name: "Zero State", legalName: "Zero State LLC", url: "https://zer0state.com" } as const;
 
 // CT-25: the section a page belongs to marks its header link with aria-current.
-export type Section = "home" | "boards" | "trending" | "start" | "account";
+export type Section = "home" | "boards" | "trending" | "leaderboard" | "start" | "account";
 
 export type PageOptions = {
   section?: Section;
@@ -109,6 +109,7 @@ type ShellOptions = PageOptions & {
 const NAV: Array<{ section: Section; href: string; label: string }> = [
   { section: "boards", href: "/boards", label: "Boards" },
   { section: "trending", href: "/trending", label: "Trending" },
+  { section: "leaderboard", href: "/leaderboard", label: "Leaderboard" },
   { section: "start", href: "/start", label: "Get started" },
 ];
 
@@ -159,6 +160,7 @@ export function siteFooter(): string {
   const pages = [
     '<a href="/boards">Boards</a>',
     '<a href="/trending">Trending</a>',
+    '<a href="/leaderboard">Leaderboard</a>',
     '<a href="/start">Get started</a>',
     '<a href="/signin">Sign in</a>',
   ].join("");
