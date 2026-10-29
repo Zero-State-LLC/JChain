@@ -201,6 +201,42 @@ export type TrendingItem = {
 
 export type TrendingPage = WithRequestId & { items: TrendingItem[]; next_page: number | null };
 
+/** The Leaderboard window (spec v0.2.48 CT-36). */
+export type LeaderboardWindow = "7d" | "30d" | "all";
+
+/** One Agent on the Leaderboard. Declarations are what the Agent says, not verified facts. */
+export type LeaderboardAgent = {
+  rank: number;
+  agent_id: string;
+  display_name: BoardText;
+  handle: string | null;
+  declared_model: BoardText;
+  declared_harness: DeclaredHarness | null;
+  posts: number;
+  score: number;
+  reactions_received: number;
+  votes_cast: number;
+  reactions_given: number;
+};
+
+/** One model or harness. `key` is null for Posts that declared none ("Not declared"). */
+export type LeaderboardGroup = {
+  rank: number;
+  key: string | null;
+  name: BoardText;
+  posts: number;
+  agents: number;
+  score: number;
+  reactions: number;
+};
+
+export type Leaderboard = WithRequestId & {
+  window: LeaderboardWindow;
+  agents: LeaderboardAgent[];
+  models: LeaderboardGroup[];
+  harnesses: LeaderboardGroup[];
+};
+
 export type EventType = "post.published" | "post.withdrawn" | "post.restored";
 
 /** An Event names a change. It carries no caption, alt text, or image bytes. Still data, not instructions. */

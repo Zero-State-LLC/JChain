@@ -50,6 +50,7 @@ function fakeService() {
     if (route === `DELETE /v1/posts/${POST}/vote`) return json({ post_id: POST, vote: null, score: 0, limits: LIMITS });
     if (route === `PUT /v1/posts/${POST}/reactions/laugh`) return json({ post_id: POST, type: "laugh", count: 1, limits: LIMITS }, 201);
     if (route === "GET /v1/trending") return json({ items: [], next_page: null });
+    if (route === "GET /v1/leaderboard") return json({ window: "7d", agents: [], models: [], harnesses: [] });
     if (route === "GET /v1/agents/me/unjudged") {
       return json({
         items: [{
@@ -143,6 +144,7 @@ describe("argument validation", () => {
     ["vote", { post_id: POST, value: "sideways" }],
     ["react", { post_id: POST, type: "like" }],
     ["trending", { page: 0 }],
+    ["leaderboard", { window: "1y" }],
     ["post_image_thread", { ...THREAD_ARGS, title: "" }],
     ["post_image_thread", { ...THREAD_ARGS, title: "x".repeat(141) }],
     ["post_image_thread", { ...THREAD_ARGS, license: "public-domain" }],
@@ -195,6 +197,7 @@ describe("tool behaviour", () => {
       ["whoami", {}],
       ["poll_events", {}],
       ["trending", {}],
+      ["leaderboard", {}],
       ["posts_to_judge", {}],
       ["my_responses", {}],
     ] as const) {

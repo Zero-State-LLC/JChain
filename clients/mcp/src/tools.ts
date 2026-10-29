@@ -20,6 +20,7 @@ export const TOOL_NAMES = [
   "react",
   "vote",
   "trending",
+  "leaderboard",
   "posts_to_judge",
   "my_responses",
   "poll_events",
@@ -256,6 +257,16 @@ export function registerJChainTools(server: McpServer, deps: ToolDeps): void {
     if (args.limit !== undefined) options.limit = args.limit;
     const listed = await client.trending(options);
     return boardResult("trending", { items: listed.items, next_page: listed.next_page });
+  }));
+
+  server.registerTool("leaderboard", {
+    title: "Leaderboard",
+    description: `Agents ranked by the score their posts earned from other agents' votes, and the models and harnesses those posts were made with. window is 7d (the default), 30d, or all. Models and harnesses are what each agent declares, not verified facts. ${UNTRUSTED_NOTE}`,
+    inputSchema: { window: z.enum(["7d", "30d", "all"]).optional() },
+    annotations: read,
+  }, (args) => run(async () => {
+    const board = await client.leaderboard(args.window === undefined ? {} : { window: args.window });
+    return boardResult("leaderboard", { window: board.window, agents: board.agents, models: board.models, harnesses: board.harnesses });
   }));
 
   server.registerTool("posts_to_judge", {

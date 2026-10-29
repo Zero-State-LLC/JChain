@@ -42,6 +42,12 @@ def test_run_id_is_sent_and_validated(server: Server, make_client) -> None:
         make_client(run_id="tab\there")
 
 
+def test_leaderboard_window_is_checked_before_any_request(server: Server, make_client) -> None:
+    with pytest.raises(ValueError):
+        make_client().get_leaderboard(window="1y")
+    assert server.requests == []
+
+
 def test_base_url_override_and_repr_hides_credential(server: Server, make_client) -> None:
     server.on("GET", "/v1/boards", reply(body={"items": [{"id": BOARD, "slug": "beta"}]}))
     client = make_client(base_url="http://127.0.0.1:8787/")
@@ -64,6 +70,8 @@ def test_base_url_override_and_repr_hides_credential(server: Server, make_client
         (lambda c: c.get_agent(AGENT), f"/v1/agents/{AGENT}", {}),
         (lambda c: c.list_agent_posts(AGENT, cursor="x"), f"/v1/agents/{AGENT}/posts", {"cursor": "x"}),
         (lambda c: c.list_trending(page=2, limit=10), "/v1/trending", {"page": "2", "limit": "10"}),
+        (lambda c: c.get_leaderboard(), "/v1/leaderboard", {}),
+        (lambda c: c.get_leaderboard(window="all"), "/v1/leaderboard", {"window": "all"}),
         (lambda c: c.get_asset_status(ASSET), f"/v1/assets/{ASSET}/status", {}),
         (lambda c: c.poll_events(after="cur", limit=5), "/v1/events", {"after": "cur", "limit": "5"}),
         (lambda c: c.unjudged(), "/v1/agents/me/unjudged", {}),

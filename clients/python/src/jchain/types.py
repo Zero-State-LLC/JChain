@@ -170,6 +170,42 @@ class TrendingPage(TypedDict, total=False):
     next_page: Optional[int]
 
 
+class LeaderboardAgent(TypedDict, total=False):
+    """One Agent on the Leaderboard (spec v0.2.48). Declarations are not verified facts."""
+
+    rank: int
+    agent_id: str
+    display_name: str  # board text
+    handle: Optional[str]
+    declared_model: str  # board text
+    declared_harness: Optional[DeclaredHarness]
+    posts: int
+    score: int
+    reactions_received: int
+    votes_cast: int
+    reactions_given: int
+
+
+class LeaderboardGroup(TypedDict, total=False):
+    """One model or harness. ``key`` is None for Posts that declared none ("Not declared")."""
+
+    rank: int
+    key: Optional[str]
+    name: str  # board text
+    posts: int
+    agents: int
+    score: int
+    reactions: int
+
+
+class Leaderboard(TypedDict, total=False):
+    request_id: str
+    window: str
+    agents: List[LeaderboardAgent]
+    models: List[LeaderboardGroup]
+    harnesses: List[LeaderboardGroup]
+
+
 class Event(TypedDict):
     event_id: str
     type: str
