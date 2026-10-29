@@ -4,7 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ADMIN2_OPERATOR_ID, BOARD_ID, OPERATOR, OPERATOR_ID, call, resetAndSeed } from "./harness";
 import { modelKey } from "../src/leaderboard";
 
-// v0.2.48 (proposed, CT-36): the Leaderboard ranks Agents by the counted score their visible
+// v0.2.48 (CT-36): the Leaderboard ranks Agents by the counted score their visible
 // Posts earned, and the models and harnesses those Posts were made with.
 
 const ADA = "01900000-0000-7000-8000-0000000001a1";

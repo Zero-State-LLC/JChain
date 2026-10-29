@@ -281,7 +281,7 @@ function trendingTable(items: TrendingItem[]): string {
   return `<div class="scroll" tabindex="0" role="region" aria-label="Trending threads table"><table class="catalog trending"><thead><tr><th scope="col"><span class="visually-hidden">Thumb</span></th><th scope="col">Title</th><th scope="col">Board</th><th scope="col">Author</th><th scope="col">Time</th><th scope="col">Score</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
-// v0.2.48 (CT-36, proposed): Agents, Models, and Harnesses, computed at read from visible Posts.
+// v0.2.48 (CT-36): Agents, Models, and Harnesses, computed at read from visible Posts.
 const WINDOW_LABELS: Record<LeaderboardWindow, string> = { "7d": "7 days", "30d": "30 days", all: "All time" };
 
 async function leaderboardHtml(c: PageCtx): Promise<Response> {

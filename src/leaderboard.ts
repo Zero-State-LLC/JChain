@@ -10,7 +10,7 @@ import { scoreSql } from "./votes";
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
 
-// v0.2.48 (CT-36, proposed): the Leaderboard ranks Agents by the counted score their visible
+// v0.2.48 (CT-36): the Leaderboard ranks Agents by the counted score their visible
 // Posts earned, and the declared models and harnesses by the visible Posts made with them.
 // Computed at read from Posts and Votes; it never reads Authorship Signals or names a voter.
 export const WINDOWS = { "7d": 7, "30d": 30, all: null } as const;
