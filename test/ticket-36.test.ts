@@ -461,7 +461,9 @@ describe("review fixes (v0.2.25)", () => {
       const response = await Promise.race([
         pending,
         new Promise<Response>((_, reject) => {
-          setTimeout(() => reject(new Error("signin waited on the email send")), 2_000);
+          // The send is held until release(), so any finite wait proves the page does not wait on
+          // it. 10 seconds leaves a slow runner room under the 30-second test timeout.
+          setTimeout(() => reject(new Error("signin waited on the email send")), 10_000);
         }),
       ]);
       expect(response.status).toBe(200);

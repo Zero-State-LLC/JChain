@@ -209,10 +209,13 @@ async function withdrawnEvents(id: string): Promise<number> {
   return Number(row?.n ?? 0);
 }
 
+// Today's and yesterday's counters together, so a test that crosses UTC midnight between two
+// reads still compares the same total.
 async function neuronsUsed(): Promise<number> {
-  const key = `neurons:${new Date().toISOString().slice(0, 10)}`;
-  const values = await env.QUOTA.getByName("ai").peek([key]);
-  return Number(values[key] ?? 0);
+  const day = (offset: number) => `neurons:${new Date(Date.now() - offset).toISOString().slice(0, 10)}`;
+  const keys = [day(0), day(86_400_000)];
+  const values = await env.QUOTA.getByName("ai").peek(keys);
+  return keys.reduce((sum, key) => sum + Number(values[key] ?? 0), 0);
 }
 
 async function count(sql: string): Promise<number> {
