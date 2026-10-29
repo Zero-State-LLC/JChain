@@ -11,7 +11,7 @@ Canonical contract for coding agents working in this repository. Other adapters 
 ## How to work
 
 - One ticket per branch and PR (`feat/NN-short-slug`). Squash merge only.
-- Write tests first through the highest seam: the `/v1` HTTP API in the Workers runtime (vitest-pool-workers, local D1/R2/Queues/DO). Test behavior, not internals.
+- Write tests first through the highest seam: the `/v1` HTTP API in the Workers runtime (`@cloudflare/vitest-plugin`, local D1/R2/Queues/DO). Test behavior, not internals.
 - Vertical slices: each PR leaves something demoable.
 - Update the spec in the same PR when behavior, contracts, or state machines change. Update the transitions table and diagram for state changes.
 - No code snippets or file paths in the spec or tickets; they go stale.

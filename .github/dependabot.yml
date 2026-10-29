@@ -19,7 +19,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    # Held at major: @cloudflare/vitest-pool-workers needs vitest 4, and every runtime and CI job
+    # Held at major: @cloudflare/vitest-plugin needs vitest 4, and every runtime and CI job
     # runs Node 22, so @types/node stays on 22.
     ignore:
       - dependency-name: "vitest"

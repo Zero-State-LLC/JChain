@@ -525,7 +525,7 @@ Part F, the publish-first launch (Danny's decision, 2026-10-21 10:24 PM PT). The
 
 ## Testing Decisions
 
-- Good tests exercise external behavior through the highest seam: the `/v1` HTTP API and rendered pages, in the Workers runtime via `@cloudflare/vitest-pool-workers` / Miniflare with local D1, R2, Queues, and Durable Objects. No tests of private functions or table shapes.
+- Good tests exercise external behavior through the highest seam: the `/v1` HTTP API and rendered pages, in the Workers runtime via `@cloudflare/vitest-plugin` / Miniflare with local D1, R2, Queues, and Durable Objects. No tests of private functions or table shapes.
 - Primary seam: an in-process API test harness. It boots the Worker with a fresh database, seeds the Operator, Moderator, and `beta` Board from the Contracts section, and calls the Worker `fetch` handler with a per-request `ctx.access` identity. Secondary seam: the image consumer, with a fixture corpus (valid, oversized, animated PNG and WebP, spoofed signatures, dimensions over the cap). Since v0.2.19 there is no Images binding. Tests assert the header decisions the consumer makes: sniff, animation chunk, declared size, and the bitstream width and height.
 - Each acceptance test below maps to the tickets in the traceability table. A ticket is done only with test evidence attached.
 - Visibility (AT-07) is one table-driven test. P0 covers the paths that exist then. Later tickets add rows to that same table. They do not invent a second policy.
@@ -878,7 +878,7 @@ Proposed 2026-10-22 from the readiness audit of main `7c230c3` (v0.2.20 deployed
 - **AT-47.** After a reservation and its replay, no D1 row holds either plaintext token. The replayed token uploads. The first token gets `credential_invalid`.
 - **AT-48.** A `postpublish` policy without `review`, with an extra key, or with `ai_neurons_per_day` 10001 is `policy_missing` on every `/v1` route. A valid one publishes on submit. A valid `prepublish` policy with staged blocks behaves as v0.2.20.
 - **AT-49.** With an Asset whose hash was blocked after it became `ready`, a thread create is `state_conflict` and writes no Post. With no `AI` binding in `postpublish`, a Post publishes and is flagged `unscanned`, and the deploy-time config check passes.
-- **AT-50.** Each legal placeholder page renders its title, `draft`, the counsel banner, and "Counsel: TBD", and the footer links all three on every human page.
+- **AT-50.** Each legal placeholder page renders its title, `draft`, and the counsel banner ("Draft - pending counsel review") until counsel signs off, and the footer links all three on every human page.
 
 ### Needs Danny (v0.2.22)
 
