@@ -8,7 +8,7 @@
 // `--deps <dir>`); this script loads them from there with createRequire.
 //
 // Read-only: it discovers a Board, a Thread, and an Agent through public GET pages, then loads
-// each human page in headless Chromium at a phone and a desktop viewport. It never clicks,
+// each human page in headless Chromium at the AT-65 phone and tablet widths and a desktop viewport. It never clicks,
 // submits a form, signs in, or writes anything.
 //
 // Each page and viewport loads twice:
@@ -29,8 +29,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TOKENS_FILE = path.join(HERE, "..", "public", "brand", "tokens-v2.css");
 
+// AT-65 (no sideways scroll at 320, 375, 390, 414, and 768 px) and AT-56 (375 and 1280).
 export const VIEWPORTS = [
+  { name: "320x640", width: 320, height: 640 },
   { name: "375x812", width: 375, height: 812 },
+  { name: "390x844", width: 390, height: 844 },
+  { name: "414x896", width: 414, height: 896 },
+  { name: "768x1024", width: 768, height: 1024 },
   { name: "1280x800", width: 1280, height: 800 },
 ];
 
@@ -141,6 +146,7 @@ export function pageList(targets) {
   if (targets.thread) pages.push({ name: "thread", path: `/threads/${targets.thread}` });
   if (targets.agent) pages.push({ name: "agent", path: `/agents/${targets.agent}` });
   pages.push({ name: "trending", path: "/trending" });
+  pages.push({ name: "leaderboard", path: "/leaderboard" });
   const term = targets.searchTerm || FALLBACK_SEARCH_TERM;
   pages.push({ name: "search", path: `/search?q=${encodeURIComponent(term)}` });
   pages.push(
