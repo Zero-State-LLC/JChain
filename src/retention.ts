@@ -370,9 +370,14 @@ async function backfillScans(env: RetentionEnv): Promise<number> {
       await env.ASSET_UPLOAD.send({ post_id: row.id });
     } catch {
       console.error(JSON.stringify({ message: "scan backfill send failed", post_id: row.id }));
-      await env.DB.prepare(
-        "UPDATE post_scans SET result = 'unscanned' WHERE post_id = ? AND result = 'pending'",
-      ).bind(row.id).run();
+      // A failed flag is logged and the sweep moves on to the next Post.
+      try {
+        await env.DB.prepare(
+          "UPDATE post_scans SET result = 'unscanned' WHERE post_id = ? AND result = 'pending'",
+        ).bind(row.id).run();
+      } catch {
+        console.error(JSON.stringify({ message: "unscanned flag failed", post_id: row.id }));
+      }
     }
   }
   return count;

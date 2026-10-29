@@ -329,7 +329,7 @@ function publishOnSubmit(db: D1Database, statements: D1PreparedStatement[], post
 }
 
 // A failed send never undoes the publish. The Post is flagged unscanned for review instead.
-async function sendScan(env: Env, postId: string): Promise<void> {
+export async function sendScan(env: Env, postId: string): Promise<void> {
   try {
     await env.ASSET_UPLOAD.send({ post_id: postId });
   } catch {

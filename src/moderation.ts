@@ -14,6 +14,7 @@ import { logHideToDecision } from "./latency";
 import { settleSeatFlags } from "./seats";
 import { applyOperatorAction, isOperatorAction, parseOperatorExtras } from "./operator-admin";
 import { mountEvidence } from "./evidence";
+import { sendScan } from "./threads";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type Ctx = Context<AppEnv>;
@@ -502,15 +503,8 @@ async function movePost(
     ...publishedSiblingIds,
   ];
   if (leftPublished.length > 0) await dropPublishedCopies(c.env, leftPublished);
-  if (enqueueScan) {
-    try {
-      await c.env.ASSET_UPLOAD.send({ post_id: action.targetId });
-    } catch {
-      await c.env.DB.prepare(
-        "UPDATE post_scans SET result = 'unscanned' WHERE post_id = ? AND result = 'pending'",
-      ).bind(action.targetId).run();
-    }
-  }
+  // The move is already committed: a failed send is logged and flags the Post unscanned, never a 500.
+  if (enqueueScan) await sendScan(c.env, action.targetId);
   await settleSeatFlags(c.env.DB, action.targetId, name, occurredAt, actorEmail, policy);
   for (const member of group) await settleSeatFlags(c.env.DB, member.id, name, occurredAt, actorEmail, policy);
   await logHideToDecision(c.env.DB, action.targetId, post, name, occurredAt);
