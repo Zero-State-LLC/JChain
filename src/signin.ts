@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import {
   badLinkPage,
   confirmLinkPage,
@@ -14,7 +14,7 @@ import { htmlError } from "./html";
 import { htmlResponse } from "./http";
 import { uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import { mailbox, type Policy } from "./policy";
+import { mailbox } from "./policy";
 import { chargeSignInAddress, chargeSignInEmail } from "./quota";
 import {
   CLEAR_SESSION_COOKIE,
@@ -33,12 +33,10 @@ import {
   signInEmail,
   signupAllowed,
 } from "./session";
+import type { AppEnv, Ctx } from "./hono-env";
 
 // CT-18 as amended in v0.2.23. The sign-in page always renders. The email form
 // and every write route work only while email sign-in is on.
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
 
 const ACCOUNT = { section: "account" } as const;
 

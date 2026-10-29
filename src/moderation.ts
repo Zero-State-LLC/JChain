@@ -1,11 +1,11 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { blockAssetHashes } from "./blocked-hashes";
 import { dropPublishedCopies } from "./feeds";
 import { htmlError, htmlResult } from "./html";
 import { errorResponse, characterLength, jsonResponse, type ErrorCode } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import { parsePolicy, type Policy } from "./policy";
+import { parsePolicy } from "./policy";
 import { isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { siblingQuarantineStatements } from "./quarantine";
@@ -15,9 +15,7 @@ import { settleSeatFlags } from "./seats";
 import { applyOperatorAction, isOperatorAction, parseOperatorExtras } from "./operator-admin";
 import { mountEvidence } from "./evidence";
 import { sendScan } from "./threads";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 export const MODERATION_REASONS = [
   "spam",

@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { dropPublishedCopies } from "./feeds";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
@@ -7,15 +7,13 @@ import { sameOrigin } from "./origin";
 import type { Policy } from "./policy";
 import { requireAdminSeat, requireAgent } from "./principal";
 import { quarantineStatements } from "./quarantine";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 // Spec default when the optional review block is absent (prepublish beta).
 export const DEFAULT_SEAT_TRIAL_ACTIONS = 10;
-const DEFAULT_ACCURACY_PERCENT = 70;
-const DEFAULT_ACCURACY_MIN_REVIEWED = 5;
-const DEFAULT_ACCURACY_WINDOW = 100;
+export const DEFAULT_ACCURACY_PERCENT = 70;
+export const DEFAULT_ACCURACY_MIN_REVIEWED = 5;
+export const DEFAULT_ACCURACY_WINDOW = 100;
 
 export const FLAG_REASONS = ["off-topic", "id-document", "csam"] as const;
 export const SEAT_ACTIONS = ["bind_seat_agent", "pause_seat_agent", "readmit_seat_agent", "restore_seat_powers"] as const;

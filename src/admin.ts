@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { decodeCursor, encodeCursor } from "./browse";
 import {
   insertBoard,
@@ -19,9 +19,7 @@ import { applySeatAction, isSeatAction } from "./seats";
 import { policySection } from "./policy-page";
 import { operatorsSection, readOperators } from "./operator-admin";
 import { gaugesSection, readAnalytics, readGauges, readScanGauges, scanSection, usageSection } from "./gauges";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 const PAGE = 25;
 

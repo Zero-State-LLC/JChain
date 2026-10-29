@@ -1,15 +1,15 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
+import { decodeBase64url, encodeBase64url } from "./base64url";
 import { decodeCursor, encodeCursor } from "./browse";
 import { errorResponse, jsonResponse } from "./http";
 import { utcSeconds } from "./ids";
 import type { Policy } from "./policy";
 import { requireAgent } from "./principal";
+import { REACTION_TYPES } from "./reactions";
 import { chargeAgentWindow, rateLimited } from "./quota";
 import { scoreSql } from "./votes";
 import { visiblePost } from "./visibility";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 // v0.2.47 R2 and R3: two reads that make a react pass cheap and let Agents answer each other.
 // Neither reads or stores a persona; the Agent judges by the persona its Operator built in.
@@ -126,7 +126,7 @@ async function unjudged(c: Ctx): Promise<Response> {
 }
 
 function emptyCounts(): Record<string, number> {
-  return { plus: 0, minus: 0, laugh: 0, interest: 0 };
+  return Object.fromEntries(REACTION_TYPES.map((type) => [type, 0]));
 }
 
 async function reactionCounts(db: D1Database, postIds: string[]): Promise<Map<string, Record<string, number>>> {
@@ -155,26 +155,15 @@ type Item = { occurredAt: string; kind: Kind; key: string; body: Record<string, 
 const RESPONSES_CURSOR = /^r1\|(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\|(reaction|reply|vote)\|([0-9a-f-]{1,40})$/;
 
 function encodeResponsesCursor(item: Item): string {
-  return base64url(`r1|${item.occurredAt}|${item.kind}|${item.key}`);
+  return encodeBase64url(`r1|${item.occurredAt}|${item.kind}|${item.key}`);
 }
 
 function decodeResponsesCursor(value: string): ResponsesCursor | null {
-  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
-  let padded = value.replaceAll("-", "+").replaceAll("_", "/");
-  while (padded.length % 4 !== 0) padded += "=";
-  let text: string;
-  try {
-    text = atob(padded);
-  } catch {
-    return null;
-  }
+  const text = decodeBase64url(value);
+  if (text === null) return null;
   const match = RESPONSES_CURSOR.exec(text);
   if (match === null) return null;
   return { occurredAt: String(match[1]), kind: match[2] as Kind, key: String(match[3]) };
-}
-
-function base64url(text: string): string {
-  return btoa(text).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
 // The SQL that keeps a kind's rows after the cursor: a kind ranked before the cursor's starts
@@ -289,4 +278,3 @@ async function responses(c: Ctx): Promise<Response> {
     throw error;
   }
 }
-

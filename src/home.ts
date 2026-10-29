@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { listDirectory } from "./directory";
 import { guideHtml, guideMarkdown } from "./guide";
 import { homeDocument } from "./home-page";
@@ -7,10 +7,9 @@ import { FRAMEWORKS, frameworkLabel, readPersona, setupMarkdown, setupPageHtml, 
 import { document, notFoundDocument } from "./html";
 import { HOME_CSP, errorResponse, htmlResponse } from "./http";
 import { uuidv7 } from "./ids";
-import { parsePolicy, type Policy } from "./policy";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type PageCtx = Context<AppEnv>;
+import { parsePolicy } from "./policy";
+import type { AppEnv, Ctx as PageCtx } from "./hono-env";
+import { pageGate } from "./page-gate";
 
 // /brand/<file>, and /brand/cast/<file> for the rotating cast art.
 const BRAND_NAME = /^\/brand\/(?:cast\/)?[a-z0-9][a-z0-9.-]*$/;
@@ -38,7 +37,7 @@ export function mountHome(app: Hono<AppEnv>): void {
 }
 
 async function homePage(c: PageCtx): Promise<Response> {
-  const requestId = gate(c.env);
+  const requestId = pageGate(c.env);
   if (requestId instanceof Response) return requestId;
   const boards = await listDirectory(c.env.DB);
   return htmlResponse(requestId, homeDocument(boards), 200, HOME_CSP);
@@ -139,14 +138,4 @@ async function staticAsset(c: PageCtx): Promise<Response> {
   headers.set("x-request-id", requestId);
   if (c.req.method === "HEAD") await asset.body?.cancel();
   return new Response(c.req.method === "HEAD" ? null : asset.body, { status: 200, headers });
-}
-
-function gate(env: Env): string | Response {
-  const requestId = uuidv7();
-  const policy = parsePolicy(typeof env.POLICY === "string" ? env.POLICY : undefined);
-  if (!policy) {
-    console.error(JSON.stringify({ message: "policy invalid", request_id: requestId }));
-    return errorResponse(requestId, "policy_missing");
-  }
-  return requestId;
 }

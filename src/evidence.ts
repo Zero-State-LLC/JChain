@@ -1,12 +1,10 @@
-import type { Hono, Context } from "hono";
+import type { Hono } from "hono";
 import { derivativeKey } from "./asset-pipeline";
 import { bytesResponse, errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
-import { parsePolicy, type Policy } from "./policy";
+import { parsePolicy } from "./policy";
 import { requireAdmin } from "./principal";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 // Gap row 12 (AT-35, Part D item 5): material under a legal hold is readable only by an Admin
 // through Cloudflare Access, and every read writes an audit row in the same batch as the lookup.

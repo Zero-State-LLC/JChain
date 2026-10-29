@@ -1,14 +1,12 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { htmlError, htmlResult } from "./html";
 import { characterLength, errorResponse, jsonResponse, type ErrorCode } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import { parsePolicy, type Policy } from "./policy";
+import { parsePolicy } from "./policy";
 import { MODERATION_REASONS, canonicalReason } from "./moderation";
 import { requireAdmin } from "./principal";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 const SLUG = /^[a-z][a-z0-9]{0,19}$/;
 const DUPLICATE = "A board with this slug already exists.";

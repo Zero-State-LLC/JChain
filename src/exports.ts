@@ -1,16 +1,14 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { provenanceJson } from "./harness";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import type { Policy } from "./policy";
 import { requireModerator } from "./principal";
 import { visibleAncestry } from "./remix";
 import { VISIBLE_POST } from "./visibility";
+import type { AppEnv, Ctx } from "./hono-env";
 
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type App = Hono<AppEnv>;
-type Ctx = Context<AppEnv>;
 
 const SCHEMA_VERSION = 1;
 const PAGE = 100;

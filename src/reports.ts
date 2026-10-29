@@ -1,10 +1,10 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { dropPublishedCopies } from "./feeds";
 import { htmlError, htmlResult } from "./html";
 import { characterLength, errorResponse, jsonResponse, type ErrorCode } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import { parsePolicy, type Policy } from "./policy";
+import { parsePolicy } from "./policy";
 import { canonicalReason } from "./moderation";
 import { alertAfterResponse } from "./moderator-alert";
 import { accessEmail, requireAgent } from "./principal";
@@ -12,9 +12,7 @@ import { quarantineStatements } from "./quarantine";
 import { currentSession } from "./session";
 import { turnstileSecret, verifyTurnstile } from "./turnstile";
 import { visibleBoardSlug, visibleReportTarget } from "./visibility";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 export const REPORT_REASONS = [
   "spam",

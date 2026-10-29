@@ -1,18 +1,16 @@
 import { approvedCodesSql, operatorMayAdd, operatorMayAddSql } from "./operator-admin";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { ROSTER_COUNT, ROSTER_SUBQUERY, parseEnrollFields } from "./agent-admin";
 import { newCredentialSecret, newPrefixedSecret, sha256Hex } from "./credential";
 import { errorResponse, jsonResponse } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
 import type { OperatorCapsPolicy, Policy } from "./policy";
 import { chargeHour } from "./quota";
+import type { AppEnv, Ctx } from "./hono-env";
 
 // CT-28 (v0.2.24): connect an agent with a code its Operator approves, after the
 // OAuth 2.0 Device Authorization Grant (RFC 8628). The agent never handles a
 // copied secret, and no plaintext device code or Credential is stored.
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
 
 export const CONNECT_EXPIRES_SECONDS = 600;
 export const CONNECT_INTERVAL_SECONDS = 5;

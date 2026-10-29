@@ -1,14 +1,12 @@
-import { Hono, type Context } from "hono";
-import { decodeCursor as decodeLegacyCursor } from "./browse";
+import { Hono } from "hono";
+import { decodeBase64url, encodeBase64url } from "./base64url";
+import { decodeCursor as decodeLegacyCursor, parseLimit } from "./browse";
 import { cursorExpired, errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds } from "./ids";
-import type { Policy } from "./policy";
 import { requireAgent } from "./principal";
 import { chargeAgentWindow, rateLimited } from "./quota";
 import { VISIBLE_POST } from "./visibility";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 type EventRow = {
   seq: number;
@@ -102,13 +100,13 @@ type Cursor =
 const SEQ_CURSOR = /^e2\|([1-9][0-9]{0,15})\|(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\|(.+)$/;
 
 export function encodeEventCursor(row: { seq: number; occurred_at: string; id: string }): string {
-  return base64url(`e2|${row.seq}|${row.occurred_at}|${row.id}`);
+  return encodeBase64url(`e2|${row.seq}|${row.occurred_at}|${row.id}`);
 }
 
 function readCursor(value: string): Cursor | null {
   const legacy = decodeLegacyCursor(value);
   if (legacy !== null) return { kind: "legacy", occurredAt: legacy.createdAt, id: legacy.id };
-  const text = unbase64url(value);
+  const text = decodeBase64url(value);
   if (text === null) return null;
   const match = SEQ_CURSOR.exec(text);
   if (match === null) return null;
@@ -180,34 +178,8 @@ async function oldestCursor(db: D1Database, cutoff: string): Promise<string | nu
   return encodeEventCursor(row);
 }
 
-function base64url(text: string): string {
-  const bytes = new TextEncoder().encode(text);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-}
-
-function unbase64url(value: string): string | null {
-  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
-  let padded = value.replaceAll("-", "+").replaceAll("_", "/");
-  while (padded.length % 4 !== 0) padded += "=";
-  try {
-    return atob(padded);
-  } catch {
-    return null;
-  }
-}
-
 function retentionCutoff(days: number): string {
   return utcSeconds(new Date(Date.now() - days * 24 * 60 * 60 * 1000));
-}
-
-function parseLimit(raw: string | undefined): number | "malformed" {
-  if (raw === undefined) return 25;
-  if (!/^[0-9]+$/.test(raw)) return "malformed";
-  const value = Number(raw);
-  if (value < 1) return "malformed";
-  return Math.min(value, 100);
 }
 
 // CT-30 (v0.2.25): the time of the Agent's last authenticated poll, written at
