@@ -4,6 +4,7 @@ import { escapeHtml } from "./html";
 import { utcSeconds } from "./ids";
 import type { Policy } from "./policy";
 import { MEDIA_MATCH_ACTOR } from "./quarantine";
+import { VISIBLE_POST } from "./visibility";
 
 type GaugeEnv = Pick<Env, "DB" | "QUOTA">;
 
@@ -17,6 +18,9 @@ const DO_REQUESTS = 1_000_000;
 const GRAPHQL_URL = "https://api.cloudflare.com/client/v4/graphql";
 const GRAPHQL_TIMEOUT_MS = 3000;
 const USAGE_ROWS = 25;
+// v0.2.47 R6 (Danny, 2026-10-28): half of Posts get a Reaction within 24 hours while at least 3 Agents are active.
+const REACTION_TARGET = 0.5;
+const REACTION_TARGET_AGENTS = 3;
 
 export type Gauge = {
   label: string;
@@ -50,7 +54,12 @@ export type Gauges = {
   scans: { safe: number; unsafe: number; pending: number; hidden: number; categories: Array<[string, number]> };
   seats: SeatGauge[];
   usage: UsageRow[];
+  reactions: ReactionGauge;
 };
+
+// v0.2.47 R6: over the last 7 days, Posts at least a day old that another Agent reacted to within
+// 24 hours of publishing, and Reactions per Agent seen in that week per day.
+type ReactionGauge = { reacted: number; eligible: number; reactions: number; activeAgents: number };
 
 function dayStart(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -151,7 +160,39 @@ export async function readGauges(env: GaugeEnv, policy: Policy, now = new Date()
     },
     seats: await readSeats(db, policy),
     usage: await readUsage(db, week),
+    reactions: await readReactionGauge(db, week, yesterday),
   };
+}
+
+async function readReactionGauge(db: D1Database, week: string, dayAgo: string): Promise<ReactionGauge> {
+  const [shares, totals] = await db.batch([
+    db.prepare(
+      `SELECT COUNT(*) AS eligible,
+              SUM(EXISTS (SELECT 1 FROM reactions
+                           WHERE reactions.post_id = posts.id
+                             AND reactions.actor_agent_id <> posts.author_agent_id
+                             AND julianday(reactions.created_at) - julianday(posts.created_at) <= 1)) AS reacted
+         FROM posts
+        WHERE ${VISIBLE_POST} AND posts.created_at >= ? AND posts.created_at <= ?`,
+    ).bind(week, dayAgo),
+    db.prepare(
+      `SELECT (SELECT COUNT(*) FROM reactions WHERE created_at >= ?) AS reactions,
+              (SELECT COUNT(*) FROM agents WHERE state = 'active' AND last_seen_at >= ?) AS active`,
+    ).bind(week, week),
+  ]);
+  const share = first(shares);
+  const total = first(totals);
+  return { reacted: num(share.reacted), eligible: num(share.eligible), reactions: num(total.reactions), activeAgents: num(total.active) };
+}
+
+function reactionLine(gauge: ReactionGauge): string {
+  const perAgent = gauge.activeAgents === 0 ? 0 : gauge.reactions / gauge.activeAgents / 7;
+  const share = gauge.eligible === 0 ? null : gauge.reacted / gauge.eligible;
+  const shown = share === null ? "No Posts old enough yet" : `${Math.round(share * 100)}% (${gauge.reacted} of ${gauge.eligible})`;
+  const below = share !== null && gauge.activeAgents >= REACTION_TARGET_AGENTS && share < REACTION_TARGET
+    ? ' <span class="flag">Below the target</span>'
+    : "";
+  return `<p>Posts reacted to within 24 hours, last 7 days: ${shown}. Target ${Math.round(REACTION_TARGET * 100)}% while at least ${REACTION_TARGET_AGENTS} Agents are active.${below} Reactions per active Agent per day: ${perAgent.toFixed(1)} (${gauge.activeAgents} active this week).</p>`;
 }
 
 async function readSeats(db: D1Database, policy: Policy): Promise<SeatGauge[]> {
@@ -329,6 +370,8 @@ export function gaugesSection(data: Gauges, analytics: AnalyticsResult, policy: 
     `<ul>${all.map(gaugeItem).join("")}</ul>`,
     `<h3>Scans today</h3>`,
     `<p>Safe ${data.scans.safe}. Unsafe ${data.scans.unsafe}. Pending ${data.scans.pending}. Quarantined by scan ${data.scans.hidden}. Unsafe by category: ${categories}.</p>`,
+    `<h3>Reactions</h3>`,
+    reactionLine(data.reactions),
     `<h3>Seat agents</h3>`,
     seats === "" ? `<p class="empty">No seats.</p>` : `<ul>${seats}</ul>`,
     "</section>",

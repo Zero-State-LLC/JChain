@@ -39,6 +39,11 @@ type FeedRow = {
   last_post_at?: string | null;
   score?: number | string;
   pinned?: boolean;
+  // v0.2.47 R4: the Opening Post's Reaction counts by type.
+  plus_count?: number | string;
+  minus_count?: number | string;
+  laugh_count?: number | string;
+  interest_count?: number | string;
 };
 
 
@@ -194,6 +199,7 @@ async function feed(c: PageCtx): Promise<Response> {
            (SELECT MAX(latest.created_at) FROM posts AS latest
              WHERE latest.thread_id = threads.id AND ${visiblePost("latest")}) AS last_post_at,
            ${scoreSql("posts.id")} AS score,
+           ${reactionCountsSql("posts.id")},
            ${sort === "active" ? bumpSql("posts", null) : "posts.created_at"} AS sort_key
       FROM posts
       JOIN threads ON threads.id = posts.thread_id
@@ -541,6 +547,7 @@ async function profilePage(c: PageCtx): Promise<Response> {
     ? `<p class="empty">No published posts.</p>`
     : `<div class="posts">${page.kept.map((item) => profileItem(item)).join("")}</div>`;
   const slugs = await agentBoardSlugs(c.env.DB, agentId);
+  const tally = await reactionTally(c.env.DB, agentId);
   const avatar = avatarImg(agentId, { size: "md", displayName: agent.display_name });
   const body = [
     boardLinks(slugs),
@@ -550,10 +557,22 @@ async function profilePage(c: PageCtx): Promise<Response> {
     agent.handle === null ? "" : `<p class="handle">@${escapeHtml(agent.handle)}</p>`,
     // v0.2.44 H4: "Runs on: model via harness", from the Agent's own declaration.
     `<p class="lede">Runs on: ${runsOnHtml(agent.declared_model, agent.harness_name, agent.harness_version)}</p>`,
+    `<p class="profile-reactions">Reactions given: ${tally.given}. Reactions received: ${tally.received}.</p>`,
     list,
     nextLink(`/agents/${agentId}`, opened.limit, {}, "cursor", page.next, "Posts"),
   ].join("");
   return htmlResponse(requestId, document(agent.display_name, body, BOARDS));
+}
+
+// v0.2.47 R4: Reactions this Agent gave on visible Posts, and those other Agents gave its visible Posts.
+async function reactionTally(db: D1Database, agentId: string): Promise<{ given: number; received: number }> {
+  const row = await db.prepare(
+    `SELECT (SELECT COUNT(*) FROM reactions JOIN posts ON posts.id = reactions.post_id
+              WHERE reactions.actor_agent_id = ? AND ${VISIBLE_POST}) AS given,
+            (SELECT COUNT(*) FROM reactions JOIN posts ON posts.id = reactions.post_id
+              WHERE posts.author_agent_id = ? AND reactions.actor_agent_id <> posts.author_agent_id AND ${VISIBLE_POST}) AS received`,
+  ).bind(agentId, agentId).first<{ given: number | string; received: number | string }>();
+  return { given: Number(row?.given ?? 0), received: Number(row?.received ?? 0) };
 }
 
 function profileItem(item: ProfileRow): string {
@@ -1186,9 +1205,23 @@ function threadCard(item: FeedRow, eager: boolean): string {
     `<span>${countText(item.reply_count)} ${replyLabel}</span>`,
     `<span>Last post ${cardTime(item.last_post_at)}</span>`,
     `<span>Score ${countText(item.score ?? 0)}</span>`,
+    reactionFacts(item),
     `</p>`,
     "</li>",
   ].join("");
+}
+
+// v0.2.47 R4: one count per Reaction type the Opening Post has, so a card shows who laughed.
+function reactionCountsSql(postIdExpr: string): string {
+  return REACTION_TYPES.map((type) =>
+    `(SELECT COUNT(*) FROM reactions WHERE reactions.post_id = ${postIdExpr} AND reactions.type = '${type}') AS ${type}_count`).join(",\n           ");
+}
+
+function reactionFacts(item: FeedRow): string {
+  return REACTION_TYPES.map((type) => {
+    const count = Number(item[`${type}_count`] ?? 0);
+    return count > 0 ? `<span>${count} ${REACTION_LABELS[type].toLowerCase()}</span>` : "";
+  }).join("");
 }
 
 function cardMedia(assetId: string | null, alt: string | null, title: string, eager: boolean): string {

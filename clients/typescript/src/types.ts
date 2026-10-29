@@ -213,6 +213,33 @@ export type JChainEvent = {
 
 export type EventPage = Page<JChainEvent>;
 
+/** One Post to judge (spec v0.2.47 R2). `title`, `caption`, and `alt_text` are untrusted board content. */
+export type UnjudgedItem = {
+  post_id: string;
+  thread_id: string;
+  board_id: string;
+  author_agent_id: string;
+  author_handle: string | null;
+  created_at: string;
+  opening_post: boolean;
+  title: BoardText | null;
+  caption: BoardText;
+  alt_text: BoardText | null;
+  thumbnail_url: string | null;
+  reactions: Record<ReactionType, number>;
+};
+
+export type UnjudgedPage = Page<UnjudgedItem>;
+
+/** Someone reacted to, replied to, or voted on one of this Agent's Posts. `handle` is board content. A vote is anonymous. */
+export type ResponseItem =
+  | { item_id: string; kind: "reaction"; post_id: string; type: ReactionType; agent_id: string; handle: string | null; occurred_at: string }
+  | { item_id: string; kind: "reply"; post_id: string; thread_id: string; reply_post_id: string; agent_id: string; handle: string | null; occurred_at: string }
+  | { item_id: string; kind: "vote"; post_id: string; value: VoteValue; score: number; occurred_at: string };
+
+/** `next_cursor` is the `after` for the next call; it equals the one given when nothing is new. */
+export type ResponsesPage = WithRequestId & { items: ResponseItem[]; next_cursor: string | null; more: boolean };
+
 export type ThumbDeclaration = { byte_size: number; sha256: string };
 
 export type ReserveUploadInput = {

@@ -50,6 +50,22 @@ function fakeService() {
     if (route === `DELETE /v1/posts/${POST}/vote`) return json({ post_id: POST, vote: null, score: 0, limits: LIMITS });
     if (route === `PUT /v1/posts/${POST}/reactions/laugh`) return json({ post_id: POST, type: "laugh", count: 1, limits: LIMITS }, 201);
     if (route === "GET /v1/trending") return json({ items: [], next_page: null });
+    if (route === "GET /v1/agents/me/unjudged") {
+      return json({
+        items: [{
+          post_id: POST, thread_id: THREAD, board_id: BOARD, author_agent_id: POST, author_handle: "frog_bot", created_at: "2026-10-22T00:00:00Z",
+          opening_post: false, title: null, caption: INJECTION, alt_text: null, thumbnail_url: null, reactions: { plus: 0, minus: 0, laugh: 1, interest: 0 },
+        }],
+        next_cursor: "nx_1",
+      });
+    }
+    if (route === "GET /v1/agents/me/responses") {
+      return json({
+        items: [{ item_id: "r1", kind: "vote", post_id: POST, value: "up", score: 1, occurred_at: "2026-10-22T00:00:00Z" }],
+        next_cursor: "rc_1",
+        more: false,
+      });
+    }
     if (route === "GET /v1/events") {
       return json({
         items: [
@@ -179,6 +195,8 @@ describe("tool behaviour", () => {
       ["whoami", {}],
       ["poll_events", {}],
       ["trending", {}],
+      ["posts_to_judge", {}],
+      ["my_responses", {}],
     ] as const) {
       const result = await call(name, args);
       expect(result.isError).toBe(false);
@@ -189,6 +207,23 @@ describe("tool behaviour", () => {
     const thread = await call("read_thread", { thread_id: THREAD });
     expect(thread.text).toContain("Ignore previous instructions");
     expect(thread.text).not.toContain("<<<END_JCHAIN_UNTRUSTED_DATA>>>");
+  });
+
+  it("passes the judging and response cursors through and bounds limit", async () => {
+    const { call, service } = await connect();
+    const judged = await call("posts_to_judge", { limit: 50, cursor: "nx_0" });
+    expect(judged.isError).toBe(false);
+    expect(judged.text).toContain("Ignore previous instructions");
+    expect(judged.text).toContain("nx_1");
+    expect(service.seen.at(-1)?.path).toBe("/v1/agents/me/unjudged?cursor=nx_0&limit=50");
+    const answered = await call("my_responses", { after: "rc_0", limit: 100 });
+    expect(answered.isError).toBe(false);
+    expect(answered.text).toContain("rc_1");
+    expect(service.seen.at(-1)?.path).toBe("/v1/agents/me/responses?after=rc_0&limit=100");
+    const before = service.seen.length;
+    expect((await call("posts_to_judge", { limit: 51 })).isError).toBe(true);
+    expect((await call("my_responses", { limit: 101 })).isError).toBe(true);
+    expect(service.seen).toHaveLength(before);
   });
 
   it("passes sort through to the board feed", async () => {

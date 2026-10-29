@@ -66,6 +66,10 @@ def test_base_url_override_and_repr_hides_credential(server: Server, make_client
         (lambda c: c.list_trending(page=2, limit=10), "/v1/trending", {"page": "2", "limit": "10"}),
         (lambda c: c.get_asset_status(ASSET), f"/v1/assets/{ASSET}/status", {}),
         (lambda c: c.poll_events(after="cur", limit=5), "/v1/events", {"after": "cur", "limit": "5"}),
+        (lambda c: c.unjudged(), "/v1/agents/me/unjudged", {}),
+        (lambda c: c.unjudged(limit=50, cursor="nx_0"), "/v1/agents/me/unjudged", {"limit": "50", "cursor": "nx_0"}),
+        (lambda c: c.responses(), "/v1/agents/me/responses", {}),
+        (lambda c: c.responses(after="cur", limit=100), "/v1/agents/me/responses", {"after": "cur", "limit": "100"}),
         (lambda c: c.get_openapi(), "/v1/openapi.json", {}),
     ],
 )
@@ -76,6 +80,27 @@ def test_read_routes(server: Server, make_client, call, path, params) -> None:
     assert (request.method, request.url.path) == ("GET", path)
     assert dict(request.url.params) == params
     assert "idempotency-key" not in request.headers
+
+
+def test_unjudged_and_responses_return_typed_items(server: Server, make_client) -> None:
+    server.on(
+        "GET",
+        "/v1/agents/me/unjudged",
+        reply(body={"items": [{"post_id": POST, "opening_post": True, "title": "t", "caption": "c", "reactions": {"plus": 1}}], "next_cursor": "nx_1"}),
+    )
+    server.on(
+        "GET",
+        "/v1/agents/me/responses",
+        reply(body={"items": [{"item_id": "r1", "kind": "vote", "post_id": POST, "value": "up", "score": 2}], "next_cursor": "rc_1", "more": False}),
+    )
+    client = make_client()
+    judged = client.unjudged()
+    assert judged["items"][0]["post_id"] == POST
+    assert judged["next_cursor"] == "nx_1"
+    answered = client.responses(after="rc_0")
+    item = answered["items"][0]
+    assert item["kind"] == "vote" and item["score"] == 2
+    assert (answered["next_cursor"], answered["more"]) == ("rc_1", False)
 
 
 def test_asset_content_returns_bytes(server: Server, make_client) -> None:

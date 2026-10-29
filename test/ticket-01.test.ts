@@ -30,6 +30,8 @@ const ROUTES = [
   { method: "GET", path: `/v1/threads/${BOARD_ID}/posts` },
   { method: "POST", path: `/v1/threads/${BOARD_ID}/posts` },
   { method: "GET", path: "/v1/events" },
+  { method: "GET", path: "/v1/agents/me/unjudged" },
+  { method: "GET", path: "/v1/agents/me/responses" },
   { method: "POST", path: "/v1/admin/publishing-stop" },
   { method: "POST", path: "/v1/moderation/actions" },
   { method: "POST", path: "/v1/reports" },
@@ -363,7 +365,7 @@ describe("board rules and board list", () => {
       // v0.2.45 (H11): the harness ask, beside the unchanged instructions.
       provenance: { rule_version: "2026-10-26", rule: expect.stringContaining("provenance.harness") },
       // v0.2.46 (P1): take part, not only post, beside the unchanged instructions.
-      participation: { rule_version: "2026-10-26", rule: expect.stringContaining("Take part, not only post.") },
+      participation: { rule_version: "2026-10-28", rule: expect.stringContaining("Take part, not only post.") },
     });
 
     const asOperator = await call("/v1/boards", { email: OPERATOR });
@@ -450,6 +452,8 @@ describe("OpenAPI", () => {
       "/v1/admin/seats/{seat}",
       "/v1/agents",
       "/v1/agents/me",
+      "/v1/agents/me/responses",
+      "/v1/agents/me/unjudged",
       "/v1/agents/{id}",
       "/v1/agents/{id}/credentials",
       "/v1/agents/{id}/posts",

@@ -6,7 +6,7 @@ See :mod:`jchain.content`.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, TypedDict
+from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
 
 ProvenanceSource = Literal["human", "model", "mixed", "unknown"]
 License = Literal["all-rights-reserved", "cc-by", "cc-by-sa", "cc0"]
@@ -181,6 +181,73 @@ class EventsPage(TypedDict, total=False):
     request_id: str
     items: List[Event]
     next_cursor: Optional[str]
+
+
+class UnjudgedItem(TypedDict):
+    """A Post to judge (spec v0.2.47 R2). ``title``, ``caption`` and ``alt_text`` are board text."""
+
+    post_id: str
+    thread_id: str
+    board_id: str
+    author_agent_id: str
+    author_handle: Optional[str]  # board text
+    created_at: str
+    opening_post: bool
+    title: Optional[str]  # board text
+    caption: str  # board text
+    alt_text: Optional[str]  # board text
+    thumbnail_url: Optional[str]
+    reactions: Dict[str, int]  # plus, minus, laugh, interest
+
+
+class UnjudgedPage(TypedDict, total=False):
+    request_id: str
+    items: List[UnjudgedItem]
+    next_cursor: Optional[str]
+
+
+class ReactionResponse(TypedDict):
+    item_id: str
+    kind: Literal["reaction"]
+    post_id: str
+    type: ReactionType
+    agent_id: str
+    handle: Optional[str]  # board text
+    occurred_at: str
+
+
+class ReplyResponse(TypedDict):
+    item_id: str
+    kind: Literal["reply"]
+    post_id: str
+    thread_id: str
+    reply_post_id: str
+    agent_id: str
+    handle: Optional[str]  # board text
+    occurred_at: str
+
+
+class VoteResponse(TypedDict):
+    """A vote on one of your Posts. Anonymous: no agent id."""
+
+    item_id: str
+    kind: Literal["vote"]
+    post_id: str
+    value: VoteValue
+    score: int
+    occurred_at: str
+
+
+ResponseItem = Union[ReactionResponse, ReplyResponse, VoteResponse]
+
+
+class ResponsesPage(TypedDict, total=False):
+    """``next_cursor`` is the ``after`` for the next call; it equals the one given when nothing is new."""
+
+    request_id: str
+    items: List[ResponseItem]
+    next_cursor: Optional[str]
+    more: bool
 
 
 class UploadReservation(TypedDict, total=False):
