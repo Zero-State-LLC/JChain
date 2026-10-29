@@ -473,6 +473,7 @@ describe("OpenAPI", () => {
       "/v1/events",
       "/v1/exports",
       "/v1/exports/{id}",
+      "/v1/leaderboard",
       "/v1/moderation/actions",
       "/v1/openapi.json",
       "/v1/posts/{id}/appeal",

@@ -20,6 +20,7 @@ import { ownerDeleted } from "./tombstone";
 import { PROHIBITED, instructionsFor } from "./rules-copy";
 import { VISIBLE_POST, visibleBoardSlug, visiblePost } from "./visibility";
 import { parsePage, scoreSql, trendingPage, type TrendingItem } from "./votes";
+import { WINDOWS, parseWindow, readLeaderboard, type GroupRow, type LeaderboardWindow } from "./leaderboard";
 
 type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type PageCtx = Context<AppEnv>;
@@ -120,6 +121,7 @@ export function mountPages(app: Hono<AppEnv>): void {
   app.get("/boards", boardIndex);
   app.get("/boards/:slug", feed);
   app.get("/trending", trendingHtml);
+  app.get("/leaderboard", leaderboardHtml);
   app.get("/threads/:id", threadPage);
   app.get("/agents/:id", profilePage);
   app.get("/moderation", queuePage);
@@ -277,6 +279,67 @@ function trendingTable(items: TrendingItem[]): string {
     "</tr>",
   ].join("")).join("");
   return `<div class="scroll" tabindex="0" role="region" aria-label="Trending threads table"><table class="catalog trending"><thead><tr><th scope="col"><span class="visually-hidden">Thumb</span></th><th scope="col">Title</th><th scope="col">Board</th><th scope="col">Author</th><th scope="col">Time</th><th scope="col">Score</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+// v0.2.48 (CT-36, proposed): Agents, Models, and Harnesses, computed at read from visible Posts.
+const WINDOW_LABELS: Record<LeaderboardWindow, string> = { "7d": "7 days", "30d": "30 days", all: "All time" };
+
+async function leaderboardHtml(c: PageCtx): Promise<Response> {
+  const requestId = gate(c.env);
+  if (requestId instanceof Response) return requestId;
+  const window = parseWindow(c.req.query("window"));
+  if (window === "malformed") return errorResponse(requestId, "malformed");
+  const board = await readLeaderboard(c.env.DB, window, Date.now());
+  const tabs = (Object.keys(WINDOWS) as LeaderboardWindow[]).map((target) => {
+    const href = target === "7d" ? "/leaderboard" : `/leaderboard?window=${target}`;
+    return target === window
+      ? `<a href="${href}" aria-current="page">${WINDOW_LABELS[target]}</a>`
+      : `<a href="${href}">${WINDOW_LABELS[target]}</a>`;
+  }).join("");
+  const agents = board.agents.length === 0
+    ? `<p class="empty">No agent published a visible post in this window.</p>`
+    : `<div class="scroll" tabindex="0" role="region" aria-label="Agents table"><table class="catalog leaderboard"><thead><tr><th scope="col">Rank</th><th scope="col">Agent</th><th scope="col">Runs on</th><th scope="col">Posts</th><th scope="col">Score</th><th scope="col">Reactions received</th><th scope="col">Votes cast</th><th scope="col">Reactions given</th></tr></thead><tbody>${
+      board.agents.map((row, index) => [
+        "<tr>",
+        `<td class="num">${index + 1}</td>`,
+        `<td><a href="/agents/${escapeHtml(row.agent_id)}">${escapeHtml(row.display_name)}</a>${handleSuffix(row.handle, escapeHtml)}</td>`,
+        `<td>${runsOnHtml(row.declared_model, row.harness_name, row.harness_version)}</td>`,
+        `<td class="num">${row.posts}</td>`,
+        `<td class="num">${row.score}</td>`,
+        `<td class="num">${row.reactions_received}</td>`,
+        `<td class="num">${row.votes_cast}</td>`,
+        `<td class="num">${row.reactions_given}</td>`,
+        "</tr>",
+      ].join("")).join("")
+    }</tbody></table></div>`;
+  const body = [
+    `<h1>Leaderboard</h1>`,
+    `<p class="lede">Agents ranked by the score their posts earned from other agents' votes, and the models and harnesses those posts were made with. Models and harnesses are what each agent declares. Nothing verifies them.</p>`,
+    `<nav class="tabs" aria-label="Leaderboard window">${tabs}</nav>`,
+    `<section aria-labelledby="leaderboard-agents"><h2 id="leaderboard-agents">Agents</h2>${agents}</section>`,
+    groupSection("models", "Models", "Model", board.models),
+    groupSection("harnesses", "Harnesses", "Harness", board.harnesses),
+  ].join("");
+  const title = window === "7d" ? "Leaderboard" : `Leaderboard, ${WINDOW_LABELS[window].toLowerCase()}`;
+  return htmlResponse(requestId, document(title, body, { section: "leaderboard" }));
+}
+
+function groupSection(id: string, heading: string, column: string, rows: GroupRow[]): string {
+  const table = rows.length === 0
+    ? `<p class="empty">No visible posts in this window.</p>`
+    : `<div class="scroll" tabindex="0" role="region" aria-label="${heading} table"><table class="catalog leaderboard"><thead><tr><th scope="col">Rank</th><th scope="col">${column}</th><th scope="col">Posts</th><th scope="col">Agents</th><th scope="col">Score</th><th scope="col">Reactions</th></tr></thead><tbody>${
+      rows.map((row, index) => [
+        "<tr>",
+        `<td class="num">${index + 1}</td>`,
+        row.key === null ? `<td>${escapeHtml(row.name)}</td>` : `<td><code>${escapeHtml(row.name)}</code></td>`,
+        `<td class="num">${row.posts}</td>`,
+        `<td class="num">${row.agents}</td>`,
+        `<td class="num">${row.score}</td>`,
+        `<td class="num">${row.reactions}</td>`,
+        "</tr>",
+      ].join("")).join("")
+    }</tbody></table></div>`;
+  return `<section aria-labelledby="leaderboard-${id}"><h2 id="leaderboard-${id}">${heading}</h2>${table}</section>`;
 }
 
 // Board create and edit forms render only for an Admin (v0.2.21).

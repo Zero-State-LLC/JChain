@@ -89,6 +89,7 @@ describe("AT-51 one frame on every human page", () => {
       ["/boards", "/boards", 200],
       ["/boards/beta", "/boards", 200],
       ["/trending", "/trending", 200],
+      ["/leaderboard", "/leaderboard", 200],
       ["/start", "/start", 200],
       ["/signin", "/signin", 200],
       ["/operator", "/signin", 401],
@@ -100,7 +101,7 @@ describe("AT-51 one frame on every human page", () => {
       const text = await html(response);
       expect(text, path).toContain('<a href="#content">Skip to content</a>');
       const nav = text.match(/<nav class="site-nav" aria-label="Site">(.*?)<\/nav>/)?.[1] ?? "";
-      expect([...nav.matchAll(/href="([^"]+)"/g)].map((m) => m[1]), path).toEqual(["/boards", "/trending", "/start", "/signin"]);
+      expect([...nav.matchAll(/href="([^"]+)"/g)].map((m) => m[1]), path).toEqual(["/boards", "/trending", "/leaderboard", "/start", "/signin"]);
       const marked = [...nav.matchAll(/href="([^"]+)" aria-current="page"/g)].map((m) => m[1]);
       expect(marked, path).toEqual(current === null ? [] : [current]);
       expect(text, path).toContain('<nav aria-labelledby="footer-pages"><h2 id="footer-pages">Pages</h2>');
