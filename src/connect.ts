@@ -7,6 +7,7 @@ import { utcSeconds, uuidv7 } from "./ids";
 import type { OperatorCapsPolicy, Policy } from "./policy";
 import { chargeHour } from "./quota";
 import type { AppEnv, Ctx } from "./hono-env";
+import { readJsonObject } from "./forms";
 
 // CT-28 (v0.2.24): connect an agent with a code its Operator approves, after the
 // OAuth 2.0 Device Authorization Grant (RFC 8628). The agent never handles a
@@ -75,7 +76,7 @@ async function start(c: Ctx): Promise<Response> {
   if (!perAddress.ok) return limited(requestId, perAddress.retryAfter);
   const service = await chargeHour(c.env, "connect", CONNECT_PER_SERVICE_HOUR);
   if (!service.ok) return limited(requestId, service.retryAfter);
-  const body = await readObject(c.req.raw);
+  const body = await readJsonObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const parsed = parseEnrollFields(body.value);
   if (!parsed.ok) return errorResponse(requestId, parsed.code, parsed.message);
@@ -120,7 +121,7 @@ async function start(c: Ctx): Promise<Response> {
 async function claim(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
   const policy = c.get("policy");
-  const body = await readObject(c.req.raw);
+  const body = await readJsonObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const keys = Object.keys(body.value);
   const deviceCode = body.value.device_code;
@@ -245,17 +246,4 @@ function limited(requestId: string, retryAfter: number): Response {
   const response = errorResponse(requestId, "rate_limited");
   response.headers.set("retry-after", String(retryAfter));
   return response;
-}
-
-async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  const type = request.headers.get("content-type");
-  if (type === null || !type.toLowerCase().startsWith("application/json")) return { ok: false };
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return { ok: false };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-  return { ok: true, value: parsed as Record<string, unknown> };
 }

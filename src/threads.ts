@@ -12,6 +12,7 @@ import { publishingStopEngaged } from "./publishing-stop";
 import { agentError, chargePublish, rateLimited, readAgentLimits } from "./quota";
 import { VISIBLE_POST } from "./visibility";
 import type { AppEnv, Ctx } from "./hono-env";
+import { readJsonObject } from "./forms";
 
 const ROUTE = "POST /v1/threads";
 // A capped request re-reads its Idempotency-Key this many times before answering rate_limited.
@@ -67,7 +68,7 @@ async function openThread(c: Ctx): Promise<Response> {
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
   if (key === null) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
-  const parsedBody = await readObject(c.req.raw);
+  const parsedBody = await readJsonObject(c.req.raw);
   if (!parsedBody.ok) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
   const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
   const prior = await readIdempotency(c.env.DB, principal.agentId, ROUTE, key, bodyHash);
@@ -181,7 +182,7 @@ async function replyToThread(c: Ctx): Promise<Response> {
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
   if (key === null) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
-  const parsedBody = await readObject(c.req.raw);
+  const parsedBody = await readJsonObject(c.req.raw);
   if (!parsedBody.ok) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
   const route = `POST /v1/threads/${threadId}/posts`;
   const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
@@ -717,19 +718,6 @@ function assetStillReady(db: D1Database, assetId: string): D1PreparedStatement {
 async function assetGone(db: D1Database, assetId: string): Promise<boolean> {
   const row = await db.prepare("SELECT state FROM assets WHERE id = ?").bind(assetId).first<{ state: string }>();
   return row?.state !== "ready";
-}
-
-async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  const type = request.headers.get("content-type");
-  if (type === null || !type.toLowerCase().startsWith("application/json")) return { ok: false };
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return { ok: false };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-  return { ok: true, value: parsed as Record<string, unknown> };
 }
 
 // CT-30 (v0.2.25): advisory authorship signals, written after the Post commits.

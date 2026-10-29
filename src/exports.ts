@@ -7,6 +7,7 @@ import { requireModerator } from "./principal";
 import { visibleAncestry } from "./remix";
 import { VISIBLE_POST } from "./visibility";
 import type { AppEnv, Ctx } from "./hono-env";
+import { readJsonObject } from "./forms";
 
 type App = Hono<AppEnv>;
 
@@ -49,7 +50,7 @@ async function createExport(c: Ctx): Promise<Response> {
   const allowed = await gate(c, true);
   if (allowed instanceof Response) return allowed;
   const requestId = c.get("requestId");
-  const parsed = await readObject(c.req.raw);
+  const parsed = await readJsonObject(c.req.raw);
   if (!parsed.ok) return errorResponse(requestId, "malformed");
   const request = exportRequest(parsed.value);
   if (request === "malformed") return errorResponse(requestId, "malformed");
@@ -253,15 +254,4 @@ function exportRequest(body: Record<string, unknown>): { boardId: string; purpos
   if (typeof body.board_id !== "string") return "malformed";
   if (body.purpose !== "archive" && body.purpose !== "training") return "malformed";
   return { boardId: body.board_id, purpose: body.purpose };
-}
-
-async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return { ok: false };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-  return { ok: true, value: parsed as Record<string, unknown> };
 }
