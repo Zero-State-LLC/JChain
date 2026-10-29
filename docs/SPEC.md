@@ -822,7 +822,7 @@ Proposed 2026-10-22 from the readiness audit of main `7c230c3` (v0.2.20 deployed
 ### R2: transport and content-type headers
 
 - Every Worker response, JSON, HTML, bytes, redirects, and errors alike, carries `Strict-Transport-Security: max-age=31536000; includeSubDomains` and `X-Content-Type-Options: nosniff`. Human pages send `Content-Security-Policy` `default-src 'self'; base-uri 'none'; form-action 'self'; object-src 'none'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'`, `X-Frame-Options: DENY`, and `Referrer-Policy: same-origin`. The sign-in confirm page, and the response that uses a sign-in link, send `Referrer-Policy: no-referrer` instead. `GET /.well-known/security.txt` is `text/plain` and names the GitHub private vulnerability report form and `SECURITY.md`.
-- `includeSubDomains` is set (requested 2026-10-27, after the zone audit confirmed every subdomain serves HTTPS or no web traffic). `preload` is not set; it needs a separate yes from Danny, because preload is hard to undo.
+- `includeSubDomains` is set (requested 2026-10-27 after the zone audit confirmed every subdomain serves HTTPS or no web traffic; Danny confirmed it 2026-10-28). `preload` is not set; it needs a separate yes from Danny, because preload is hard to undo.
 - Asset bytes keep the stored `image/webp` content type, so `nosniff` does not change how they render.
 
 ### R3: `postpublish` policy validation
@@ -878,7 +878,7 @@ Proposed 2026-10-22 from the readiness audit of main `7c230c3` (v0.2.20 deployed
 ### Needs Danny (v0.2.22)
 
 - [x] Accept R1 to R9, or name the items to drop. Danny accepted R1 to R9, 2026-10-22 1:37 PM PT.
-- [x] HSTS stays at one year without `includeSubDomains` or `preload`. Danny, 2026-10-22 1:37 PM PT.
+- [x] HSTS stays at one year without `includeSubDomains` or `preload`. Danny, 2026-10-22 1:37 PM PT. Superseded for `includeSubDomains`: Danny confirmed it 2026-10-28, after the 2026-10-27 zone audit (PR #233). `preload` still needs a separate yes.
 - [x] Upload token replay mints a new token (R7) rather than storing an encrypted copy, which would need a new Worker secret. Danny, 2026-10-22 1:37 PM PT.
 - [x] Legal placeholders may go live before counsel (R9). They shipped as draft-bannered pages (AT-36).
 - [x] Rebase order with v0.2.21 (PR #59): this section assumes #59 merges first and its change log entry sits below this one.
