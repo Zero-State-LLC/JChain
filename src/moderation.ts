@@ -16,6 +16,7 @@ import { applyOperatorAction, isOperatorAction, parseOperatorExtras } from "./op
 import { mountEvidence } from "./evidence";
 import { sendScan } from "./threads";
 import type { AppEnv, Ctx } from "./hono-env";
+import { readFormOrJson } from "./forms";
 
 export const MODERATION_REASONS = [
   "spam",
@@ -76,7 +77,7 @@ async function moderate(c: Ctx, format: Format): Promise<Response> {
   if (!principal.ok) return moderationError(requestId, format, principal.code);
   if (principal.kind !== "moderator") return moderationError(requestId, format, "forbidden");
   if (!sameOrigin(c.req.raw, policy.site_origin)) return moderationError(requestId, format, "forbidden");
-  const parsed = await readAction(c.req.raw);
+  const parsed = await readFormOrJson(c.req.raw);
   if (!parsed.ok) return moderationError(requestId, format, "malformed");
   const action = parseAction(parsed.value);
   if (!action.ok) return moderationError(requestId, format, action.code);
@@ -1041,40 +1042,4 @@ function parseAction(
     reasonCode,
     privateNote,
   };
-}
-
-async function readAction(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  const type = request.headers.get("content-type");
-  if (type === null) return { ok: false };
-  const lower = type.toLowerCase();
-  if (lower.startsWith("application/json")) return readObject(request);
-  if (lower.startsWith("application/x-www-form-urlencoded")) return readForm(request);
-  return { ok: false };
-}
-
-async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return { ok: false };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-  return { ok: true, value: parsed as Record<string, unknown> };
-}
-
-async function readForm(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  let text: string;
-  try {
-    text = new TextDecoder().decode(await request.arrayBuffer());
-  } catch {
-    return { ok: false };
-  }
-  const params = new URLSearchParams(text);
-  const value: Record<string, unknown> = {};
-  for (const [key, item] of params.entries()) {
-    if (Object.hasOwn(value, key)) return { ok: false };
-    value[key] = item;
-  }
-  return { ok: true, value };
 }

@@ -7,6 +7,7 @@ import { parsePolicy } from "./policy";
 import { requireAdminSeat } from "./principal";
 import { VISIBLE_POST } from "./visibility";
 import type { AppEnv, Ctx } from "./hono-env";
+import { readForm, readJsonObject } from "./forms";
 
 // Admin pins (Danny, 2026-10-24, "build all"). An Admin pins at most one Thread per Board and
 // unpins it. A pin is not a Post state and not a moderation outcome: it adds no transition. Each
@@ -34,9 +35,9 @@ async function pinJson(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "admin") return errorResponse(requestId, "forbidden");
   if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
-  const body = await readJson(c.req.raw);
-  if (body === null) return errorResponse(requestId, "malformed");
-  const parsed = parsePin(body);
+  const body = await readJsonObject(c.req.raw);
+  if (!body.ok) return errorResponse(requestId, "malformed");
+  const parsed = parsePin(body.value);
   if (!parsed.ok) return errorResponse(requestId, parsed.code);
   const applied = await applyPin(c.env.DB, principal.email, parsed.action, parsed.threadId);
   if (!applied.ok) return errorResponse(requestId, applied.code, applied.message);
@@ -58,8 +59,8 @@ async function pinForm(c: Ctx): Promise<Response> {
   }
   if (!sameOrigin(c.req.raw, policy.site_origin)) return htmlError(requestId, "forbidden", "Admin", "/admin", "Admin");
   const body = await readForm(c.req.raw);
-  if (body === null) return htmlError(requestId, "malformed", "Admin", "/admin", "Admin");
-  const parsed = parsePin(body);
+  if (!body.ok) return htmlError(requestId, "malformed", "Admin", "/admin", "Admin");
+  const parsed = parsePin(body.value);
   if (!parsed.ok) return htmlError(requestId, parsed.code, "Admin", "/admin", "Admin");
   const applied = await applyPin(c.env.DB, principal.email, parsed.action, parsed.threadId);
   if (!applied.ok) {
@@ -200,29 +201,4 @@ export function pinsSection(rows: PinRow[]): string {
     `<p><button type="submit">Pin thread</button></p></form>`,
     "</section>",
   ].join("");
-}
-
-async function readJson(request: Request): Promise<Record<string, unknown> | null> {
-  const type = request.headers.get("content-type");
-  if (type === null || !type.toLowerCase().startsWith("application/json")) return null;
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return null;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-  return parsed as Record<string, unknown>;
-}
-
-async function readForm(request: Request): Promise<Record<string, unknown> | null> {
-  const type = request.headers.get("content-type");
-  if (type === null || !type.toLowerCase().startsWith("application/x-www-form-urlencoded")) return null;
-  const params = new URLSearchParams(new TextDecoder().decode(await request.arrayBuffer()));
-  const value: Record<string, unknown> = {};
-  for (const [key, item] of params.entries()) {
-    if (Object.hasOwn(value, key)) return null;
-    value[key] = item;
-  }
-  return value;
 }

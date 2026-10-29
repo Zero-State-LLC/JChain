@@ -20,6 +20,7 @@ import { policySection } from "./policy-page";
 import { operatorsSection, readOperators } from "./operator-admin";
 import { gaugesSection, readAnalytics, readGauges, readScanGauges, scanSection, usageSection } from "./gauges";
 import type { AppEnv, Ctx } from "./hono-env";
+import { readForm } from "./forms";
 
 const PAGE = 25;
 
@@ -315,16 +316,4 @@ function readCursor(raw: string | undefined): { createdAt: string; id: string } 
   if (raw === undefined || raw === "") return null;
   const cursor = decodeCursor(raw);
   return cursor === null ? "malformed" : cursor;
-}
-
-async function readForm(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  const type = request.headers.get("content-type");
-  if (type === null || !type.toLowerCase().startsWith("application/x-www-form-urlencoded")) return { ok: false };
-  const params = new URLSearchParams(new TextDecoder().decode(await request.arrayBuffer()));
-  const value: Record<string, unknown> = {};
-  for (const [key, item] of params.entries()) {
-    if (Object.hasOwn(value, key)) return { ok: false };
-    value[key] = item;
-  }
-  return { ok: true, value };
 }

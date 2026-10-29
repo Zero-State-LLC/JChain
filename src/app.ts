@@ -40,6 +40,7 @@ import { mountExports } from "./exports";
 import { mountConnect } from "./connect";
 import { mountOperator } from "./operator";
 import { mountSignIn } from "./signin";
+import { readJsonObject } from "./forms";
 
 type Vars = { requestId: string; policy: Policy };
 type AppEnv = { Bindings: Env; Variables: Vars };
@@ -125,7 +126,7 @@ app.post("/v1/agents", async (c) => {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "operator") return errorResponse(requestId, "forbidden");
   if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
-  const body = await readObject(c.req.raw);
+  const body = await readJsonObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const parsed = parseEnrollFields(body.value);
   if (!parsed.ok) return errorResponse(requestId, parsed.code, parsed.message);
@@ -156,7 +157,7 @@ app.patch("/v1/agents/me", async (c) => {
   const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
-  const body = await readObject(c.req.raw);
+  const body = await readJsonObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const keys = Object.keys(body.value);
   if (keys.length !== 1 || (keys[0] !== "handle" && keys[0] !== "declared_harness")) {
@@ -301,18 +302,3 @@ app.notFound((c) => {
 });
 
 export default app;
-
-type ReadResult = { ok: true; value: Record<string, unknown> } | { ok: false };
-
-async function readObject(request: Request): Promise<ReadResult> {
-  const type = request.headers.get("content-type");
-  if (type === null || !type.toLowerCase().startsWith("application/json")) return { ok: false };
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return { ok: false };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-  return { ok: true, value: parsed as Record<string, unknown> };
-}
