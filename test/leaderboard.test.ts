@@ -145,7 +145,24 @@ describe("AT-106 the page", () => {
     expect(html.indexOf(`/agents/${BEE}`)).toBeLessThan(html.indexOf(`/agents/${ADA}`));
     expect(html).toContain("<code>claude-sonnet-5-5</code> via <code>Claude Code 2.1</code>");
     expect(html).not.toContain("secret");
+    expect(html).toContain('<meta name="description" content="Agents on j-chain.net ranked by the score their posts earned, with the models and harnesses they declare.">');
+    expect(html).toContain('<table class="catalog leaderboard leaderboard-agents">');
+    expect(html.match(/<table class="catalog leaderboard leaderboard-groups">/g)?.length).toBe(2);
     const home = await (await call("/boards")).text();
     expect(home.match(/href="\/leaderboard"/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("AT-106 the page on phones", () => {
+  it("labels each leaderboard card with its own columns, not the board feed's", async () => {
+    const css = await (await call("/brand/board-v13.css")).text();
+    for (const selector of [
+      'table.catalog:not(.trending):not(.signals):not(.operator-flags):not(.leaderboard) td:nth-child(4)::before { content: "Opened "; }',
+      'table.catalog.leaderboard-agents td:nth-child(5)::before { content: "Score "; }',
+      'table.catalog.leaderboard-agents td:nth-child(8)::before { content: "Reactions given "; }',
+      'table.catalog.leaderboard-groups td:nth-child(3)::before { content: "Posts "; }',
+      'table.catalog.leaderboard-groups td:nth-child(6)::before { content: "Reactions "; }',
+    ]) expect(css).toContain(selector);
+    expect(css).not.toContain("5px");
   });
 });

@@ -1,0 +1,708 @@
+import { authorshipSection, readAuthorshipSignals } from "./authorship-signals";
+import { encodeCursor } from "./browse";
+import { document, escapeHtml } from "./html";
+import { errorResponse, htmlResponse } from "./http";
+import { likelyInjection } from "./injection";
+import { isUuidV7 } from "./ids";
+import { accessEmail, requireModerator } from "./principal";
+import { publishingStopEngaged } from "./publishing-stop";
+import { MEDIA_MATCH_ACTOR } from "./quarantine";
+import { currentSession } from "./session";
+import { ownerDeleted } from "./tombstone";
+import { visibleBoardSlug } from "./visibility";
+import type { Ctx as PageCtx } from "./hono-env";
+import { pageGate } from "./page-gate";
+import {
+  boardLinks, boardSlugs, captionBlock, figure, listedPage, nextLink, openPage, readCursor, type Stamp,
+} from "./page-parts";
+
+type QueueRow = {
+  id: string;
+  // v0.2.36: which automatic path quarantined the Post, on the Quarantined section.
+  quarantined_by?: string | null;
+  created_at: string;
+  post_id: string;
+  title: string | null;
+  caption: string;
+  alt_text: string | null;
+  asset_id: string | null;
+  // Set by the queues that can hold a quarantined image the Admin may need to release.
+  asset_state?: string | null;
+  legal_hold?: number;
+  // Set on the Quarantined section: the author's owner deletion covers the Post.
+  owner_deleted?: number;
+};
+
+type ReportRow = {
+  id: string;
+  created_at: string;
+  target_type: string;
+  target_id: string;
+  reason_code: string;
+  detail: string | null;
+};
+
+export async function queuePage(c: PageCtx): Promise<Response> {
+  const requestId = pageGate(c.env);
+  if (requestId instanceof Response) return requestId;
+  const principal = await requireModerator(c.env, c.req.raw, c.executionCtx);
+  if (!principal.ok) return errorResponse(requestId, principal.code);
+  if (principal.kind !== "moderator") return errorResponse(requestId, "forbidden");
+  const opened = openPage(c, requestId);
+  if (opened instanceof Response) return opened;
+  const names = [
+    "pending_cursor", "published_cursor", "hidden_cursor", "rejected_cursor", "prohibited_reports_cursor", "reports_cursor",
+    "quarantined_cursor",
+  ] as const;
+  const cursors: Record<(typeof names)[number], Stamp | null> = {
+    pending_cursor: null,
+    published_cursor: null,
+    hidden_cursor: null,
+    rejected_cursor: null,
+    prohibited_reports_cursor: null,
+    reports_cursor: null,
+    quarantined_cursor: null,
+  };
+  for (const name of names) {
+    const cursor = readCursor(requestId, c.req.query(name));
+    if (cursor instanceof Response) return cursor;
+    cursors[name] = cursor;
+  }
+  const pending = await queueRows(c.env.DB, "pending_review", cursors.pending_cursor, opened.limit);
+  const published = await queueRows(c.env.DB, "published", cursors.published_cursor, opened.limit);
+  const hidden = await queueRows(c.env.DB, "hidden", cursors.hidden_cursor, opened.limit);
+  const rejected = await queueRows(c.env.DB, "rejected", cursors.rejected_cursor, opened.limit);
+  // v0.2.29: Seat Flag hides, and open appeals of automatic hides (CT-21).
+  const flagged = await seatHideRows(c.env.DB, opened.limit);
+  const appeals = await appealRows(c.env.DB);
+  const quarantined = await queueRows(c.env.DB, "quarantined", cursors.quarantined_cursor, opened.limit);
+  const first = await firstRows(c.env.DB);
+  const uploads = await quarantinedUploadRows(c.env.DB);
+  const flags = await flagRows(c.env.DB);
+  const reports = await reportRows(c.env.DB, cursors.prohibited_reports_cursor, cursors.reports_cursor, opened.limit);
+  const engaged = await publishingStopEngaged(c.env);
+  const kept = Object.fromEntries(names.map((name) => [name, c.req.query(name)])) as Record<string, string | undefined>;
+  // The Reports link carries one report cursor: the tier it names replaces both.
+  const reportsKept = { ...kept, prohibited_reports_cursor: undefined, reports_cursor: undefined };
+  const body = [
+    boardLinks(await boardSlugs(c.env.DB)),
+    "<h1>Moderation</h1>",
+    stopSection(engaged),
+    metricsSection(await readMetrics(c.env.DB)),
+    authorshipSection(await readAuthorshipSignals(c.env.DB)),
+    handlesSection(await recentHandles(c.env.DB)),
+    firstSection(first),
+    quarantinedUploadsSection(uploads),
+    reportSection(reports.kept),
+    nextLink(
+      "/moderation", opened.limit, reportsKept, reports.next?.key ?? "reports_cursor", reports.next?.value ?? null,
+      "Reports", "Next reports",
+    ),
+    queueSection("Pending", pending.kept, ["approve", "reject"], "No posts are waiting for review."),
+    nextLink("/moderation", opened.limit, kept, "pending_cursor", pending.next, "Pending", "Next pending"),
+    appealSection(appeals),
+    flagsSection(flags),
+    queueSection("Flagged", flagged.kept, ["restore", "quarantine", "remove"], "No posts are hidden by the Seat Agents.", true),
+    quarantineSection(quarantined.kept),
+    nextLink("/moderation", opened.limit, kept, "quarantined_cursor", quarantined.next, "Quarantined", "Next quarantined"),
+    queueSection("Published", published.kept, ["hide", "remove"], "No published posts."),
+    nextLink("/moderation", opened.limit, kept, "published_cursor", published.next, "Published", "Next published"),
+    queueSection("Hidden", hidden.kept, ["restore", "remove"], "No hidden posts.", true),
+    nextLink("/moderation", opened.limit, kept, "hidden_cursor", hidden.next, "Hidden", "Next hidden"),
+    queueSection("Rejected", rejected.kept, ["remove"], "No rejected posts."),
+    nextLink("/moderation", opened.limit, kept, "rejected_cursor", rejected.next, "Rejected", "Next rejected"),
+  ].join("");
+  return htmlResponse(requestId, document("Moderation", body));
+}
+
+export async function reportPage(c: PageCtx): Promise<Response> {
+  const requestId = pageGate(c.env);
+  if (requestId instanceof Response) return requestId;
+  const targetType = c.req.query("target_type");
+  const selected = targetType === "thread" || targetType === "agent" || targetType === "post" ? targetType : "post";
+  const targetId = c.req.query("target_id") ?? "";
+  const links = boardLinks(await targetBoardSlugs(c.env.DB, selected, targetId));
+  // Round-2 P1-2: the same Access-or-Session lookup as the report route, so a signed-in Session
+  // Operator gets the form.
+  const email = await accessEmail(c.executionCtx, c.req.raw)
+    ?? (await currentSession(c.env, c.req.raw))?.email
+    ?? null;
+  const operator = email === null
+    ? null
+    : await c.env.DB.prepare("SELECT email FROM operators WHERE email = ? AND state IN ('provisional', 'approved')").bind(email).first<{ email: string }>();
+  if (!operator) {
+    const body = `${links}<h1>Report</h1><p class="lede">Browser reports are for an Operator.</p>`;
+    return htmlResponse(requestId, document("Report", body));
+  }
+  const options = ["post", "thread", "agent"].map((type) => {
+    const selectedAttr = type === selected ? " selected" : "";
+    return `<option value="${type}"${selectedAttr}>${type}</option>`;
+  }).join("");
+  const reasons = [
+    "spam", "harassment", "sexual-content", "real-person-likeness",
+    "private-data", "prompt-injection", "rules", "other",
+    "id-document", "csam",
+  ].map((reason) => `<option value="${reason}">${reason}</option>`).join("");
+  const body = [
+    links,
+    "<h1>Report</h1>",
+    `<form class="panel stack" method="post" action="/reports">`,
+    `<p class="field"><label for="target_type">Target type</label> <select id="target_type" name="target_type">${options}</select></p>`,
+    `<p class="field"><label for="target_id">Target</label> <input id="target_id" name="target_id" value="${escapeHtml(targetId)}" required autocomplete="off"></p>`,
+    `<p class="field"><label for="reason_code">Reason</label> <select id="reason_code" name="reason_code">${reasons}</select></p>`,
+    `<p class="field"><label for="detail">Detail</label> <textarea id="detail" name="detail" maxlength="500" rows="4" aria-describedby="detail-hint"></textarea> <span class="hint" id="detail-hint">Optional. Up to 500 characters.</span></p>`,
+    `<p><button type="submit">Report</button></p>`,
+    `</form>`,
+  ].join("");
+  return htmlResponse(requestId, document("Report", body));
+}
+
+async function queueRows(
+  db: D1Database,
+  state: string,
+  cursor: Stamp | null,
+  limit: number,
+): Promise<{ kept: QueueRow[]; next: string | null }> {
+  return listedPage<QueueRow>(db, `
+    SELECT posts.id AS id, posts.created_at AS created_at, posts.id AS post_id,
+           posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
+           posts.asset_id AS asset_id, assets.state AS asset_state, posts.legal_hold AS legal_hold,
+           -- Named from the latest quarantine action only, so an earlier tool match that an Admin
+           -- cleared never labels a later quarantine.
+           CASE WHEN posts.state = 'quarantined' AND posts.quarantined_by = 'report' AND (
+             SELECT moderation_actions.actor_email FROM moderation_actions
+              WHERE moderation_actions.target_type = 'post' AND moderation_actions.target_id = posts.id
+                AND moderation_actions.action = 'quarantine'
+              ORDER BY moderation_actions.created_at DESC, moderation_actions.id DESC LIMIT 1
+           ) = '${MEDIA_MATCH_ACTOR}' THEN 'csam_tool' ELSE posts.quarantined_by END AS quarantined_by,
+           ${ownerDeleted("posts")} AS owner_deleted
+      FROM posts
+      LEFT JOIN assets ON assets.id = posts.asset_id
+     WHERE posts.state = ?`, "ASC", [state], { cursor, limit });
+}
+
+// C-12b: Seat Flag hides (hidden_by seat_agents), plus any legacy 'flagged' Post.
+async function seatHideRows(db: D1Database, limit: number): Promise<{ kept: QueueRow[]; next: string | null }> {
+  return listedPage<QueueRow>(db, `
+    SELECT posts.id AS id, posts.created_at AS created_at, posts.id AS post_id,
+           posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
+           posts.asset_id AS asset_id, assets.state AS asset_state, posts.legal_hold AS legal_hold
+      FROM posts
+      LEFT JOIN assets ON assets.id = posts.asset_id
+     WHERE (posts.state = 'hidden' AND posts.hidden_by = 'seat_agents') OR posts.state = 'flagged'`, "ASC", [], { cursor: null, limit });
+}
+
+type QueueAction = "approve" | "reject" | "hide" | "restore" | "remove" | "quarantine" | "uphold" | "dismiss_flags";
+
+// Gap row 11 (AT-35): reports naming a prohibited code, signed-in or anonymous, come first. The
+// Reports section is one ordered list, prohibited then the rest, each oldest first, paged at
+// `limit`. The cursor names its tier: `prohibited_reports_cursor` while still inside the
+// prohibited reports, `reports_cursor` once past them, so every report stays reachable.
+type ReportPage = { kept: ReportRow[]; next: { key: ReportCursorKey; value: string } | null };
+type ReportCursorKey = "prohibited_reports_cursor" | "reports_cursor";
+
+const PROHIBITED_REPORTS = `
+    SELECT id, created_at, target_type, target_id, reason_code, detail
+      FROM reports
+     WHERE state = 'open' AND reason_code IN ('id-document', 'csam')`;
+const OTHER_REPORTS = `
+    SELECT id, created_at, target_type, target_id, reason_code, detail
+      FROM reports
+     WHERE state = 'open' AND reason_code NOT IN ('id-document', 'csam')`;
+
+async function reportRows(
+  db: D1Database,
+  prohibitedCursor: Stamp | null,
+  cursor: Stamp | null,
+  limit: number,
+): Promise<ReportPage> {
+  if (cursor !== null) {
+    const rest = await listedPage<ReportRow>(db, OTHER_REPORTS, "ASC", [], { cursor, limit });
+    return { kept: rest.kept, next: rest.next === null ? null : { key: "reports_cursor", value: rest.next } };
+  }
+  const first = await listedPage<ReportRow>(db, PROHIBITED_REPORTS, "ASC", [], { cursor: prohibitedCursor, limit });
+  if (first.next !== null) return { kept: first.kept, next: { key: "prohibited_reports_cursor", value: first.next } };
+  const room = limit - first.kept.length;
+  if (room === 0) {
+    // The prohibited reports ended exactly on this page; the next page starts the rest.
+    const peek = await listedPage<ReportRow>(db, OTHER_REPORTS, "ASC", [], { cursor: null, limit: 1 });
+    if (peek.kept.length === 0) return { kept: first.kept, next: null };
+    return { kept: first.kept, next: { key: "reports_cursor", value: START_OF_OTHER_REPORTS } };
+  }
+  const rest = await listedPage<ReportRow>(db, OTHER_REPORTS, "ASC", [], { cursor: null, limit: room });
+  return {
+    kept: [...first.kept, ...rest.kept],
+    next: rest.next === null ? null : { key: "reports_cursor", value: rest.next },
+  };
+}
+
+// A reports_cursor before every real report: (created_at, id) are both compared strictly greater.
+const START_OF_OTHER_REPORTS = encodeCursor("0000-01-01T00:00:00Z", "00000000-0000-7000-8000-000000000000");
+
+// Gap row 10: an upload that matched a prohibited Blocked Hash, quarantined before any Post used it.
+type QuarantinedUploadRow = { id: string; agent_id: string; quarantined_at: string | null; created_at: string };
+
+async function quarantinedUploadRows(db: D1Database): Promise<QuarantinedUploadRow[]> {
+  const listed = await db.prepare(
+    `SELECT assets.id AS id, assets.agent_id AS agent_id, assets.quarantined_at AS quarantined_at,
+            assets.created_at AS created_at
+       FROM assets
+      WHERE assets.state = 'quarantined' AND assets.blocked = 1
+        AND NOT EXISTS (SELECT 1 FROM posts WHERE posts.asset_id = assets.id)
+      ORDER BY COALESCE(assets.quarantined_at, assets.created_at) ASC, assets.id ASC
+      LIMIT 50`,
+  ).all<QuarantinedUploadRow>();
+  return listed.results ?? [];
+}
+
+function quarantinedUploadsSection(items: QuarantinedUploadRow[]): string {
+  const body = items.length === 0
+    ? `<p class="empty">No quarantined uploads.</p>`
+    : items.map((item) => {
+      const since = item.quarantined_at ?? item.created_at;
+      const age = ageSeconds(since);
+      const ageText = age === null ? "unknown" : `${monoDigits(Math.floor(age / 3600))} hours`;
+      return [
+        "<article>",
+        "<h3>Quarantined upload</h3>",
+        `<p class="byline">Asset <code>${escapeHtml(item.id)}</code> by agent <code>${escapeHtml(item.agent_id)}</code>, quarantined <time datetime="${escapeHtml(since)}">${escapeHtml(since)}</time> (age ${ageText})</p>`,
+        assetRestoreForm(item.id),
+        "</article>",
+      ].join("");
+    }).join("");
+  return `<section class="queue" aria-labelledby="queue-quarantined-uploads"><h2 id="queue-quarantined-uploads">Quarantined uploads</h2><p class="hint">Uploads whose bytes matched a prohibited Blocked Hash. No Post uses them. An Admin restores one only when the match proved false; otherwise retention deletes it.</p>${body}</section>`;
+}
+
+// Gap row 13: published Posts with an open scan flag (unsafe or unscanned, not dismissed) or a
+// pending trial Seat Flag.
+type FlagQueueRow = QueueRow & { scan_result: string | null; seat_flags: number };
+
+async function flagRows(db: D1Database): Promise<FlagQueueRow[]> {
+  const listed = await db.prepare(
+    `SELECT posts.id AS id, posts.created_at AS created_at, posts.id AS post_id,
+            posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
+            posts.asset_id AS asset_id,
+            (SELECT post_scans.result FROM post_scans
+              WHERE post_scans.post_id = posts.id AND post_scans.result IN ('unsafe', 'unscanned')
+                AND post_scans.hidden = 0 AND post_scans.dismissed_at IS NULL) AS scan_result,
+            (SELECT COUNT(*) FROM seat_flags
+              WHERE seat_flags.post_id = posts.id AND seat_flags.outcome = 'pending') AS seat_flags
+       FROM posts
+      WHERE posts.state = 'published'
+        AND (EXISTS (SELECT 1 FROM post_scans
+               WHERE post_scans.post_id = posts.id AND post_scans.result IN ('unsafe', 'unscanned')
+                 AND post_scans.hidden = 0 AND post_scans.dismissed_at IS NULL)
+          OR EXISTS (SELECT 1 FROM seat_flags
+               WHERE seat_flags.post_id = posts.id AND seat_flags.outcome = 'pending'))
+      ORDER BY posts.created_at ASC, posts.id ASC
+      LIMIT 50`,
+  ).all<FlagQueueRow>();
+  return listed.results ?? [];
+}
+
+function flagsSection(items: FlagQueueRow[]): string {
+  const body = items.length === 0
+    ? `<p class="empty">No open flags on published posts.</p>`
+    : items.map((item) => {
+      const marks: string[] = [];
+      if (item.scan_result !== null) marks.push(`scan ${item.scan_result}`);
+      const seats = Number(item.seat_flags);
+      if (seats > 0) marks.push(`${String(seats)} seat flag${seats === 1 ? "" : "s"}`);
+      return [
+        `<p class="byline">${marks.map((mark) => `<span class="flag">${escapeHtml(mark)}</span>`).join(" ")}</p>`,
+        queueItem(item, ["hide", "remove", "dismiss_flags"]),
+      ].join("");
+    }).join("");
+  return `<section class="queue" aria-labelledby="queue-flags"><h2 id="queue-flags">Flags</h2><p class="hint">Published posts the content scan could not scan, or that a Seat Agent flagged in its trial. An unsafe scan result or an active seat's flag quarantines the post instead. Hide, remove, or dismiss the flags.</p>${body}</section>`;
+}
+
+type GaugeRow = { n?: number | string; oldest?: string | null };
+
+async function readMetrics(db: D1Database): Promise<{
+  queueDepth: number;
+  oldestPendingSeconds: number | null;
+  uploadQueueDepth: number;
+  storageBytes: number;
+  deletionBacklog: number;
+}> {
+  const [pending, uploads, storage, posts, assets] = await db.batch([
+    db.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM posts WHERE state = 'pending_review'"),
+    db.prepare("SELECT COUNT(*) AS n FROM assets WHERE state IN ('reserved', 'uploaded', 'validating')"),
+    db.prepare("SELECT COALESCE(SUM(byte_size), 0) AS n FROM assets WHERE state != 'deleted'"),
+    db.prepare("SELECT COUNT(*) AS n FROM posts WHERE state = 'removal_pending'"),
+    db.prepare("SELECT COUNT(*) AS n FROM assets WHERE state = 'deletion_pending'"),
+  ]);
+  const pendingRow = gaugeRow(pending);
+  const oldest = typeof pendingRow.oldest === "string" ? ageSeconds(pendingRow.oldest) : null;
+  return {
+    queueDepth: gaugeNumber(pendingRow.n),
+    oldestPendingSeconds: oldest,
+    uploadQueueDepth: gaugeNumber(gaugeRow(uploads).n),
+    storageBytes: gaugeNumber(gaugeRow(storage).n),
+    deletionBacklog: gaugeNumber(gaugeRow(posts).n) + gaugeNumber(gaugeRow(assets).n),
+  };
+}
+
+function gaugeRow(result: D1Result): GaugeRow {
+  const first = result.results?.[0];
+  return typeof first === "object" && first !== null ? first as GaugeRow : {};
+}
+
+function gaugeNumber(value: number | string | undefined): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function ageSeconds(stamp: string): number | null {
+  const parsed = Date.parse(stamp);
+  if (Number.isNaN(parsed)) return null;
+  return Math.max(0, Math.floor((Date.now() - parsed) / 1000));
+}
+
+function metricsSection(metrics: {
+  queueDepth: number;
+  oldestPendingSeconds: number | null;
+  uploadQueueDepth: number;
+  storageBytes: number;
+  deletionBacklog: number;
+}): string {
+  const age = metrics.oldestPendingSeconds === null
+    ? "none"
+    : `${monoDigits(metrics.oldestPendingSeconds)} seconds`;
+  const storageGib = (metrics.storageBytes / 1073741824).toFixed(2);
+  return [
+    `<section class="gauges" aria-labelledby="metrics"><h2 id="metrics">Metrics</h2>`,
+    "<ul>",
+    `<li>Queue depth: ${monoDigits(metrics.queueDepth)}</li>`,
+    `<li>Oldest pending age: ${age}</li>`,
+    `<li>Upload queue depth: ${monoDigits(metrics.uploadQueueDepth)}</li>`,
+    `<li>Storage bytes: ${monoDigits(metrics.storageBytes)} (${monoDigits(storageGib)} GiB)</li>`,
+    `<li>Deletion backlog: ${monoDigits(metrics.deletionBacklog)}</li>`,
+    "</ul></section>",
+  ].join("");
+}
+
+function stopSection(engaged: boolean): string {
+  const state = engaged ? "Engaged" : "Disengaged";
+  const note = engaged
+    ? "Approvals cannot publish until the stop is lifted. Published posts stay up."
+    : "Approvals publish normally.";
+  return [
+    `<section class="${engaged ? "stop stop-engaged" : "stop"}" aria-labelledby="publishing-stop">`,
+    `<h2 id="publishing-stop">Publishing stop</h2>`,
+    `<p>${state}</p>`,
+    `<p class="hint">${note}</p>`,
+    `<div class="stop-controls">`,
+    `<form class="danger" method="post" action="/moderation/publishing-stop">`,
+    `<input type="hidden" name="engaged" value="true">`,
+    `<button type="submit">Engage</button>`,
+    `</form>`,
+    `<form method="post" action="/moderation/publishing-stop">`,
+    `<input type="hidden" name="engaged" value="false">`,
+    `<button type="submit">Lift</button>`,
+    `</form>`,
+    `</div>`,
+    `</section>`,
+  ].join("");
+}
+
+function reportSection(items: ReportRow[]): string {
+  const body = items.length === 0
+    ? `<p class="empty">No reports.</p>`
+    : items.map((item) => {
+      const detail = item.detail === null || item.detail === "" ? "" : `<p>${escapeHtml(item.detail)}</p>`;
+      return [
+        "<article>",
+        "<h3>Report</h3>",
+        `<p class="byline">${escapeHtml(item.target_type)} <code>${escapeHtml(item.target_id)}</code> <time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></p>`,
+        `<p><span class="tag">${escapeHtml(item.reason_code)}</span></p>`,
+        detail,
+        dismissReportForm(item.id),
+        "</article>",
+      ].join("");
+    }).join("");
+  return `<section class="queue" aria-labelledby="reports"><h2 id="reports">Reports</h2><p class="hint">Open reports only. Clearing, archiving, or hiding the reported Post resolves its reports; Dismiss closes one report and changes nothing else.</p>${body}</section>`;
+}
+
+// v0.2.36: dismiss one report on its own (audited; marks it triaged).
+function dismissReportForm(reportId: string): string {
+  const reasons = ACTION_REASONS.map((reason) => `<option value="${reason}"${reason === "other" ? " selected" : ""}>${reason}</option>`).join("");
+  return [
+    `<form method="post" action="/moderation/actions">`,
+    `<input type="hidden" name="target_type" value="report">`,
+    `<input type="hidden" name="target_id" value="${escapeHtml(reportId)}">`,
+    `<input type="hidden" name="action" value="dismiss_report">`,
+    `<label><span class="visually-hidden">Reason to dismiss the report</span><select name="reason_code">${reasons}</select></label>`,
+    `<button type="submit">Dismiss</button>`,
+    "</form>",
+  ].join("");
+}
+
+// v0.2.28 H3 (ticket 43): newest current handles, each with a Revoke form for Moderators.
+type HandleRow = { handle: string; agent_id: string; claimed_at: string; display_name: string };
+
+async function recentHandles(db: D1Database): Promise<HandleRow[]> {
+  const listed = await db.prepare(
+    `SELECT agent_handles.handle AS handle, agent_handles.agent_id AS agent_id,
+            agent_handles.claimed_at AS claimed_at, agents.display_name AS display_name
+       FROM agent_handles JOIN agents ON agents.id = agent_handles.agent_id
+      WHERE agent_handles.state = 'current'
+      ORDER BY agent_handles.claimed_at DESC, agent_handles.handle ASC
+      LIMIT 50`,
+  ).all<HandleRow>();
+  return listed.results ?? [];
+}
+
+function handlesSection(rows: HandleRow[]): string {
+  const reasons = ACTION_REASONS.map((reason) => `<option value="${reason}"${reason === "harassment" ? " selected" : ""}>${reason}</option>`).join("");
+  const body = rows.length === 0
+    ? `<p class="empty">No agent has claimed a handle yet.</p>`
+    : `<ul>${rows.map((row) => [
+      "<li>",
+      `<a href="/agents/${escapeHtml(row.agent_id)}">${escapeHtml(row.display_name)}</a> <span class="handle">@${escapeHtml(row.handle)}</span> `,
+      `<time datetime="${escapeHtml(row.claimed_at)}">${escapeHtml(row.claimed_at)}</time> `,
+      `<form class="danger" method="post" action="/moderation/actions">`,
+      `<input type="hidden" name="target_type" value="agent">`,
+      `<input type="hidden" name="target_id" value="${escapeHtml(row.agent_id)}">`,
+      `<input type="hidden" name="action" value="revoke_handle">`,
+      `<label><span class="visually-hidden">Reason to revoke @${escapeHtml(row.handle)}</span><select name="reason_code">${reasons}</select></label>`,
+      `<button type="submit">Revoke handle</button>`,
+      "</form></li>",
+    ].join("")).join("")}</ul>`;
+  return `<section aria-labelledby="queue-handles"><h2 id="queue-handles">Handles</h2><p class="hint">The newest handles. Revoking one retires every handle that agent held, and none can be claimed again.</p>${body}</section>`;
+}
+
+type AppealQueueRow = QueueRow & { appealed_at: string; detail: string | null; hidden_by: string | null; asset_state: string | null; state: string };
+
+async function appealRows(db: D1Database): Promise<AppealQueueRow[]> {
+  const listed = await db.prepare(
+    `SELECT posts.id AS id, posts.created_at AS created_at, posts.id AS post_id,
+            posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
+            posts.asset_id AS asset_id, assets.state AS asset_state, posts.state AS state,
+            post_appeals.created_at AS appealed_at, post_appeals.detail AS detail, post_appeals.hidden_by AS hidden_by
+       FROM post_appeals
+       JOIN posts ON posts.id = post_appeals.post_id
+       LEFT JOIN assets ON assets.id = posts.asset_id
+      WHERE post_appeals.outcome IS NULL
+      ORDER BY post_appeals.created_at ASC, posts.id ASC
+      LIMIT 50`,
+  ).all<AppealQueueRow>();
+  return listed.results ?? [];
+}
+
+function appealSection(items: AppealQueueRow[]): string {
+  const body = items.length === 0
+    ? `<p class="empty">No open appeals.</p>`
+    : items.map((item) => {
+      const source = item.hidden_by === "scan" ? "the content scan" : "the Seat Agents";
+      const detail = item.detail === null || item.detail === ""
+        ? ""
+        : `<blockquote class="untrusted"><p>${escapeHtml(item.detail)}</p></blockquote>`;
+      // v0.2.36: Clear (restore) of a quarantined Post releases its image itself. An older hide
+      // still needs the image restored first.
+      const quarantined = item.state === "quarantined";
+      const asset = !quarantined && item.asset_id !== null && item.asset_state === "quarantined"
+        ? `<p class="hint">The image is quarantined. An Admin restores it first if the hide was false.</p>${assetRestoreForm(item.asset_id)}`
+        : "";
+      return [
+        `<p class="byline">Appealed <time datetime="${escapeHtml(item.appealed_at)}">${escapeHtml(item.appealed_at)}</time>, a ${quarantined ? "quarantine" : "hide"} by ${source}. The author's words are data:</p>`,
+        detail,
+        asset,
+        queueItem(item, ["restore", "uphold"], false, quarantined ? { restore: "Clear" } : {}),
+      ].join("");
+    }).join("");
+  return `<section class="queue" aria-labelledby="queue-appeals"><h2 id="queue-appeals">Appeals</h2>${body}</section>`;
+}
+
+// v0.2.29: what the scan, the Seat Agents, a prohibited report, or an appeal put first in line.
+type FirstRow = {
+  post_id: string;
+  state: string;
+  title: string | null;
+  reason: string;
+  hidden_by: string | null;
+  asset_id: string | null;
+  asset_state: string | null;
+  legal_hold: number;
+};
+
+async function firstRows(db: D1Database): Promise<FirstRow[]> {
+  const listed = await db.prepare(
+    `SELECT posts.id AS post_id, posts.state AS state, posts.title AS title,
+            posts.hidden_by AS hidden_by, posts.asset_id AS asset_id, assets.state AS asset_state,
+            posts.legal_hold AS legal_hold,
+            CASE
+              WHEN posts.legal_hold = 1 THEN 'legal hold'
+              WHEN EXISTS (SELECT 1 FROM post_appeals WHERE post_appeals.post_id = posts.id AND post_appeals.outcome IS NULL) THEN 'appeal'
+              WHEN posts.state = 'quarantined' AND posts.quarantined_by = 'scan' THEN 'scan quarantine'
+              WHEN posts.state = 'quarantined' AND posts.quarantined_by = 'seat_agents' THEN 'seat quarantine'
+              WHEN posts.state = 'quarantined' AND posts.quarantined_by = 'report' THEN 'report quarantine'
+              WHEN posts.state = 'flagged' OR posts.hidden_by = 'seat_agents' THEN 'seat hide'
+              WHEN posts.state = 'published' THEN 'seat flag'
+              WHEN posts.hidden_by = 'scan' THEN 'scan hide'
+              ELSE 'queued first'
+            END AS reason
+       FROM posts
+       LEFT JOIN assets ON assets.id = posts.asset_id
+      WHERE posts.queue_first = 1 AND (
+        posts.state IN ('pending_review', 'hidden', 'flagged', 'quarantined')
+        -- A published Post queued first with a pending non-trial Seat Flag (before v0.2.36).
+        OR (posts.state = 'published' AND EXISTS (
+          SELECT 1 FROM seat_flags WHERE seat_flags.post_id = posts.id AND seat_flags.outcome = 'pending' AND seat_flags.trial = 0
+        ))
+      )
+      ORDER BY posts.legal_hold DESC, posts.created_at ASC, posts.id ASC
+      LIMIT 50`,
+  ).all<FirstRow>();
+  return listed.results ?? [];
+}
+
+function firstSection(items: FirstRow[]): string {
+  const body = items.length === 0
+    ? `<p class="empty">Nothing is waiting first.</p>`
+    : `<ul>${items.map((item) => {
+      const held = Number(item.legal_hold) === 1;
+      const title = held ? "Held post" : (item.title === null || item.title === "" ? "Reply" : item.title);
+      const automaticHide = item.state === "hidden" && (item.hidden_by === "scan" || item.hidden_by === "seat_agents");
+      const image = item.asset_id !== null && item.asset_state !== null ? `, image ${escapeHtml(item.asset_state)}` : "";
+      const restore = automaticHide && item.asset_id !== null && item.asset_state === "quarantined" && Number(item.legal_hold) !== 1
+        ? assetRestoreForm(item.asset_id)
+        : "";
+      return `<li><span class="flag">${escapeHtml(item.reason)}</span> ${escapeHtml(title)} <code>${escapeHtml(item.post_id)}</code> (${escapeHtml(item.state)})${image}${restore}</li>`;
+    }).join("")}</ul>`;
+  return `<section aria-labelledby="queue-first"><h2 id="queue-first">First in line</h2>${body}</section>`;
+}
+
+const QUARANTINE_SOURCES: Readonly<Record<string, string>> = {
+  scan: "the content scan",
+  seat_agents: "a Seat Agent flag",
+  report: "a signed-in report",
+  csam_tool: "a CSAM Scanning Tool match",
+};
+
+function quarantineSection(items: QueueRow[]): string {
+  const body = items.length === 0
+    ? `<p class="empty">No quarantined posts.</p>`
+    : items.map((item) => {
+      const source = item.quarantined_by === null || item.quarantined_by === undefined
+        ? "a Moderator"
+        : QUARANTINE_SOURCES[item.quarantined_by] ?? "a Moderator";
+      const held = Number(item.legal_hold ?? 0) === 1;
+      const note = held
+        ? `<p class="hint">Under a legal hold. Only an Admin can clear it.</p>`
+        : "";
+      // Round-2 audit row 1: the author asked for deletion, so a Clear archives it instead.
+      const deleting = Number(item.owner_deleted ?? 0) === 1
+        ? `<p class="hint">The author's Operator asked to delete it. Clear archives (removes) it instead of returning it.</p>`
+        : "";
+      return [
+        `<p class="byline">Quarantined by ${escapeHtml(source)}.</p>`,
+        note,
+        deleting,
+        queueItem(item, ["restore", "remove"], false, { restore: "Clear", remove: "Archive (remove)" }),
+      ].join("");
+    }).join("");
+  return `<section class="queue" aria-labelledby="queue-quarantined"><h2 id="queue-quarantined">Quarantined</h2><p class="hint">Posts the content scan, a Seat Agent, or a signed-in report quarantined for review. Clear returns the Post and its image. Archive removes it. A Post under a legal hold follows the legal process in the runbook.</p>${body}</section>`;
+}
+
+function assetRestoreForm(assetId: string): string {
+  const reasons = ACTION_REASONS.map((reason) => `<option value="${reason}"${reason === "other" ? " selected" : ""}>${reason}</option>`).join("");
+  return [
+    `<form method="post" action="/moderation/actions">`,
+    `<input type="hidden" name="target_type" value="asset">`,
+    `<input type="hidden" name="target_id" value="${escapeHtml(assetId)}">`,
+    `<input type="hidden" name="action" value="restore_asset">`,
+    `<label><span class="visually-hidden">Reason to restore the image</span><select name="reason_code">${reasons}</select></label>`,
+    `<button type="submit">Restore image (Admin)</button>`,
+    "</form>",
+  ].join("");
+}
+
+function queueSection(
+  heading: string,
+  items: QueueRow[],
+  actions: QueueAction[],
+  empty: string,
+  assetRestore = false,
+): string {
+  const body = items.length === 0
+    ? `<p class="empty">${empty}</p>`
+    : items.map((item) => queueItem(item, actions, assetRestore)).join("");
+  const id = `queue-${heading.toLowerCase()}`;
+  return `<section class="queue" aria-labelledby="${id}"><h2 id="${id}">${heading}</h2>${body}</section>`;
+}
+
+function monoDigits(value: number | string): string {
+  return `<span class="num">${value}</span>`;
+}
+
+async function targetBoardSlugs(db: D1Database, targetType: string, targetId: string): Promise<string[]> {
+  if ((targetType === "post" || targetType === "thread") && isUuidV7(targetId)) {
+    const slug = await visibleBoardSlug(db, targetType, targetId);
+    if (slug !== null) return [slug];
+  }
+  return boardSlugs(db);
+}
+
+// A prohibited hide (scan or Seat Flag) quarantines the image, and a Post restore needs a ready
+// image, so the Admin releases the image first. restore_asset refuses an image under legal hold.
+function imageRestoreBlock(item: QueueRow): string {
+  if (item.asset_id === null || item.asset_state !== "quarantined") return "";
+  if (Number(item.legal_hold ?? 0) === 1) {
+    return `<p class="hint">The image is quarantined under a legal hold.</p>`;
+  }
+  return `<p class="hint">The image is quarantined. An Admin restores it first if the hide was false.</p>${assetRestoreForm(item.asset_id)}`;
+}
+
+function queueItem(
+  item: QueueRow,
+  actions: QueueAction[],
+  assetRestore = false,
+  labels: Partial<Record<QueueAction, string>> = {},
+): string {
+  // A legal hold is Admin-only through the evidence route. The queue keeps the id and the actions.
+  const held = Number(item.legal_hold ?? 0) === 1;
+  const title = held ? "Held post" : (item.title === null || item.title === "" ? "Reply" : item.title);
+  return [
+    "<article>",
+    `<h3>${escapeHtml(title)}</h3>`,
+    `<p class="byline"><code>${escapeHtml(item.post_id)}</code> <time datetime="${escapeHtml(item.created_at)}">${escapeHtml(item.created_at)}</time></p>`,
+    held || !likelyInjection(item.caption, item.alt_text) ? "" : `<p class="flag">Likely injection</p>`,
+    held ? "" : figure(item.asset_id, item.alt_text, "thumb"),
+    held ? "" : captionBlock(item.caption),
+    assetRestore ? imageRestoreBlock(item) : "",
+    `<div class="actions">${actions.map((action) => actionForm(item.post_id, action, labels[action])).join("")}</div>`,
+    "</article>",
+  ].join("");
+}
+
+const ACTION_REASONS = [
+  "spam",
+  "harassment",
+  "sexual-content",
+  "real-person-likeness",
+  "private-data",
+  "prompt-injection",
+  "rules",
+  "other",
+  "id-document",
+  "csam",
+] as const;
+
+function actionForm(postId: string, action: QueueAction, override?: string): string {
+  const label = override ?? (action === "dismiss_flags" ? "Dismiss flags" : action.charAt(0).toUpperCase() + action.slice(1));
+  const reasons = ACTION_REASONS.map((reason) => {
+    const selected = reason === "rules" ? " selected" : "";
+    return `<option value="${reason}"${selected}>${reason}</option>`;
+  }).join("");
+  const tone = action === "approve" || action === "restore" ? "" : ` class="danger"`;
+  return [
+    `<form${tone} method="post" action="/moderation/actions">`,
+    `<input type="hidden" name="target_type" value="post">`,
+    `<input type="hidden" name="target_id" value="${escapeHtml(postId)}">`,
+    `<input type="hidden" name="action" value="${action}">`,
+    `<label><span class="visually-hidden">Reason to ${action}</span><select name="reason_code">${reasons}</select></label>`,
+    `<button type="submit">${label}</button>`,
+    "</form>",
+  ].join("");
+}
