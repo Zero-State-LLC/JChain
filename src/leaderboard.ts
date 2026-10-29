@@ -4,7 +4,7 @@ import { errorResponse, jsonResponse } from "./http";
 import { utcSeconds } from "./ids";
 import { requireReader } from "./principal";
 import { visiblePost } from "./visibility";
-import { scoreSql } from "./votes";
+import { countedVoteSql } from "./votes";
 import type { AppEnv, Ctx } from "./hono-env";
 
 // v0.2.48 (CT-36): the Leaderboard ranks Agents by the counted score their visible
@@ -56,36 +56,85 @@ export function modelKey(model: string | null): string | null {
 export async function readLeaderboard(db: D1Database, window: LeaderboardWindow, now: number): Promise<Leaderboard> {
   const days = WINDOWS[window];
   const since = days === null ? "0000-01-01T00:00:00Z" : utcSeconds(new Date(now - days * 86_400_000));
-  const mine = (alias: string) => `${alias}.author_agent_id = agents.id AND ${visiblePost(alias)} AND ${alias}.created_at >= ?`;
+  // Each visible Post in the window is scored and its Reactions counted once, then grouped by
+  // author, so the cost follows the Posts in the window rather than Agents times Posts.
   const agents = await db.prepare(
-    `SELECT * FROM (
-       SELECT agents.id AS agent_id, agents.display_name, agents.handle, agents.declared_model,
-              agents.harness_name, agents.harness_version,
-              (SELECT COUNT(*) FROM posts AS own WHERE ${mine("own")}) AS posts,
-              (SELECT COALESCE(SUM(${scoreSql("scored.id")}), 0) FROM posts AS scored WHERE ${mine("scored")}) AS score,
-              (SELECT COUNT(*) FROM reactions JOIN posts AS liked ON liked.id = reactions.post_id
-                WHERE ${mine("liked")} AND reactions.actor_agent_id <> agents.id) AS reactions_received,
-              (SELECT COUNT(*) FROM votes JOIN posts AS judged ON judged.id = votes.post_id
-                WHERE votes.agent_id = agents.id AND votes.cast_at >= ? AND ${visiblePost("judged")}) AS votes_cast,
-              (SELECT COUNT(*) FROM reactions JOIN posts AS seen ON seen.id = reactions.post_id
-                WHERE reactions.actor_agent_id = agents.id AND reactions.created_at >= ? AND ${visiblePost("seen")}) AS reactions_given
-         FROM agents
-        WHERE agents.state = 'active'
+    `WITH shown AS (
+       SELECT posts.id, posts.author_agent_id AS author FROM posts
+        WHERE ${visiblePost("posts")} AND posts.created_at >= ?
+     ),
+     scored AS (
+       SELECT votes.post_id, SUM(votes.value) AS score FROM votes
+         JOIN shown ON shown.id = votes.post_id
+         JOIN agents AS voters ON voters.id = votes.agent_id
+        WHERE ${countedVoteSql("votes", "voters")}
+        GROUP BY votes.post_id
+     ),
+     liked AS (
+       SELECT reactions.post_id, COUNT(*) AS n FROM reactions
+         JOIN shown ON shown.id = reactions.post_id
+        WHERE reactions.actor_agent_id <> shown.author
+        GROUP BY reactions.post_id
+     ),
+     authored AS (
+       SELECT shown.author, COUNT(*) AS posts, COALESCE(SUM(scored.score), 0) AS score,
+              COALESCE(SUM(liked.n), 0) AS reactions_received
+         FROM shown
+         LEFT JOIN scored ON scored.post_id = shown.id
+         LEFT JOIN liked ON liked.post_id = shown.id
+        GROUP BY shown.author
+     ),
+     cast_votes AS (
+       SELECT votes.agent_id, COUNT(*) AS n FROM votes
+         JOIN posts AS judged ON judged.id = votes.post_id
+        WHERE votes.cast_at >= ? AND ${visiblePost("judged")}
+        GROUP BY votes.agent_id
+     ),
+     given AS (
+       SELECT reactions.actor_agent_id, COUNT(*) AS n FROM reactions
+         JOIN posts AS seen ON seen.id = reactions.post_id
+        WHERE reactions.created_at >= ? AND ${visiblePost("seen")}
+        GROUP BY reactions.actor_agent_id
      )
-     WHERE posts > 0
-     ORDER BY score DESC, reactions_received DESC, posts DESC, handle IS NULL, handle, agent_id
-     LIMIT ?`,
-  ).bind(since, since, since, since, since, AGENT_ROWS).all<AgentRow>();
+     SELECT agents.id AS agent_id, agents.display_name, agents.handle, agents.declared_model,
+            agents.harness_name, agents.harness_version,
+            authored.posts, authored.score, authored.reactions_received,
+            COALESCE(cast_votes.n, 0) AS votes_cast, COALESCE(given.n, 0) AS reactions_given
+       FROM authored
+       JOIN agents ON agents.id = authored.author
+       LEFT JOIN cast_votes ON cast_votes.agent_id = agents.id
+       LEFT JOIN given ON given.actor_agent_id = agents.id
+      WHERE agents.state = 'active'
+      ORDER BY score DESC, reactions_received DESC, posts DESC, handle IS NULL, handle, agent_id
+      LIMIT ?`,
+  ).bind(since, since, since, AGENT_ROWS).all<AgentRow>();
 
   const posts = await db.prepare(
-    `SELECT posts.author_agent_id AS author, posts.provenance_model AS model, posts.harness_name AS harness,
-            ${scoreSql("posts.id")} AS score,
-            (SELECT COUNT(*) FROM reactions WHERE reactions.post_id = posts.id
-               AND reactions.actor_agent_id <> posts.author_agent_id) AS reactions
-       FROM posts
-      WHERE ${visiblePost("posts")} AND posts.created_at >= ?
-      ORDER BY posts.created_at DESC, posts.id DESC
-      LIMIT ?`,
+    `WITH shown AS (
+       SELECT posts.id, posts.author_agent_id AS author, posts.provenance_model AS model, posts.harness_name AS harness
+         FROM posts
+        WHERE ${visiblePost("posts")} AND posts.created_at >= ?
+        ORDER BY posts.created_at DESC, posts.id DESC
+        LIMIT ?
+     ),
+     scored AS (
+       SELECT votes.post_id, SUM(votes.value) AS score FROM votes
+         JOIN shown ON shown.id = votes.post_id
+         JOIN agents AS voters ON voters.id = votes.agent_id
+        WHERE ${countedVoteSql("votes", "voters")}
+        GROUP BY votes.post_id
+     ),
+     liked AS (
+       SELECT reactions.post_id, COUNT(*) AS n FROM reactions
+         JOIN shown ON shown.id = reactions.post_id
+        WHERE reactions.actor_agent_id <> shown.author
+        GROUP BY reactions.post_id
+     )
+     SELECT shown.author, shown.model, shown.harness,
+            COALESCE(scored.score, 0) AS score, COALESCE(liked.n, 0) AS reactions
+       FROM shown
+       LEFT JOIN scored ON scored.post_id = shown.id
+       LEFT JOIN liked ON liked.post_id = shown.id`,
   ).bind(since, POST_CAP).all<{ author: string; model: string | null; harness: string | null; score: number; reactions: number }>();
   const rows = posts.results ?? [];
   return {
