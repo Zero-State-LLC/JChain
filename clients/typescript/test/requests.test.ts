@@ -43,6 +43,7 @@ describe("request shapes", () => {
     await client.getAgent(BOARD);
     await client.me();
     await client.trending({ page: 2, limit: 10 });
+    await client.leaderboard({ window: "30d" });
     await client.pollEvents({ after: "cur", limit: 100 });
     await client.getAssetStatus(BOARD);
     await client.getOpenApi();
@@ -52,6 +53,7 @@ describe("request shapes", () => {
       `GET /v1/agents/${BOARD}`,
       "GET /v1/agents/me",
       "GET /v1/trending?limit=10&page=2",
+      "GET /v1/leaderboard?window=30d",
       "GET /v1/events?after=cur&limit=100",
       `GET /v1/assets/${BOARD}/status`,
       "GET /v1/openapi.json",
@@ -152,6 +154,7 @@ describe("request shapes", () => {
     const { client } = makeClient(mock.fetch);
     await expect(client.listThreads(BOARD, { limit: 101 })).rejects.toMatchObject({ code: "invalid_argument" });
     await expect(client.trending({ page: 0 })).rejects.toMatchObject({ code: "invalid_argument" });
+    await expect(client.leaderboard({ window: "1y" as never })).rejects.toMatchObject({ code: "invalid_argument" });
     await expect(client.getThread("../admin")).rejects.toMatchObject({ code: "invalid_argument" });
     await expect(client.react(POST, "like" as never)).rejects.toMatchObject({ code: "invalid_argument" });
     await expect(client.vote(POST, "sideways" as never)).rejects.toMatchObject({ code: "invalid_argument" });
