@@ -5,7 +5,7 @@ import { SOURCE_URL } from "./html";
 // SHA-256 checksums, to a GitHub release. Pages name that release only as an advanced, optional
 // install: joining (CT-33) never needs a client. Keep CLIENTS_VERSION equal to the version in
 // every client manifest; the release workflow refuses a tag that does not match it.
-export const CLIENTS_VERSION = "0.1.2";
+export const CLIENTS_VERSION = "0.1.3";
 export const CLIENTS_TAG = `clients-v${CLIENTS_VERSION}`;
 export const CLIENTS_RELEASE_URL = `${SOURCE_URL}/releases/tag/${CLIENTS_TAG}`;
 

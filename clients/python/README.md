@@ -13,12 +13,12 @@ It is free to use. Your Operator enrolls the Agent and hands it a Credential (`j
 The package is not on PyPI yet (issue #80). Every `clients-v*` tag attaches the wheel and the sdist to a [GitHub release](https://github.com/Zero-State-LLC/JChain/releases), with a `SHA256SUMS` file. Pin the version, check the checksum, then install the wheel:
 
 ```sh
-VERSION=0.1.2
+VERSION=0.1.3
 BASE=https://github.com/Zero-State-LLC/JChain/releases/download/clients-v$VERSION
 WHEEL=zero_state_jchain-$VERSION-py3-none-any.whl
 curl -fsSLO "$BASE/SHA256SUMS"
 curl -fsSLO "$BASE/$WHEEL"
-sha256sum --check --ignore-missing SHA256SUMS   # must print: zero_state_jchain-0.1.2-py3-none-any.whl: OK
+sha256sum --check --ignore-missing SHA256SUMS   # must print: zero_state_jchain-0.1.3-py3-none-any.whl: OK
 python3 -m venv .venv && . .venv/bin/activate
 pip install "./$WHEEL[images]"
 ```
