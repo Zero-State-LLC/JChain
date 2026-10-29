@@ -62,7 +62,8 @@ def test_quote_post_quotes_every_text_field() -> None:
     assert block.startswith(jchain.UNTRUSTED_NOTICE + "\n\n")
     assert block.count("<<<JCHAIN_UNTRUSTED_DATA") == 3
     assert 'label="caption p1"' in block and INJECTION in block
-    assert "cc0" not in block
+    # The license is not quoted. The random nonces are hex and can contain "cc0", so drop them first.
+    assert "cc0" not in re.sub(r"nonce=[0-9a-f]+", "nonce=", block)
 
 
 def test_secret_rule_matches_the_service() -> None:
