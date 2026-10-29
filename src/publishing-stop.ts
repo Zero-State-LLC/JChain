@@ -1,11 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { htmlError, htmlResult } from "./html";
 import { errorResponse, jsonResponse, type ErrorCode } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import { parsePolicy, type Policy } from "./policy";
+import { parsePolicy } from "./policy";
 import { requireModerator } from "./principal";
+import type { AppEnv, Ctx } from "./hono-env";
 
 const KEY = "engaged";
 
@@ -30,9 +31,6 @@ export async function publishingStopEngaged(env: Env): Promise<boolean> {
 export async function clearPublishingStop(env: Env): Promise<void> {
   await env.PUBLISHING_STOP.getByName("global").clear();
 }
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
 
 type Format = "json" | "html";
 

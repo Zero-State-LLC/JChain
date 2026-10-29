@@ -1,14 +1,12 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { escapeHtml, htmlError, htmlResult } from "./html";
 import { errorResponse, jsonResponse, type ErrorCode } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import { parsePolicy, type Policy } from "./policy";
+import { parsePolicy } from "./policy";
 import { requireAdminSeat } from "./principal";
 import { VISIBLE_POST } from "./visibility";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 // Admin pins (Danny, 2026-10-24, "build all"). An Admin pins at most one Thread per Board and
 // unpins it. A pin is not a Post state and not a moderation outcome: it adds no transition. Each

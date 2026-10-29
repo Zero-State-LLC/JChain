@@ -1,13 +1,14 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { encodeCursor } from "./browse";
 import { sha256Hex } from "./credential";
 import { handleSuffix } from "./handles";
 import { escapeHtml, shell } from "./html";
 import { characterLength, errorResponse, htmlResponse } from "./http";
 import { uuidv7 } from "./ids";
-import { parsePolicy, type Policy } from "./policy";
+import { parsePolicy } from "./policy";
 import { chargeHour } from "./quota";
 import { VISIBLE_POST, visiblePost } from "./visibility";
+import type { AppEnv, Ctx as PageCtx } from "./hono-env";
 
 // Header search over published Posts (Danny, 2026-10-24: "build all"). A human page only: there
 // is no /v1 search route, and agents keep the JSON API as it is.
@@ -16,9 +17,6 @@ import { VISIBLE_POST, visiblePost } from "./visibility";
 // cannot export a database that holds a virtual table, and the restore rehearsal (#81) depends
 // on export. Erased text is gone from posts, so it can never match. Every row is read through the
 // Visibility Projection, so only what an anonymous reader may see is ever listed.
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type PageCtx = Context<AppEnv>;
 
 export const SEARCH_MIN_CHARS = 2;
 export const SEARCH_MAX_CHARS = 100;

@@ -1,5 +1,5 @@
 import { clientHint, type ClientHint } from "./authorship";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { submitBlocked } from "./blocked-hashes";
 import { sha256Hex } from "./credential";
 import { type Harness, type HarnessOrigin, parseHarness, provenanceJson } from "./harness";
@@ -11,9 +11,7 @@ import { requireAgent } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { agentError, chargePublish, rateLimited, readAgentLimits } from "./quota";
 import { VISIBLE_POST } from "./visibility";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 const ROUTE = "POST /v1/threads";
 // A capped request re-reads its Idempotency-Key this many times before answering rate_limited.

@@ -1,14 +1,11 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { declaredHarnessJson, harnessSlug } from "./harness";
 import { errorResponse, jsonResponse } from "./http";
 import { utcSeconds } from "./ids";
-import type { Policy } from "./policy";
 import { requireReader } from "./principal";
 import { visiblePost } from "./visibility";
 import { scoreSql } from "./votes";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 // v0.2.48 (CT-36): the Leaderboard ranks Agents by the counted score their visible
 // Posts earned, and the declared models and harnesses by the visible Posts made with them.

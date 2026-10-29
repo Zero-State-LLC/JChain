@@ -1,5 +1,5 @@
 import { agentIdForHandle, handleSuffix, looksLikeHandle } from "./handles";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { authorshipSection, readAuthorshipSignals } from "./authorship-signals";
 import { avatarImg } from "./avatar";
 import { bumpSql, parseSort, visiblePinnedThread, type BoardSort } from "./board-order";
@@ -9,8 +9,8 @@ import { runsOnHtml } from "./harness";
 import { document, escapeHtml, notFoundDocument } from "./html";
 import { errorResponse, htmlResponse } from "./http";
 import { likelyInjection } from "./injection";
-import { isUuidV7, uuidv7 } from "./ids";
-import { parsePolicy, type Policy } from "./policy";
+import { isUuidV7 } from "./ids";
+import { parsePolicy } from "./policy";
 import { accessEmail, isAdminEmail, requireModerator } from "./principal";
 import { publishingStopEngaged } from "./publishing-stop";
 import { MEDIA_MATCH_ACTOR } from "./quarantine";
@@ -19,11 +19,11 @@ import { currentSession } from "./session";
 import { ownerDeleted } from "./tombstone";
 import { PROHIBITED, instructionsFor } from "./rules-copy";
 import { VISIBLE_POST, visibleBoardSlug, visiblePost } from "./visibility";
+import { REACTION_TYPES, type ReactionType } from "./reactions";
 import { parsePage, scoreSql, trendingPage, type TrendingItem } from "./votes";
 import { WINDOWS, parseWindow, readLeaderboard, type GroupRow, type LeaderboardWindow } from "./leaderboard";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type PageCtx = Context<AppEnv>;
+import type { AppEnv, Ctx as PageCtx } from "./hono-env";
+import { pageGate } from "./page-gate";
 
 type FeedRow = {
   id: string;
@@ -73,8 +73,7 @@ type ThreadRow = FeedRow & {
 
 type Stamp = { createdAt: string; id: string };
 
-const REACTION_TYPES = ["plus", "minus", "laugh", "interest"] as const;
-const REACTION_LABELS: Record<(typeof REACTION_TYPES)[number], string> = {
+const REACTION_LABELS: Record<ReactionType, string> = {
   plus: "Plus",
   minus: "Minus",
   laugh: "Laugh",
@@ -129,7 +128,7 @@ export function mountPages(app: Hono<AppEnv>): void {
 }
 
 async function boardIndex(c: PageCtx): Promise<Response> {
-  const requestId = gate(c.env);
+  const requestId = pageGate(c.env);
   if (requestId instanceof Response) return requestId;
   const rows = await listDirectory(c.env.DB);
   const table = rows.length === 0
@@ -161,7 +160,7 @@ async function boardIndex(c: PageCtx): Promise<Response> {
 }
 
 async function feed(c: PageCtx): Promise<Response> {
-  const requestId = gate(c.env);
+  const requestId = pageGate(c.env);
   if (requestId instanceof Response) return requestId;
   const slug = c.req.param("slug");
   if (slug === undefined) return notFoundPage(requestId);
@@ -247,7 +246,7 @@ async function feed(c: PageCtx): Promise<Response> {
 }
 
 async function trendingHtml(c: PageCtx): Promise<Response> {
-  const requestId = gate(c.env);
+  const requestId = pageGate(c.env);
   if (requestId instanceof Response) return requestId;
   const limit = parseLimit(c.req.query("limit"));
   const pageNumber = parsePage(c.req.query("page"));
@@ -285,7 +284,7 @@ function trendingTable(items: TrendingItem[]): string {
 const WINDOW_LABELS: Record<LeaderboardWindow, string> = { "7d": "7 days", "30d": "30 days", all: "All time" };
 
 async function leaderboardHtml(c: PageCtx): Promise<Response> {
-  const requestId = gate(c.env);
+  const requestId = pageGate(c.env);
   if (requestId instanceof Response) return requestId;
   const window = parseWindow(c.req.query("window"));
   if (window === "malformed") return errorResponse(requestId, "malformed");
@@ -419,7 +418,7 @@ function timeText(value: string | null | undefined): string {
 }
 
 async function threadPage(c: PageCtx): Promise<Response> {
-  const requestId = gate(c.env);
+  const requestId = pageGate(c.env);
   if (requestId instanceof Response) return requestId;
   const threadId = c.req.param("id");
   if (threadId === undefined || !isUuidV7(threadId)) {
@@ -573,7 +572,7 @@ function ancestryList(ancestry: RemixAncestor[]): string {
 }
 
 async function profilePage(c: PageCtx): Promise<Response> {
-  const requestId = gate(c.env);
+  const requestId = pageGate(c.env);
   if (requestId instanceof Response) return requestId;
   const agentId = c.req.param("id");
   if (agentId === undefined) return notFoundPage(requestId);
@@ -652,7 +651,7 @@ function profileItem(item: ProfileRow): string {
 }
 
 async function queuePage(c: PageCtx): Promise<Response> {
-  const requestId = gate(c.env);
+  const requestId = pageGate(c.env);
   if (requestId instanceof Response) return requestId;
   const principal = await requireModerator(c.env, c.req.raw, c.executionCtx);
   if (!principal.ok) return errorResponse(requestId, principal.code);
@@ -725,7 +724,7 @@ async function queuePage(c: PageCtx): Promise<Response> {
 }
 
 async function reportPage(c: PageCtx): Promise<Response> {
-  const requestId = gate(c.env);
+  const requestId = pageGate(c.env);
   if (requestId instanceof Response) return requestId;
   const targetType = c.req.query("target_type");
   const selected = targetType === "thread" || targetType === "agent" || targetType === "post" ? targetType : "post";
@@ -1440,16 +1439,6 @@ function captionBlock(caption: string): string {
 
 function notFoundPage(requestId: string): Response {
   return htmlResponse(requestId, notFoundDocument(), 404);
-}
-
-function gate(env: Env): string | Response {
-  const requestId = uuidv7();
-  const policy = parsePolicy(typeof env.POLICY === "string" ? env.POLICY : undefined);
-  if (!policy) {
-    console.error(JSON.stringify({ message: "policy invalid", request_id: requestId }));
-    return errorResponse(requestId, "policy_missing");
-  }
-  return requestId;
 }
 
 function postLinks(row: { post_id: string; author_agent_id: string; author_name: string }): string {

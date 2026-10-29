@@ -1,16 +1,14 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { derivativeKey, originalKey, originalThumbKey, refundDerivatives } from "./asset-pipeline";
 import { dropPublishedCopies } from "./feeds";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import type { Policy } from "./policy";
 import { requireOperator } from "./principal";
 import { ownerDeleted, tombstoneStatements } from "./tombstone";
+import type { AppEnv, Ctx } from "./hono-env";
 
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type App = Hono<AppEnv>;
-type Ctx = Context<AppEnv>;
 type DeletionEnv = Pick<Env, "DB" | "MEDIA" | "QUOTA">;
 
 // FR-13 and CT-10 (round-2 audit rows 1 and 9). An owner deletion marks the Agent with the time of

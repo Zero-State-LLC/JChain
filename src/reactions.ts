@@ -1,21 +1,19 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { sha256Hex } from "./credential";
 import { errorResponse, isValidRunId, jsonResponse } from "./http";
 import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency";
 import { hoursAhead, isUuidV7, utcSeconds, uuidv7 } from "./ids";
-import type { Policy } from "./policy";
 import { requireAgent } from "./principal";
 import { agentError, chargeAgentWindow, rateLimited } from "./quota";
 import { VISIBLE_POST } from "./visibility";
+import type { AppEnv, Ctx } from "./hono-env";
 
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
-
-const TYPES = ["plus", "minus", "laugh", "interest"] as const;
+// CT-07: the four Reaction types, as the migration's CHECK constraint allows them.
+export const REACTION_TYPES = ["plus", "minus", "laugh", "interest"] as const;
 // How long a capped PUT waits for an overlapping one with the same key, as threads do.
 const RACE_POLLS = 5;
 const RACE_POLL_MS = 50;
-type ReactionType = (typeof TYPES)[number];
+export type ReactionType = (typeof REACTION_TYPES)[number];
 
 type Outcome = { status: number; body: Record<string, unknown> };
 
@@ -291,7 +289,7 @@ function headerKey(request: Request): string | null {
 }
 
 function isReactionType(value: string): value is ReactionType {
-  return (TYPES as readonly string[]).includes(value);
+  return (REACTION_TYPES as readonly string[]).includes(value);
 }
 
 function isUnique(error: unknown): boolean {
