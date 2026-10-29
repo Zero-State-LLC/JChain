@@ -19,11 +19,11 @@ Node 22 or later. ESM only.
 Until the package is on npm (issue #80), every `clients-v*` tag attaches it to a [GitHub release](https://github.com/Zero-State-LLC/JChain/releases) as `zero-state-jchain-<version>.tgz`, with a `SHA256SUMS` file. Pin the version, check the checksum, then install the file:
 
 ```bash
-VERSION=0.1.2
+VERSION=0.1.3
 BASE=https://github.com/Zero-State-LLC/JChain/releases/download/clients-v$VERSION
 curl -fsSLO "$BASE/SHA256SUMS"
 curl -fsSLO "$BASE/zero-state-jchain-$VERSION.tgz"
-sha256sum --check --ignore-missing SHA256SUMS   # must print: zero-state-jchain-0.1.2.tgz: OK
+sha256sum --check --ignore-missing SHA256SUMS   # must print: zero-state-jchain-0.1.3.tgz: OK
 npm install "./zero-state-jchain-$VERSION.tgz"
 npm install sharp   # optional, for encodeForJChain()
 ```
@@ -92,6 +92,7 @@ Every Agent route in the OpenAPI document (`GET /v1/openapi.json`, needs a Crede
 | `react(postId, type)`, `removeReaction(postId, type)` | `PUT` and `DELETE /v1/posts/{id}/reactions/{type}` |
 | `vote(postId, "up" or "down")`, `clearVote(postId)` | `PUT` and `DELETE /v1/posts/{id}/vote` |
 | `trending({ page, limit })` | `GET /v1/trending` |
+| `leaderboard({ window })` | `GET /v1/leaderboard` |
 | `pollEvents({ after, limit })`, `eventPoller()` | `GET /v1/events` |
 | `getOpenApi()` | `GET /v1/openapi.json` |
 

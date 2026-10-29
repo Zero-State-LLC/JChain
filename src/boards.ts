@@ -1,14 +1,13 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { htmlError, htmlResult } from "./html";
 import { characterLength, errorResponse, jsonResponse, type ErrorCode } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import { parsePolicy, type Policy } from "./policy";
+import { parsePolicy } from "./policy";
 import { MODERATION_REASONS, canonicalReason } from "./moderation";
 import { requireAdmin } from "./principal";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
+import { readForm, readJsonObject } from "./forms";
 
 const SLUG = /^[a-z][a-z0-9]{0,19}$/;
 const DUPLICATE = "A board with this slug already exists.";
@@ -29,8 +28,6 @@ export type BoardRow = { id: string; slug: string; name: string; description: st
 const NAME_RULE = "name must be 1 to 60 characters.";
 const DESCRIPTION_RULE = "description must be at most 500 characters.";
 
-type ReadResult = { ok: true; value: Record<string, unknown> } | { ok: false };
-
 export function mountBoards(app: Hono<AppEnv>): void {
   app.post("/v1/boards", createJson);
   app.post("/boards", createHtml);
@@ -44,7 +41,7 @@ async function createJson(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "admin") return errorResponse(requestId, "forbidden");
   if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
-  const body = await readObject(c.req.raw);
+  const body = await readJsonObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const parsed = parseBoardCreate(body.value);
   if (!parsed.ok) return errorResponse(requestId, parsed.code, parsed.message);
@@ -83,7 +80,7 @@ async function editJson(c: Ctx): Promise<Response> {
   const board = await c.env.DB.prepare("SELECT id, slug, name, description, state FROM boards WHERE id = ?")
     .bind(c.req.param("id") ?? "").first<BoardRow>();
   if (!board) return errorResponse(requestId, "not_found");
-  const body = await readObject(c.req.raw);
+  const body = await readJsonObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const parsed = parseBoardEdit(body.value, false);
   if (!parsed.ok) return errorResponse(requestId, parsed.code, parsed.message);
@@ -270,35 +267,4 @@ export async function insertBoard(
     throw error;
   }
   return { ok: true, id, slug, name, description, state: "open" };
-}
-
-async function readObject(request: Request): Promise<ReadResult> {
-  const type = request.headers.get("content-type");
-  if (type === null || !type.toLowerCase().startsWith("application/json")) return { ok: false };
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return { ok: false };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-  return { ok: true, value: parsed as Record<string, unknown> };
-}
-
-async function readForm(request: Request): Promise<ReadResult> {
-  const type = request.headers.get("content-type");
-  if (type === null || !type.toLowerCase().startsWith("application/x-www-form-urlencoded")) return { ok: false };
-  let text: string;
-  try {
-    text = new TextDecoder().decode(await request.arrayBuffer());
-  } catch {
-    return { ok: false };
-  }
-  const params = new URLSearchParams(text);
-  const value: Record<string, unknown> = {};
-  for (const [key, item] of params.entries()) {
-    if (Object.hasOwn(value, key)) return { ok: false };
-    value[key] = item;
-  }
-  return { ok: true, value };
 }

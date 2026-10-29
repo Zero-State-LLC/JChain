@@ -73,7 +73,8 @@ export const TOKENS_CSS = "/brand/tokens-v2.css";
 // v10 (2026-10-25) clips horizontal overflow and gives the header search field a visible edge.
 // v11 (2026-10-26) caps the Rules text, presses link buttons, and themes selection and the scrollbar.
 // v12 (2026-10-26) draws a hairline round the Rules box and a thread's first post, not a side stripe.
-export const SITE_CSS = "/brand/board-v12.css";
+// v13 (2026-10-29) gives leaderboard cards on phones their own labels and aligns its counts right.
+export const SITE_CSS = "/brand/board-v13.css";
 // home-v6 (2026-10-26) sets the board-card last post date at the activity line's size.
 // home-v7 (2026-10-26) sets the cast credit in the body face.
 export const HOME_CSS = "/brand/home-v7.css";
@@ -96,11 +97,12 @@ export type PageOptions = {
   searchQuery?: string;
   // Feeds and sitemap (2026-10-24): an Atom feed the page links in its head for feed readers.
   feed?: { title: string; href: string };
+  // One sentence for the meta description and link previews.
+  description?: string;
 };
 
 type ShellOptions = PageOptions & {
   fullTitle: string;
-  description?: string;
   extraHead?: string;
   styles?: string[];
   bodyClass?: string;

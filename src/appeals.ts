@@ -2,7 +2,7 @@
 // v0.2.36: a scan or Seat Flag quarantine (quarantined_by 'scan' or 'seat_agents') is appealable
 // once, within review.appeal_days, as an older scan or Seat Flag hide still is. A report
 // quarantine is not: a Moderator decides it. A Moderator hide is final.
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { sha256Hex } from "./credential";
 import { errorResponse, characterLength, isValidRunId, jsonResponse, ERRORS, type ErrorCode } from "./http";
 import { canonicalJson, idempotencyInsert, readIdempotency } from "./idempotency";
@@ -11,9 +11,7 @@ import { sameOrigin } from "./origin";
 import type { Policy } from "./policy";
 import { requireAgent, requireModerator, requireOperator } from "./principal";
 import { chargeOperatorAppeal } from "./quota";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 const DETAIL_MAX = 500;
 const DEFAULT_APPEAL_DAYS = 7;

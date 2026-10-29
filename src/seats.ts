@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { dropPublishedCopies } from "./feeds";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
@@ -7,15 +7,14 @@ import { sameOrigin } from "./origin";
 import type { Policy } from "./policy";
 import { requireAdminSeat, requireAgent } from "./principal";
 import { quarantineStatements } from "./quarantine";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
+import { readJsonObject } from "./forms";
 
 // Spec default when the optional review block is absent (prepublish beta).
 export const DEFAULT_SEAT_TRIAL_ACTIONS = 10;
-const DEFAULT_ACCURACY_PERCENT = 70;
-const DEFAULT_ACCURACY_MIN_REVIEWED = 5;
-const DEFAULT_ACCURACY_WINDOW = 100;
+export const DEFAULT_ACCURACY_PERCENT = 70;
+export const DEFAULT_ACCURACY_MIN_REVIEWED = 5;
+export const DEFAULT_ACCURACY_WINDOW = 100;
 
 export const FLAG_REASONS = ["off-topic", "id-document", "csam"] as const;
 export const SEAT_ACTIONS = ["bind_seat_agent", "pause_seat_agent", "readmit_seat_agent", "restore_seat_powers"] as const;
@@ -70,7 +69,7 @@ async function flagPost(c: Ctx): Promise<Response> {
   if (!seat) return errorResponse(requestId, "forbidden");
   if (seat.seat_state === "paused") return errorResponse(requestId, "forbidden");
 
-  const body = await readObject(c.req.raw);
+  const body = await readJsonObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const reason = body.value.reason;
   if (typeof reason !== "string" || !(FLAG_REASONS as readonly string[]).includes(reason)) {
@@ -208,7 +207,7 @@ async function adminSeat(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "admin") return errorResponse(requestId, "forbidden");
   if (!sameOrigin(c.req.raw, c.get("policy").site_origin)) return errorResponse(requestId, "forbidden");
-  const body = await readObject(c.req.raw);
+  const body = await readJsonObject(c.req.raw);
   if (!body.ok) return errorResponse(requestId, "malformed");
   const action = body.value.action;
   if (!isSeatAction(action)) return errorResponse(requestId, "validation_failed");
@@ -384,17 +383,4 @@ async function maybePauseSeat(db: D1Database, seat: number, policy?: Policy | nu
   if (confirmed * 100 < accuracyPercent * rows.length) {
     await db.prepare("UPDATE admin_seats SET seat_state = 'paused', powers_held = 1 WHERE seat = ?").bind(seat).run();
   }
-}
-
-async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  const type = request.headers.get("content-type");
-  if (type === null || !type.toLowerCase().startsWith("application/json")) return { ok: false };
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return { ok: false };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-  return { ok: true, value: parsed as Record<string, unknown> };
 }

@@ -10,16 +10,14 @@ import {
   visiblePinnedThread,
   type BoardSort,
 } from "./board-order";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7 } from "./ids";
-import type { Policy } from "./policy";
 import { requireReader } from "./principal";
 import { visibleAncestry } from "./remix";
 import { VISIBLE_POST } from "./visibility";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
+import { decodeBase64url, encodeBase64url } from "./base64url";
 
 const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
@@ -331,22 +329,12 @@ export function parseLimit(raw: string | undefined): number | "malformed" {
 }
 
 export function encodeCursor(createdAt: string, id: string): string {
-  const bytes = new TextEncoder().encode(`${createdAt}|${id}`);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  return encodeBase64url(`${createdAt}|${id}`);
 }
 
 export function decodeCursor(value: string): { createdAt: string; id: string } | null {
-  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
-  let padded = value.replaceAll("-", "+").replaceAll("_", "/");
-  while (padded.length % 4 !== 0) padded += "=";
-  let text: string;
-  try {
-    text = atob(padded);
-  } catch {
-    return null;
-  }
+  const text = decodeBase64url(value);
+  if (text === null) return null;
   const split = text.indexOf("|");
   if (split < 1) return null;
   const createdAt = text.slice(0, split);

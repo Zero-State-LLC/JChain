@@ -16,6 +16,7 @@ import type { Policy } from "./policy";
 import { requireAgent, requireModerator } from "./principal";
 import { agentError, chargeUploadBytes, logRejected, processingHeadroom, rateLimited, readAgentLimits } from "./quota";
 import { type AssetReader, projectAsset } from "./visibility";
+import { readJsonObject } from "./forms";
 
 type UploadEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type UploadApp = Hono<UploadEnv>;
@@ -70,7 +71,7 @@ async function reserve(c: Ctx): Promise<Response> {
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
   if (key === null) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
-  const parsedBody = await readObject(c.req.raw);
+  const parsedBody = await readJsonObject(c.req.raw);
   if (!parsedBody.ok) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
   const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
   const prior = await readIdempotency(c.env.DB, principal.agentId, RESERVE_ROUTE, key, bodyHash);
@@ -527,19 +528,6 @@ async function rejectStored(env: Env, assetId: string, reason: ReasonCode): Prom
     "UPDATE assets SET state = 'rejected', reason_code = ?, rejected_at = ? WHERE id = ? AND state = 'reserved'",
   ).bind(reason, utcSeconds(), assetId).run();
   console.log(JSON.stringify({ message: "asset rejected", asset_id: assetId, reason_code: reason }));
-}
-
-async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  const type = request.headers.get("content-type");
-  if (type === null || !type.toLowerCase().startsWith("application/json")) return { ok: false };
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return { ok: false };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-  return { ok: true, value: parsed as Record<string, unknown> };
 }
 
 async function readCapped(

@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { approvedCodesSql, effectiveCap, heldPlaces, notSeatAgentSql, operatorMayAdd } from "./operator-admin";
 import {
   connectCapPage,
@@ -38,12 +38,10 @@ import { sameOrigin } from "./origin";
 import type { Policy } from "./policy";
 import { requireOperator } from "./principal";
 import { emailSignIn, policyOf } from "./session";
+import type { AppEnv, Ctx } from "./hono-env";
 
 // CT-27 (v0.2.23): the Operator page. It runs the same guarded writes as CT-01
 // and CT-10 through the agent-admin module, and answers in HTML.
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
 
 const SIGNED_IN: PageOptions = { section: "account", signedIn: true };
 const BACK = "/operator";

@@ -1,16 +1,15 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { derivativeKey, originalKey, originalThumbKey, refundDerivatives } from "./asset-pipeline";
 import { dropPublishedCopies } from "./feeds";
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import type { Policy } from "./policy";
 import { requireOperator } from "./principal";
 import { ownerDeleted, tombstoneStatements } from "./tombstone";
+import type { AppEnv, Ctx } from "./hono-env";
+import { readJsonObject } from "./forms";
 
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type App = Hono<AppEnv>;
-type Ctx = Context<AppEnv>;
 type DeletionEnv = Pick<Env, "DB" | "MEDIA" | "QUOTA">;
 
 // FR-13 and CT-10 (round-2 audit rows 1 and 9). An owner deletion marks the Agent with the time of
@@ -53,7 +52,7 @@ async function requestDeletion(c: Ctx): Promise<Response> {
   const opened = await gate(c);
   if (opened instanceof Response) return opened;
   const requestId = c.get("requestId");
-  const parsed = await readObject(c.req.raw);
+  const parsed = await readJsonObject(c.req.raw);
   if (!parsed.ok) return errorResponse(requestId, "malformed");
   const agentId = agentIdFrom(parsed.value);
   if (agentId === null) return errorResponse(requestId, "malformed");
@@ -272,17 +271,6 @@ function agentIdFrom(body: Record<string, unknown>): string | null {
   const keys = Object.keys(body);
   if (keys.length !== 1 || keys[0] !== "agent_id" || typeof body.agent_id !== "string") return null;
   return body.agent_id;
-}
-
-async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return { ok: false };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-  return { ok: true, value: parsed as Record<string, unknown> };
 }
 
 function isUnique(error: unknown): boolean {

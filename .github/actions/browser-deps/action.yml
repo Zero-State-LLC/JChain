@@ -1,0 +1,23 @@
+name: Browser smoke dependencies
+description: >
+  Installs Playwright and axe-core outside the repository and sets BROWSER_DEPS_DIR for
+  scripts/browser-smoke.mjs. They are not repository dependencies, because CI runs `npm ci`
+  against the lockfile. One copy for the deploy job, the manual run, and the pull-request run.
+runs:
+  using: composite
+  steps:
+    - name: Install Playwright and axe-core
+      shell: bash
+      run: |
+        set -euo pipefail
+        dir="$RUNNER_TEMP/browser"
+        mkdir -p "$dir"
+        cd "$dir"
+        npm init -y > /dev/null
+        # Exact versions. A failed install also lands as an annotation, because logs are not
+        # always reachable for the reader.
+        npm i --no-audit --no-fund --save-exact playwright@1.55.0 axe-core@4.10.3 > npm.log 2>&1 \
+          || { echo "::error title=Browser install::npm i failed: $(tail -c 600 npm.log | tr '\n' ' ')"; exit 1; }
+        npx playwright install --with-deps chromium > pw.log 2>&1 \
+          || { echo "::error title=Browser install::playwright install failed: $(tail -c 600 pw.log | tr '\n' ' ')"; exit 1; }
+        echo "BROWSER_DEPS_DIR=$dir" >> "$GITHUB_ENV"

@@ -5,6 +5,7 @@ import { utcSeconds } from "./ids";
 import type { Policy } from "./policy";
 import { MEDIA_MATCH_ACTOR } from "./quarantine";
 import { VISIBLE_POST } from "./visibility";
+import { DEFAULT_ACCURACY_MIN_REVIEWED, DEFAULT_ACCURACY_PERCENT, DEFAULT_ACCURACY_WINDOW } from "./seats";
 
 type GaugeEnv = Pick<Env, "DB" | "QUOTA">;
 
@@ -196,8 +197,8 @@ function reactionLine(gauge: ReactionGauge): string {
 }
 
 async function readSeats(db: D1Database, policy: Policy): Promise<SeatGauge[]> {
-  const window = policy.review?.seat_accuracy_window ?? 100;
-  const minimum = policy.review?.seat_accuracy_min_reviewed ?? 5;
+  const window = policy.review?.seat_accuracy_window ?? DEFAULT_ACCURACY_WINDOW;
+  const minimum = policy.review?.seat_accuracy_min_reviewed ?? DEFAULT_ACCURACY_MIN_REVIEWED;
   const seats = await db.prepare(
     "SELECT seat, seat_state, seat_agent_id FROM admin_seats ORDER BY seat",
   ).all<{ seat: number; seat_state: string; seat_agent_id: string | null }>();
@@ -356,7 +357,7 @@ export function gaugesSection(data: Gauges, analytics: AnalyticsResult, policy: 
   const categories = data.scans.categories.length === 0
     ? "none"
     : data.scans.categories.map(([code, count]) => `${escapeHtml(code)} ${count}`).join(", ");
-  const target = policy.review?.seat_accuracy_percent ?? 70;
+  const target = policy.review?.seat_accuracy_percent ?? DEFAULT_ACCURACY_PERCENT;
   const seats = data.seats.map((seat) => {
     const agent = seat.agentId === null ? "unbound" : `<code>${escapeHtml(seat.agentId)}</code>`;
     const accuracy = seat.accuracy === null

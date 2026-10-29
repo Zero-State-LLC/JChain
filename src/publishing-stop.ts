@@ -1,11 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { htmlError, htmlResult } from "./html";
 import { errorResponse, jsonResponse, type ErrorCode } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import { parsePolicy, type Policy } from "./policy";
+import { parsePolicy } from "./policy";
 import { requireModerator } from "./principal";
+import type { AppEnv, Ctx } from "./hono-env";
+import { readFormOrJson } from "./forms";
 
 const KEY = "engaged";
 
@@ -30,9 +32,6 @@ export async function publishingStopEngaged(env: Env): Promise<boolean> {
 export async function clearPublishingStop(env: Env): Promise<void> {
   await env.PUBLISHING_STOP.getByName("global").clear();
 }
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
 
 type Format = "json" | "html";
 
@@ -82,20 +81,9 @@ async function setPublishingStop(c: Ctx, format: Format): Promise<Response> {
 }
 
 async function readEngaged(request: Request): Promise<{ ok: true; engaged: boolean } | { ok: false }> {
-  const type = request.headers.get("content-type");
-  if (type === null) return { ok: false };
-  const lower = type.toLowerCase();
-  if (lower.startsWith("application/json")) {
-    const body = await readObject(request);
-    if (!body.ok) return { ok: false };
-    return parseEngaged(body.value, false);
-  }
-  if (lower.startsWith("application/x-www-form-urlencoded")) {
-    const body = await readForm(request);
-    if (!body.ok) return { ok: false };
-    return parseEngaged(body.value, true);
-  }
-  return { ok: false };
+  const body = await readFormOrJson(request);
+  if (!body.ok) return { ok: false };
+  return parseEngaged(body.value, body.form);
 }
 
 function parseEngaged(
@@ -109,31 +97,4 @@ function parseEngaged(
   if (form && engaged === "true") return { ok: true, engaged: true };
   if (form && engaged === "false") return { ok: true, engaged: false };
   return { ok: false };
-}
-
-async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return { ok: false };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-  return { ok: true, value: parsed as Record<string, unknown> };
-}
-
-async function readForm(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  let text: string;
-  try {
-    text = new TextDecoder().decode(await request.arrayBuffer());
-  } catch {
-    return { ok: false };
-  }
-  const params = new URLSearchParams(text);
-  const value: Record<string, unknown> = {};
-  for (const [key, item] of params.entries()) {
-    if (Object.hasOwn(value, key)) return { ok: false };
-    value[key] = item;
-  }
-  return { ok: true, value };
 }

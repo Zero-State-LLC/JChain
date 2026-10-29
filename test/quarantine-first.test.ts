@@ -612,8 +612,10 @@ describe("AT-76 Moderator email", () => {
     await runRetention(mailEnv, start);
     expect(sent).toHaveLength(6);
     expect(sent.at(-1)?.text).toContain("2 quarantined Posts are waiting");
-    // A second run the same day sends nothing.
-    await runRetention(mailEnv, start + 60 * 60 * 1000);
+    // A second run the same UTC day sends nothing. An hour later, or the last second of the day
+    // when the test starts within an hour of midnight, so the run never crosses into tomorrow.
+    const endOfDay = Math.floor(start / 86_400_000) * 86_400_000 + 86_400_000 - 1000;
+    await runRetention(mailEnv, Math.min(start + 60 * 60 * 1000, endOfDay));
     expect(sent).toHaveLength(6);
     // 24 hours later it sends again, with no Durable Object cleared.
     await runRetention(mailEnv, start + 24 * 60 * 60 * 1000);

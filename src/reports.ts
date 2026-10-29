@@ -1,10 +1,10 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { dropPublishedCopies } from "./feeds";
 import { htmlError, htmlResult } from "./html";
 import { characterLength, errorResponse, jsonResponse, type ErrorCode } from "./http";
 import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
-import { parsePolicy, type Policy } from "./policy";
+import { parsePolicy } from "./policy";
 import { canonicalReason } from "./moderation";
 import { alertAfterResponse } from "./moderator-alert";
 import { accessEmail, requireAgent } from "./principal";
@@ -12,9 +12,8 @@ import { quarantineStatements } from "./quarantine";
 import { currentSession } from "./session";
 import { turnstileSecret, verifyTurnstile } from "./turnstile";
 import { visibleBoardSlug, visibleReportTarget } from "./visibility";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
+import { readFormOrJson } from "./forms";
 
 export const REPORT_REASONS = [
   "spam",
@@ -76,7 +75,7 @@ async function report(c: Ctx, format: Format): Promise<Response> {
     return reportError(c, requestId, format, "forbidden");
   }
 
-  const parsed = await readReport(c.req.raw);
+  const parsed = await readFormOrJson(c.req.raw);
   if (!parsed.ok) return reportError(c, requestId, format, "malformed");
   const body = parseReport(parsed.value);
   if (!body.ok) return reportError(c, requestId, format, body.code);
@@ -246,40 +245,4 @@ function parseReport(
     detail,
     token,
   };
-}
-
-async function readReport(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  const type = request.headers.get("content-type");
-  if (type === null) return { ok: false };
-  const lower = type.toLowerCase();
-  if (lower.startsWith("application/json")) return readObject(request);
-  if (lower.startsWith("application/x-www-form-urlencoded")) return readForm(request);
-  return { ok: false };
-}
-
-async function readObject(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return { ok: false };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-  return { ok: true, value: parsed as Record<string, unknown> };
-}
-
-async function readForm(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  let text: string;
-  try {
-    text = new TextDecoder().decode(await request.arrayBuffer());
-  } catch {
-    return { ok: false };
-  }
-  const params = new URLSearchParams(text);
-  const value: Record<string, unknown> = {};
-  for (const [key, item] of params.entries()) {
-    if (Object.hasOwn(value, key)) return { ok: false };
-    value[key] = item;
-  }
-  return { ok: true, value };
 }

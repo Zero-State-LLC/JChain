@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import {
   OWNER_ISSUES,
   RESUME,
@@ -13,12 +13,10 @@ import {
 import { errorResponse, jsonResponse } from "./http";
 import { isUuidV7 } from "./ids";
 import { sameOrigin } from "./origin";
-import type { Policy } from "./policy";
 import { requireAgent, requireModerator, requireOperator } from "./principal";
+import type { AppEnv, Ctx } from "./hono-env";
 
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
 type App = Hono<AppEnv>;
-type Ctx = Context<AppEnv>;
 
 export function mountCredentials(app: App): void {
   app.post("/v1/credentials/:id/revoke", revoke);

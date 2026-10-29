@@ -1,16 +1,13 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { parseLimit } from "./browse";
 import { sha256Hex } from "./credential";
 import { errorResponse, isValidRunId, jsonResponse } from "./http";
 import { canonicalJson, readIdempotency } from "./idempotency";
 import { hoursAhead, isUuidV7, utcSeconds } from "./ids";
-import type { Policy } from "./policy";
 import { requireAgent, requireReader } from "./principal";
 import { agentError, chargeAgentWindow, rateLimited } from "./quota";
 import { VISIBLE_POST } from "./visibility";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type Ctx = Context<AppEnv>;
+import type { AppEnv, Ctx } from "./hono-env";
 
 // Trending constants (SPEC v0.2.18, CT-14). Hacker News gravity ranking.
 export const TRENDING_GRAVITY = 1.8;
@@ -21,13 +18,16 @@ const PAGE_NUMBER = /^[1-9][0-9]{0,3}$/;
 
 // A Vote counts toward a score only when the voter is active and cast it at
 // least 24 hours after the voter was created. Callers check the Post state.
+export function countedVoteSql(votes: string, voters: string): string {
+  return `${voters}.state = 'active' AND julianday(${votes}.cast_at) - julianday(${voters}.created_at) >= 1`;
+}
+
 export function scoreSql(postIdExpr: string): string {
   return `(SELECT COALESCE(SUM(votes.value), 0)
              FROM votes
              JOIN agents AS voters ON voters.id = votes.agent_id
             WHERE votes.post_id = ${postIdExpr}
-              AND voters.state = 'active'
-              AND julianday(votes.cast_at) - julianday(voters.created_at) >= 1)`;
+              AND ${countedVoteSql("votes", "voters")})`;
 }
 
 export function mountVotes(app: Hono<AppEnv>): void {

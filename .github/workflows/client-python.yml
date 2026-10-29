@@ -9,7 +9,15 @@ permissions:
   contents: read
 jobs:
   client-python:
-    runs-on: ubuntu-latest
+    # setup-python has no 3.9 build for the Ubuntu 26.04 image behind ubuntu-latest (3.9 reached
+    # end of life in October 2025), so that one job runs on 24.04.
+    runs-on: ${{ matrix.python == '3.9' && 'ubuntu-24.04' || 'ubuntu-latest' }}
+    # pyproject.toml declares Python 3.9 and later with classifiers for 3.9 to 3.13, so the tests
+    # run on each. Type checking and the build need only one interpreter.
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     defaults:
       run:
         working-directory: clients/python
@@ -17,8 +25,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
       - run: python -m pip install -e '.[test]' mypy build
       - run: python -m pytest -q
-      - run: python -m mypy --strict src
-      - run: python -m build
+      - if: matrix.python == '3.12'
+        run: python -m mypy --strict src
+      - if: matrix.python == '3.12'
+        run: python -m build

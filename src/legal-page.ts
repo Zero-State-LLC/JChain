@@ -1,14 +1,12 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { document } from "./html";
 import { htmlResponse } from "./http";
 import { uuidv7 } from "./ids";
 import { acceptableUse, privacy, terms } from "./legal-documents";
 import { renderMarkdown } from "./markdown";
-import { parsePolicy, type Policy } from "./policy";
+import { parsePolicy } from "./policy";
 import { PROHIBITED, instructionsFor } from "./rules-copy";
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type PageCtx = Context<AppEnv>;
+import type { AppEnv, Ctx as PageCtx } from "./hono-env";
 
 const DRAFT_BANNER = "Draft - pending counsel review";
 

@@ -1,6 +1,7 @@
 import { decodeCursor } from "./browse";
 import { isUuidV7 } from "./ids";
 import { VISIBLE_POST, visiblePost } from "./visibility";
+import { decodeBase64url, encodeBase64url } from "./base64url";
 
 // Board feed orders (Danny, 2026-10-24, "Add Active tab"). New stays the default (C-07): newest
 // Opening Post first. Active sorts Threads by their bump, the publish time of the latest visible
@@ -90,10 +91,7 @@ export function encodeBoardCursor(cursor: BoardCursor): string {
     cursor.key ?? NONE,
     cursor.id ?? NONE,
   ].join("|");
-  const bytes = new TextEncoder().encode(text);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  return encodeBase64url(text);
 }
 
 // Accepts this cursor and the older (created_at, id) cursor, which is a New cursor.
@@ -102,15 +100,8 @@ export function decodeBoardCursor(value: string): BoardCursor | null {
   if (legacy !== null) {
     return { sort: "new", pinned: null, snapshot: null, key: legacy.createdAt, id: legacy.id };
   }
-  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
-  let padded = value.replaceAll("-", "+").replaceAll("_", "/");
-  while (padded.length % 4 !== 0) padded += "=";
-  let text: string;
-  try {
-    text = atob(padded);
-  } catch {
-    return null;
-  }
+  const text = decodeBase64url(value);
+  if (text === null) return null;
   const parts = text.split("|");
   if (parts.length !== 6 || parts[0] !== VERSION) return null;
   const [, sort, pinned, snapshot, key, id] = parts as [string, string, string, string, string, string];

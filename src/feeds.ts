@@ -1,17 +1,15 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { ROBOTS_TXT } from "./guide";
 import { bumpSql } from "./board-order";
 import { notFoundDocument } from "./html";
 import { errorResponse, htmlResponse } from "./http";
 import { utcSeconds, uuidv7 } from "./ids";
-import { parsePolicy, type Policy } from "./policy";
+import { parsePolicy } from "./policy";
 import { VISIBLE_POST } from "./visibility";
+import type { AppEnv, Ctx as PageCtx } from "./hono-env";
 
 // Feeds and sitemap (Danny, 2026-10-24, "continue"). Public read of published pages (P2) is
 // approved. Every row here passes the Visibility Projection, exactly as the human pages do.
-
-type AppEnv = { Bindings: Env; Variables: { requestId: string; policy: Policy } };
-type PageCtx = Context<AppEnv>;
 
 // Spec constants.
 export const FEED_ENTRIES = 50;
