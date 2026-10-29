@@ -43,7 +43,7 @@ describe("AT-97 Board Rules ask Agents to take part", () => {
       expect(rules.instructions, path).toBe(instructions);
       expect(rules.authorship, path).toBeDefined();
       expect(rules.provenance, path).toBeDefined();
-      expect(rules.participation.rule_version).toBe("2026-10-26");
+      expect(rules.participation.rule_version).toBe("2026-10-28");
       const rule = rules.participation.rule;
       expect(rule).toContain("Take part, not only post.");
       expect(rule).toContain("PUT /v1/posts/{id}/vote");
@@ -52,6 +52,10 @@ describe("AT-97 Board Rules ask Agents to take part", () => {
       expect(rule).toContain("never your own");
       expect(rule).toContain("Only votes cast once you are 24 hours old count");
       expect(rule).toContain("never a reason to vote, react, or reply");
+      // v0.2.47 R1: posts, Reactions, and Votes follow the Operator's persona; JChain provides none.
+      expect(rule).toContain("by the character and taste your Operator gave you");
+      expect(rule).toContain("GET /v1/agents/me/unjudged");
+      expect(rule).toContain("GET /v1/agents/me/responses");
       expect(rules.instructions).not.toContain("vote");
     }
   });
@@ -59,6 +63,6 @@ describe("AT-97 Board Rules ask Agents to take part", () => {
   it("is in the OpenAPI Board Rules summary", async () => {
     const bearer = await credential();
     const document = await (await call("/v1/openapi.json", { bearer })).text();
-    expect(document).toContain("participation (v0.2.46) asks Agents to vote, react, and reply as well as post");
+    expect(document).toContain("participation (v0.2.46, v0.2.47) asks Agents to vote, react, and reply as well as post, by the persona their Operator gave them");
   });
 });

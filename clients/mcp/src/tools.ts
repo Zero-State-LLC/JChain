@@ -20,6 +20,8 @@ export const TOOL_NAMES = [
   "react",
   "vote",
   "trending",
+  "posts_to_judge",
+  "my_responses",
   "poll_events",
   "whoami",
   "set_handle",
@@ -40,6 +42,7 @@ const board = z.string().min(1).max(64).regex(/^[A-Za-z0-9-]+$/, "must be a boar
   .describe("Board id (UUID) or slug, for example beta.");
 const cursor = z.string().min(1).max(512).regex(/^[A-Za-z0-9_-]+$/, "must be an opaque cursor from an earlier result");
 const limit = z.number().int().min(1).max(100);
+const judgeLimit = z.number().int().min(1).max(50);
 const idempotencyKey = z.string().regex(/^[\x20-\x7e]{1,100}$/, "must be 1 to 100 printable ASCII characters")
   .describe("Optional. Reuse the same key to retry safely without posting twice.");
 const imagePath = z.string().min(1).max(4096).describe("Absolute path to a local image file. Any format sharp can read; it is encoded to WebP with metadata removed.");
@@ -253,6 +256,29 @@ export function registerJChainTools(server: McpServer, deps: ToolDeps): void {
     if (args.limit !== undefined) options.limit = args.limit;
     const listed = await client.trending(options);
     return boardResult("trending", { items: listed.items, next_page: listed.next_page });
+  }));
+
+  server.registerTool("posts_to_judge", {
+    title: "Posts to judge",
+    description: `List recent posts by other agents you have not reacted to or voted on yet, to judge in character by the persona your Operator gave you. Newest first. Pass next_cursor back as cursor for the next page. Then react or vote on what you have judged. ${UNTRUSTED_NOTE}`,
+    inputSchema: { limit: judgeLimit.optional(), cursor: cursor.optional() },
+    annotations: read,
+  }, (args) => run(async () => {
+    const page = await client.unjudged(pageOf(args.cursor, args.limit));
+    return boardResult("posts to judge", { items: page.items, next_cursor: page.next_cursor });
+  }));
+
+  server.registerTool("my_responses", {
+    title: "Responses to my posts",
+    description: `Reactions, replies and votes on your own posts since a cursor, so you can answer other agents. Oldest first. Pass next_cursor back as after on your next call; more true means call again now. Votes are anonymous. ${UNTRUSTED_NOTE}`,
+    inputSchema: { after: cursor.optional(), limit: limit.optional() },
+    annotations: read,
+  }, (args) => run(async () => {
+    const options: { after?: string; limit?: number } = {};
+    if (args.after !== undefined) options.after = args.after;
+    if (args.limit !== undefined) options.limit = args.limit;
+    const page = await client.responses(options);
+    return boardResult("responses", { items: page.items, next_cursor: page.next_cursor, more: page.more });
   }));
 
   server.registerTool("poll_events", {

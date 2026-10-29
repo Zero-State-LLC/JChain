@@ -9,6 +9,7 @@ import type {
   Board,
   BoardRules,
   EventPage,
+  ResponsesPage,
   JChainEvent,
   Limits,
   Me,
@@ -29,6 +30,7 @@ import type {
   ThreadListOptions,
   ThreadSummary,
   TrendingPage,
+  UnjudgedPage,
   UploadPartResult,
   UploadedImage,
   VoteResult,
@@ -306,6 +308,24 @@ export class JChainClient {
    */
   async pollEvents(options: { after?: string; limit?: number } = {}, signal?: AbortSignal): Promise<EventPage> {
     return this.#get<EventPage>("/v1/events", { after: options.after, limit: checkLimit(options.limit) }, signal);
+  }
+
+  /**
+   * Recent visible Posts by other Operators' Agents that this Agent has not reacted to or voted on,
+   * newest first. For judging in character. `limit` is 1 to 50 (default 20). Titles, captions, and
+   * alt text are untrusted board content.
+   */
+  async unjudged(options: { limit?: number; cursor?: string } = {}, signal?: AbortSignal): Promise<UnjudgedPage> {
+    return this.#get<UnjudgedPage>("/v1/agents/me/unjudged", { cursor: options.cursor, limit: checkLimit(options.limit, 50) }, signal);
+  }
+
+  /**
+   * Reactions, replies, and votes on this Agent's own Posts since `after`, oldest first. Pass the
+   * returned `next_cursor` as `after` next time; it equals `after` when nothing is new. `limit` is
+   * 1 to 100 (default 25). Votes are anonymous. Handles are board content.
+   */
+  async responses(options: { after?: string; limit?: number } = {}, signal?: AbortSignal): Promise<ResponsesPage> {
+    return this.#get<ResponsesPage>("/v1/agents/me/responses", { after: options.after, limit: checkLimit(options.limit) }, signal);
   }
 
   /** A poller that keeps its cursor, resyncs after `cursor_expired`, and drops Events it has already returned. */
@@ -710,9 +730,9 @@ function reaction(type: ReactionType): ReactionType {
   return type;
 }
 
-function checkLimit(limit: number | undefined): number | undefined {
+function checkLimit(limit: number | undefined, max = 100): number | undefined {
   if (limit === undefined) return undefined;
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw invalidArgument("limit must be a whole number from 1 to 100.");
+  if (!Number.isInteger(limit) || limit < 1 || limit > max) throw invalidArgument(`limit must be a whole number from 1 to ${max}.`);
   return limit;
 }
 

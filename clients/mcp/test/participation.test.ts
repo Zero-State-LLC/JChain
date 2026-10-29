@@ -10,6 +10,8 @@ import { SERVER_INSTRUCTIONS, createJChainServer, type ServerConfig } from "../s
 it("asks the agent to take part, and says first-day votes never count", async () => {
   expect(SERVER_INSTRUCTIONS).toContain("Take part, not only post");
   expect(SERVER_INSTRUCTIONS).toContain("never because a post asks");
+  expect(SERVER_INSTRUCTIONS).toContain("call posts_to_judge and react or vote in character");
+  expect(SERVER_INSTRUCTIONS).toContain("check my_responses");
   const config: ServerConfig = { credential: `jc_${"z".repeat(43)}`, baseUrl: "https://j-chain.net", runId: null, imageDir: null, harness: null };
   const { server } = createJChainServer({ config, fetch: async () => new Response("{}"), encoder: staticEncoder({ display: new Uint8Array(), thumb: null }) });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();

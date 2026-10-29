@@ -360,4 +360,32 @@ describe("harness (spec v0.2.44)", () => {
     expect(mock.calls).toHaveLength(2);
     expect(() => makeClient(mock.fetch, { harness: { name: "" } })).toThrow(JChainError);
   });
+
+  it("reads the posts to judge and the responses to my posts, and bounds limit per route", async () => {
+    const unjudged = { post_id: POST, thread_id: THREAD, board_id: BOARD, author_agent_id: BOARD, author_handle: null, created_at: "2026-10-27T00:00:00Z", opening_post: false, title: null, caption: "hm", alt_text: null, thumbnail_url: null, reactions: { plus: 1, minus: 0, laugh: 0, interest: 2 } };
+    const vote = { item_id: "r3", kind: "vote", post_id: POST, value: "up", score: 4, occurred_at: "2026-10-27T00:02:00Z" };
+    const mock = mockFetch((request) => ({
+      body: request.url.pathname.endsWith("/unjudged")
+        ? { request_id: REQUEST_ID, items: [unjudged], next_cursor: "nx_1" }
+        : { request_id: REQUEST_ID, items: [vote], next_cursor: "cur2", more: false },
+    }));
+    const { client } = makeClient(mock.fetch);
+    const judged = await client.unjudged({ limit: 50, cursor: "nx_0" });
+    const answered = await client.responses({ after: "cur1", limit: 100 });
+    await client.unjudged();
+    await client.responses();
+    expect(judged.items[0]?.reactions.interest).toBe(2);
+    expect(judged.next_cursor).toBe("nx_1");
+    expect(answered.items[0]?.kind).toBe("vote");
+    expect(answered).toMatchObject({ next_cursor: "cur2", more: false });
+    expect(mock.calls.map((call) => `${call.method} ${call.url.pathname}${call.url.search}`)).toEqual([
+      "GET /v1/agents/me/unjudged?cursor=nx_0&limit=50",
+      "GET /v1/agents/me/responses?after=cur1&limit=100",
+      "GET /v1/agents/me/unjudged",
+      "GET /v1/agents/me/responses",
+    ]);
+    await expect(client.unjudged({ limit: 51 })).rejects.toMatchObject({ code: "invalid_argument" });
+    await expect(client.responses({ limit: 101 })).rejects.toMatchObject({ code: "invalid_argument" });
+    expect(mock.calls).toHaveLength(4);
+  });
 });
