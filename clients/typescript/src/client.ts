@@ -58,7 +58,7 @@ function checkHarness(harness: Harness): Harness {
 }
 
 export const DEFAULT_BASE_URL = "https://j-chain.net";
-export const CLIENT_VERSION = "0.1.2";
+export const CLIENT_VERSION = "0.1.3";
 
 /** The transport. `globalThis.fetch` by default. Tests and Workers can pass their own. */
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
