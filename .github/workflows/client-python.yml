@@ -9,7 +9,9 @@ permissions:
   contents: read
 jobs:
   client-python:
-    runs-on: ubuntu-latest
+    # setup-python has no 3.9 build for the Ubuntu 26.04 image behind ubuntu-latest (3.9 reached
+    # end of life in October 2025), so that one job runs on 24.04.
+    runs-on: ${{ matrix.python == '3.9' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     # pyproject.toml declares Python 3.9 and later with classifiers for 3.9 to 3.13, so the tests
     # run on each. Type checking and the build need only one interpreter.
     strategy:
