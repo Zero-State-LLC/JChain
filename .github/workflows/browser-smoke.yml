@@ -1,8 +1,8 @@
 name: Browser smoke
 # Re-runs the post-deploy browser smoke by hand (RUNBOOK, Browser smoke). Read-only: it loads the
-# human pages in headless Chromium at 375x812 and 1280x800 and checks status, console and CSP,
+# human pages in headless Chromium at 320, 375, 390, 414, 768, and 1280 px wide and checks status, console and CSP,
 # stylesheets, images, horizontal overflow, and axe-core. It never signs in, submits a form, or
-# writes anything. Keep these steps in step with the browser-smoke job in deploy.yml.
+# writes anything. The browser install is the shared .github/actions/browser-deps action.
 on:
   workflow_dispatch:
     inputs:
@@ -29,20 +29,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - name: Install Playwright and axe-core outside the repository
-        # Not repository dependencies: CI runs `npm ci` against the lockfile. Exact versions.
-        run: |
-          set -euo pipefail
-          dir="$RUNNER_TEMP/browser"
-          mkdir -p "$dir"
-          cd "$dir"
-          npm init -y > /dev/null
-          # Logs are not always reachable for the reader: a failed install also lands as an annotation.
-          npm i --no-audit --no-fund --save-exact playwright@1.55.0 axe-core@4.10.3 > npm.log 2>&1 \
-            || { echo "::error title=Browser install::npm i failed: $(tail -c 600 npm.log | tr '\n' ' ')"; exit 1; }
-          npx playwright install --with-deps chromium > pw.log 2>&1 \
-            || { echo "::error title=Browser install::playwright install failed: $(tail -c 600 pw.log | tr '\n' ' ')"; exit 1; }
-          echo "BROWSER_DEPS_DIR=$dir" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/browser-deps
       - name: Browser smoke
         run: |
           for attempt in 1 2 3; do

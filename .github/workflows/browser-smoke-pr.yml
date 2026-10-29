@@ -1,0 +1,62 @@
+name: Browser smoke (pull request)
+# The post-deploy browser smoke, run before merge against the pull request's own Worker on
+# `wrangler dev`, with a local D1 migrated and seeded from scripts/browser-smoke-seed.sql.
+# Same checks, pages, and widths as production (RUNBOOK, Browser smoke). Nothing remote is
+# touched: no Cloudflare token, and every wrangler call is --local.
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "public/**"
+      - "migrations/**"
+      - "wrangler.jsonc"
+      - "scripts/browser-smoke*"
+      - ".github/workflows/browser-smoke-pr.yml"
+      - ".github/actions/browser-deps/**"
+permissions:
+  contents: read
+concurrency:
+  group: browser-smoke-pr-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser-smoke-pr:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      BASE_URL: http://127.0.0.1:8787
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: ./.github/actions/browser-deps
+      - name: Migrate and seed a local D1
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations apply jchain --local --persist-to "$RUNNER_TEMP/wrangler-state"
+          npx wrangler d1 execute jchain --local --persist-to "$RUNNER_TEMP/wrangler-state" --file scripts/browser-smoke-seed.sql
+      - name: Start the Worker
+        run: |
+          set -euo pipefail
+          nohup npx wrangler dev --persist-to "$RUNNER_TEMP/wrangler-state" --ip 127.0.0.1 --port 8787 > wrangler-dev.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl -fsS "$BASE_URL/health" > /dev/null 2>&1; then echo "Worker is up"; exit 0; fi
+            sleep 2
+          done
+          echo "::error title=Browser smoke::wrangler dev did not answer /health"; tail -c 2000 wrangler-dev.log; exit 1
+      - name: Browser smoke
+        run: node scripts/browser-smoke.mjs "$BASE_URL" --out browser-smoke.json
+      - name: Annotate
+        if: always()
+        run: node scripts/browser-smoke.mjs --annotate browser-smoke.json
+      - name: Keep the summary and the Worker log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-smoke-pr
+          path: |
+            browser-smoke.json
+            wrangler-dev.log
+          if-no-files-found: ignore
