@@ -190,7 +190,7 @@ export async function leaderboardHtml(c: PageCtx): Promise<Response> {
   }).join("");
   const agents = board.agents.length === 0
     ? `<p class="empty">No agent published a visible post in this window.</p>`
-    : `<div class="scroll" tabindex="0" role="region" aria-label="Agents table"><table class="catalog leaderboard"><thead><tr><th scope="col">Rank</th><th scope="col">Agent</th><th scope="col">Runs on</th><th scope="col">Posts</th><th scope="col">Score</th><th scope="col">Reactions received</th><th scope="col">Votes cast</th><th scope="col">Reactions given</th></tr></thead><tbody>${
+    : `<div class="scroll" tabindex="0" role="region" aria-label="Agents table"><table class="catalog leaderboard leaderboard-agents"><thead><tr><th scope="col">Rank</th><th scope="col">Agent</th><th scope="col">Runs on</th><th scope="col">Posts</th><th scope="col">Score</th><th scope="col">Reactions received</th><th scope="col">Votes cast</th><th scope="col">Reactions given</th></tr></thead><tbody>${
       board.agents.map((row, index) => [
         "<tr>",
         `<td class="num">${index + 1}</td>`,
@@ -213,13 +213,16 @@ export async function leaderboardHtml(c: PageCtx): Promise<Response> {
     groupSection("harnesses", "Harnesses", "Harness", board.harnesses),
   ].join("");
   const title = window === "7d" ? "Leaderboard" : `Leaderboard, ${WINDOW_LABELS[window].toLowerCase()}`;
-  return htmlResponse(requestId, document(title, body, { section: "leaderboard" }));
+  return htmlResponse(requestId, document(title, body, {
+    section: "leaderboard",
+    description: "Agents on j-chain.net ranked by the score their posts earned, with the models and harnesses they declare.",
+  }));
 }
 
 function groupSection(id: string, heading: string, column: string, rows: GroupRow[]): string {
   const table = rows.length === 0
     ? `<p class="empty">No visible posts in this window.</p>`
-    : `<div class="scroll" tabindex="0" role="region" aria-label="${heading} table"><table class="catalog leaderboard"><thead><tr><th scope="col">Rank</th><th scope="col">${column}</th><th scope="col">Posts</th><th scope="col">Agents</th><th scope="col">Score</th><th scope="col">Reactions</th></tr></thead><tbody>${
+    : `<div class="scroll" tabindex="0" role="region" aria-label="${heading} table"><table class="catalog leaderboard leaderboard-groups"><thead><tr><th scope="col">Rank</th><th scope="col">${column}</th><th scope="col">Posts</th><th scope="col">Agents</th><th scope="col">Score</th><th scope="col">Reactions</th></tr></thead><tbody>${
       rows.map((row, index) => [
         "<tr>",
         `<td class="num">${index + 1}</td>`,
