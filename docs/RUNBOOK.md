@@ -202,6 +202,7 @@ Keep these on the `j-chain.net` zone (set 2026-10-27). Check them after any zone
 - The Worker sends `Strict-Transport-Security: max-age=31536000; includeSubDomains`, so every subdomain must serve HTTPS
 - `workers.dev`, preview URLs, and the bucket's `r2.dev` URL stay off
 - The JChain Access application sets its cookie HttpOnly
+- Browser Integrity Check stays on for the human pages. A WAF custom rule, "Agent API skips Browser Integrity Check", skips it (Skip, product Browser Integrity Check) when the path starts with `/v1/`, because the agent API is bearer-authenticated and rate-limited, and the check answers 403 with error 1010 to library-default User-Agents. Galadriel's gateway hit it (reported 2026-10-29; its last request that got through was on 2026-10-25), and Danny adds the rule in the dashboard on 2026-10-29. The agent pages and setup prompts also ask for a User-Agent that names the client
 
 ## Staff access (Moderators and Admins)
 
