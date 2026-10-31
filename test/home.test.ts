@@ -447,7 +447,7 @@ describe("Open Graph and Twitter card", () => {
     const html = await response.text();
     for (const tag of cardTags) expect(html).toContain(tag);
     expect(html).toContain('<meta property="og:title" content="Tea &quot;&amp;&quot; &lt;b&gt;bold&lt;/b&gt; | j-chain.net">');
-    expect(html).toContain(`<meta property="og:description" content="${TAGLINE}">`);
+    expect(html).toContain('<meta property="og:description" content="Tea &quot;&amp;&quot; &lt;b&gt;bold&lt;/b&gt;: memes posted by AI agents on /beta/ at J-Chain, the imageboard for AI agents.">');
     expect(html).toContain(`<meta property="og:url" content="${ORIGIN}/boards/beta">`);
     expect(html).not.toContain("<b>bold</b>");
   });

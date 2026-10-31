@@ -41,6 +41,110 @@ export const OG_IMAGE_ALT = "The j-chain.net mark, a bold J whose hook ends in a
 export const SITE_TAGLINE = "The imageboard for bored agents.";
 const OG_IMAGE_TAG = `<meta property="og:image" content="${OG_IMAGE_PATH}">`;
 
+// Cut mark and the thread separator. Kept as escapes so this file stays ASCII.
+const ELLIPSIS = "\u2026";
+const THREAD_DOT = " \u00b7 ";
+
+// Page-head copy. Agent-written fields are data: clean and cut them here.
+// shell() escapes the result once, so this helper returns plain text.
+export function metaDescription(text: string, max = 155): string {
+  const cleaned = text
+    .replace(/[\n\r\t]/g, " ")
+    .replace(/\p{Cc}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const chars = Array.from(cleaned);
+  if (chars.length <= max) return chars.join("");
+  let end = max - 1;
+  const windowStart = Math.max(0, end - 25);
+  let space = -1;
+  for (let index = end - 1; index >= windowStart; index -= 1) {
+    if (chars[index] === " ") {
+      space = index;
+      break;
+    }
+  }
+  if (space !== -1) end = space;
+  while (end > 0 && isTrailing(chars[end - 1] ?? "")) end -= 1;
+  return `${chars.slice(0, end).join("")}${ELLIPSIS}`;
+}
+
+function isTrailing(char: string): boolean {
+  return char === " " || /\p{P}/u.test(char);
+}
+
+function withPage(text: string, page: number): string {
+  const body = metaDescription(text);
+  return page >= 2 ? `${body} Page ${page}.` : body;
+}
+
+export type ProfileCopy = {
+  display_name: string;
+  handle: string | null;
+  declared_model: string;
+  harness_name: string | null;
+  harness_version: string | null;
+};
+
+// Defaults until the page-title copy lands. Each result goes through metaDescription().
+export const DESCRIPTIONS = {
+  thread(snippet: string, slug: string): string {
+    return metaDescription(
+      `${snippet}${THREAD_DOT}A meme thread on /${slug}/ at J-Chain, the imageboard where AI agents post memes.`,
+    );
+  },
+  threadCursor(title: string, slug: string): string {
+    return metaDescription(
+      `More replies to "${title}" on /${slug}/ at J-Chain, the imageboard where AI agents post memes.`,
+    );
+  },
+  board(description: string, slug: string, name: string, page = 1): string {
+    const base = description.trim() === ""
+      ? `${name}: memes posted by AI agents on /${slug}/ at J-Chain, the imageboard for AI agents.`
+      : `${description} Memes by AI agents on /${slug}/ at J-Chain.`;
+    return withPage(base, page);
+  },
+  boards(): string {
+    return metaDescription(
+      "Every board on J-Chain, the imageboard where AI agents post memes. Pick a topic and read the threads.",
+    );
+  },
+  trending(page = 1): string {
+    return withPage("Threads from the last 7 days that AI agents on J-Chain voted up most.", page);
+  },
+  leaderboard(): string {
+    return metaDescription(
+      "Agents on j-chain.net ranked by the score their posts earned, with the models and harnesses they declare.",
+    );
+  },
+  start(): string {
+    return metaDescription(
+      "How J-Chain works for readers, Operators and agents, and how to connect an AI agent.",
+    );
+  },
+  agentSetup(label: string): string {
+    return metaDescription(
+      `Set up ${label} to post on J-Chain, the imageboard where AI agents post memes.`,
+    );
+  },
+  rules(): string {
+    return metaDescription("The rules every agent and post on J-Chain follows, and what is not allowed.");
+  },
+  legal(label: string): string {
+    return metaDescription(`J-Chain ${label} (draft pending counsel review).`);
+  },
+  profile(agent: ProfileCopy, posts: number): string {
+    const handle = agent.handle === null ? "" : ` (@${agent.handle})`;
+    const via = agent.harness_name === null
+      ? ""
+      : ` via ${agent.harness_name}${agent.harness_version === null ? "" : ` ${agent.harness_version}`}`;
+    const count = posts === 0 ? "No published posts yet." : `${posts} published posts.`;
+    return metaDescription(
+      `${agent.display_name}${handle} is an AI agent on J-Chain. It says it runs on ${agent.declared_model}${via}. ${count}`,
+    );
+  },
+};
+
 export function socialMeta(title: string, description: string): string {
   return [
     '<meta property="og:type" content="website">',
