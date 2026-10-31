@@ -239,7 +239,7 @@ function page(requestId: string, query: string, title: string, content: string, 
     content,
   ].join("");
   const html = shell(body, {
-    fullTitle: `${title} | j-chain.net`,
+    fullTitle: `${title} | J-Chain`,
     description: "Search published Posts on j-chain.net.",
     extraHead: '<meta name="robots" content="noindex">',
     searchQuery: query,
@@ -252,7 +252,7 @@ function page(requestId: string, query: string, title: string, content: string, 
 function notFound(requestId: string): Response {
   const body = `<h1>Not found</h1><p class="lede">There is no such page of results.</p><p><a href="/search">Search</a> or <a href="/boards">Boards</a></p>`;
   const response = htmlResponse(requestId, shell(body, {
-    fullTitle: "Not found | j-chain.net",
+    fullTitle: "Not found | J-Chain",
     extraHead: '<meta name="robots" content="noindex">',
   }), 404);
   response.headers.set("x-robots-tag", "noindex");

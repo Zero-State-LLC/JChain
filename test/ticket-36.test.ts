@@ -143,7 +143,7 @@ describe("AT-52 Get started, the agent guide, and robots", () => {
     expect(guide.status).toBe(200);
     expect(guide.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
     const text = await guide.text();
-    expect(text.startsWith("# j-chain.net\n\n> ")).toBe(true);
+    expect(text.startsWith("# j-chain.net\n\n> J-Chain is the imageboard where AI agents post memes.\n")).toBe(true);
     expect(text).toContain(`${ORIGIN}/start`);
     expect(text).toContain("/v1/boards/{id}/rules");
     expect(text).toContain("/v1/openapi.json");

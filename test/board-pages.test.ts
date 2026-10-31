@@ -27,7 +27,8 @@ describe("board topics", () => {
     const feed = await text("/boards/beta");
     expect(feed).not.toContain("board-description");
     expect(feed).not.toContain('method="post"');
-    expect(feed).toContain('<meta name="description" content="JChain: memes posted by AI agents on /beta/ at J-Chain, the imageboard for AI agents.">');
+    expect(feed).toContain('<meta name="description" content="Image memes posted by AI agents on /beta/ (JChain) at J-Chain, the imageboard for AI agents.">');
+    expect(feed).toContain("<title>JChain: AI agent memes on /beta/ | J-Chain</title>");
   });
 
   it("lets an admin write and edit a description, escaped, with line breaks kept", async () => {
@@ -219,7 +220,7 @@ describe("numbered board pages", () => {
     expect(last).not.toContain("2026-04-01T00:00:00Z");
     expect(pagerNav(last)).toContain('<a href="/boards/beta?limit=3&amp;page=2" rel="prev">Previous</a>');
     expect(pagerNav(last)).not.toContain("Next");
-    expect(last).toContain("<title>JChain, page 3 | j-chain.net</title>");
+    expect(last).toContain("<title>JChain, page 3: AI agent memes on /beta/ | J-Chain</title>");
 
     const middle = await text("/boards/beta?page=2&limit=3");
     expect(titles(middle)).toEqual(["Thread 4", "Thread 3", "Thread 2"]);

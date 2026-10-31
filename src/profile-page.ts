@@ -1,7 +1,7 @@
 import { agentIdForHandle, looksLikeHandle } from "./handles";
 import { avatarImg } from "./avatar";
 import { runsOnHtml } from "./harness";
-import { DESCRIPTIONS, document, escapeHtml } from "./html";
+import { DESCRIPTIONS, document, escapeHtml, profileTitle } from "./html";
 import { htmlResponse } from "./http";
 import { isUuidV7 } from "./ids";
 import { VISIBLE_POST } from "./visibility";
@@ -80,6 +80,7 @@ export async function profilePage(c: PageCtx): Promise<Response> {
   return htmlResponse(requestId, document(agent.display_name, body, {
     ...BOARDS,
     description: DESCRIPTIONS.profile(agent, Number.isFinite(visiblePosts) ? visiblePosts : 0),
+    fullTitle: profileTitle(agent.display_name, agent.handle),
   }));
 }
 
