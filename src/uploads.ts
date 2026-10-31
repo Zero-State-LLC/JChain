@@ -24,6 +24,11 @@ type Ctx = Context<UploadEnv>;
 
 const RESERVE_ROUTE = "POST /v1/uploads";
 const TOKEN_MESSAGE = "The upload token is missing or not valid.";
+// Agents kept retrying uploads blind on a bare "malformed". Each message names the one thing to fix.
+const KEY_MESSAGE = "Send an Idempotency-Key header (1 to 128 printable ASCII characters) on this write, and reuse it on a retry.";
+const RESERVE_BODY_MESSAGE = "Send a JSON object body: content_type, byte_size, sha256, and an optional thumb with byte_size and sha256.";
+const COMPLETE_BODY_MESSAGE = "Send this request with no body: no JSON, not even {}, and no Content-Length other than 0.";
+const VARIANT_MESSAGE = "Add ?variant=display or ?variant=thumb to the URL.";
 const SHA256 = /^[0-9a-f]{64}$/;
 const UPLOAD_TOKEN = /^up_[A-Za-z0-9_-]{43}$/;
 
@@ -70,9 +75,9 @@ async function reserve(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
-  if (key === null) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
+  if (key === null) return agentError(c.env, policy, requestId, principal.agentId, "malformed", KEY_MESSAGE);
   const parsedBody = await readJsonObject(c.req.raw);
-  if (!parsedBody.ok) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
+  if (!parsedBody.ok) return agentError(c.env, policy, requestId, principal.agentId, "malformed", RESERVE_BODY_MESSAGE);
   const bodyHash = await sha256Hex(canonicalJson(parsedBody.value));
   const prior = await readIdempotency(c.env.DB, principal.agentId, RESERVE_ROUTE, key, bodyHash);
   if (prior.action === "replay") {
@@ -175,7 +180,7 @@ async function putPart(c: Ctx, part: Part): Promise<Response> {
   const assetId = c.req.param("id");
   if (assetId === undefined || !isUuidV7(assetId)) return errorResponse(requestId, "not_found");
   const key = headerKey(c.req.raw);
-  if (key === null) return errorResponse(requestId, "malformed");
+  if (key === null) return errorResponse(requestId, "malformed", KEY_MESSAGE);
   const token = c.req.header("upload-token");
   if (token === undefined || !UPLOAD_TOKEN.test(token)) return errorResponse(requestId, "credential_invalid", TOKEN_MESSAGE);
   const reservation = await c.env.DB.prepare(
@@ -253,8 +258,10 @@ async function complete(c: Ctx): Promise<Response> {
   if (!principal.ok) return errorResponse(requestId, principal.code);
   if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
   const key = headerKey(c.req.raw);
-  if (key === null) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
-  if (await hasBody(c.req.raw)) return agentError(c.env, policy, requestId, principal.agentId, "malformed");
+  if (key === null) return agentError(c.env, policy, requestId, principal.agentId, "malformed", KEY_MESSAGE);
+  if (await hasBody(c.req.raw)) {
+    return agentError(c.env, policy, requestId, principal.agentId, "malformed", COMPLETE_BODY_MESSAGE);
+  }
 
   const route = `POST /v1/uploads/${assetId}/complete`;
   const bodyHash = await sha256Hex("");
@@ -327,7 +334,7 @@ async function assetContent(c: Ctx): Promise<Response> {
   const assetId = c.req.param("id");
   if (assetId === undefined || !isUuidV7(assetId)) return errorResponse(requestId, "not_found");
   const variant = c.req.query("variant");
-  if (variant !== "display" && variant !== "thumb") return errorResponse(requestId, "malformed");
+  if (variant !== "display" && variant !== "thumb") return errorResponse(requestId, "malformed", VARIANT_MESSAGE);
   const reader = await assetReader(c);
   const published = await projectAsset(c.env.DB, assetId, { kind: "anonymous" });
   if ("error" in reader) {
