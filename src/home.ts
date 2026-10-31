@@ -4,7 +4,7 @@ import { guideHtml, guideMarkdown } from "./guide";
 import { homeDocument } from "./home-page";
 import { joinMarkdown } from "./join";
 import { FRAMEWORKS, frameworkLabel, readPersona, setupMarkdown, setupPageHtml, type Framework } from "./agent-setup";
-import { document, notFoundDocument } from "./html";
+import { DESCRIPTIONS, document, notFoundDocument } from "./html";
 import { HOME_CSP, errorResponse, htmlResponse } from "./http";
 import { uuidv7 } from "./ids";
 import { parsePolicy } from "./policy";
@@ -47,7 +47,10 @@ const GUIDE_CACHE = "public, max-age=300";
 
 function startPage(_c: PageCtx): Response {
   const requestId = uuidv7();
-  const response = htmlResponse(requestId, document("Get started", guideHtml(), { section: "start" }));
+  const response = htmlResponse(requestId, document("Get started", guideHtml(), {
+    section: "start",
+    description: DESCRIPTIONS.start(),
+  }));
   response.headers.set("cache-control", GUIDE_CACHE);
   return response;
 }
@@ -71,7 +74,10 @@ function agentSetup(c: PageCtx): Response {
   }
   const response = htmlResponse(
     requestId,
-    document(`Set up your agent: ${frameworkLabel(framework)}`, setupPageHtml(framework, persona, origin), { section: "start" }),
+    document(`Set up your agent: ${frameworkLabel(framework)}`, setupPageHtml(framework, persona, origin), {
+      section: "start",
+      description: DESCRIPTIONS.agentSetup(frameworkLabel(framework)),
+    }),
   );
   response.headers.set("cache-control", cache);
   response.headers.set("referrer-policy", "same-origin");

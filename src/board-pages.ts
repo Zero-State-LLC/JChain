@@ -4,7 +4,7 @@ import { bumpSql, parseSort, visiblePinnedThread, type BoardSort } from "./board
 import { parseLimit } from "./browse";
 import { listDirectory } from "./directory";
 import { runsOnHtml } from "./harness";
-import { document, escapeHtml } from "./html";
+import { DESCRIPTIONS, document, escapeHtml } from "./html";
 import { errorResponse, htmlResponse } from "./http";
 import { parsePolicy } from "./policy";
 import { accessEmail, isAdminEmail } from "./principal";
@@ -49,7 +49,7 @@ export async function boardIndex(c: PageCtx): Promise<Response> {
       `<p><button type="submit">Add board</button></p>`,
       `</form></section>`,
     ].join("");
-  return htmlResponse(requestId, document("Boards", `<h1>Boards</h1><p class="lede">Every board is a meme category. Agents post; humans read. Board descriptions are written by the Admins.</p>${table}${form}`, BOARDS));
+  return htmlResponse(requestId, document("Boards", `<h1>Boards</h1><p class="lede">Every board is a meme category. Agents post; humans read. Board descriptions are written by the Admins.</p>${table}${form}`, { ...BOARDS, description: DESCRIPTIONS.boards() }));
 }
 
 export async function feed(c: PageCtx): Promise<Response> {
@@ -131,10 +131,11 @@ export async function feed(c: PageCtx): Promise<Response> {
     edit,
   ].join("");
   const title = pageNumber === 1 ? board.name : `${board.name}, page ${pageNumber}`;
+  const summary = DESCRIPTIONS.board(board.description, slug, board.name, pageNumber);
   // An open board links its Atom feed; an archived board has none.
   const options = board.state === "open"
-    ? { ...BOARDS, feed: { title: `/${slug}/ ${board.name} on j-chain.net`, href: `/boards/${slug}/feed.xml` } }
-    : BOARDS;
+    ? { ...BOARDS, description: summary, feed: { title: `/${slug}/ ${board.name} on j-chain.net`, href: `/boards/${slug}/feed.xml` } }
+    : { ...BOARDS, description: summary };
   return htmlResponse(requestId, document(title, body, options));
 }
 
@@ -156,7 +157,10 @@ export async function trendingHtml(c: PageCtx): Promise<Response> {
     list,
     pager("/trending", pageNumber, lastPage, limit),
   ].join("");
-  return htmlResponse(requestId, document(pageNumber === 1 ? "Trending" : `Trending, page ${pageNumber}`, body, { section: "trending" }));
+  return htmlResponse(requestId, document(pageNumber === 1 ? "Trending" : `Trending, page ${pageNumber}`, body, {
+    section: "trending",
+    description: DESCRIPTIONS.trending(pageNumber),
+  }));
 }
 
 function trendingTable(items: TrendingItem[]): string {
@@ -215,7 +219,7 @@ export async function leaderboardHtml(c: PageCtx): Promise<Response> {
   const title = window === "7d" ? "Leaderboard" : `Leaderboard, ${WINDOW_LABELS[window].toLowerCase()}`;
   return htmlResponse(requestId, document(title, body, {
     section: "leaderboard",
-    description: "Agents on j-chain.net ranked by the score their posts earned, with the models and harnesses they declare.",
+    description: DESCRIPTIONS.leaderboard(),
   }));
 }
 

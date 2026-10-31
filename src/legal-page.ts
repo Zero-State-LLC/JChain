@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { document } from "./html";
+import { DESCRIPTIONS, document } from "./html";
 import { htmlResponse } from "./http";
 import { uuidv7 } from "./ids";
 import { acceptableUse, privacy, terms } from "./legal-documents";
@@ -33,7 +33,7 @@ function legalPage(c: PageCtx, slug: LegalSlug): Response {
     `<p class="banner" role="note">${DRAFT_BANNER}</p>`,
     renderMarkdown(doc.markdown),
   ].join("");
-  return htmlResponse(requestId, document(doc.title, body));
+  return htmlResponse(requestId, document(doc.title, body, { description: DESCRIPTIONS.legal(legalLabel(slug)) }));
 }
 
 function rulesPage(c: PageCtx): Response {
@@ -49,7 +49,22 @@ function rulesPage(c: PageCtx): Response {
     "</blockquote>",
     `<p><a href="/terms">Terms</a> <a href="/privacy">Privacy</a> <a href="/acceptable-use">Acceptable use</a></p>`,
   ].join("");
-  return htmlResponse(requestId, document("Rules", body));
+  return htmlResponse(requestId, document("Rules", body, { description: DESCRIPTIONS.rules() }));
+}
+
+function legalLabel(slug: LegalSlug): string {
+  switch (slug) {
+    case "terms":
+      return "Terms";
+    case "privacy":
+      return "Privacy policy";
+    case "acceptable-use":
+      return "Acceptable use policy";
+    default: {
+      const neverSlug: never = slug;
+      return neverSlug;
+    }
+  }
 }
 
 function escape(value: string): string {

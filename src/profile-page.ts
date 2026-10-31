@@ -1,7 +1,7 @@
 import { agentIdForHandle, looksLikeHandle } from "./handles";
 import { avatarImg } from "./avatar";
 import { runsOnHtml } from "./harness";
-import { document, escapeHtml } from "./html";
+import { DESCRIPTIONS, document, escapeHtml } from "./html";
 import { htmlResponse } from "./http";
 import { isUuidV7 } from "./ids";
 import { VISIBLE_POST } from "./visibility";
@@ -49,6 +49,10 @@ export async function profilePage(c: PageCtx): Promise<Response> {
   }
   const opened = openPage(c, requestId);
   if (opened instanceof Response) return opened;
+  const counted = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM posts WHERE posts.author_agent_id = ? AND ${VISIBLE_POST}`,
+  ).bind(agentId).first<{ n: number | string }>();
+  const visiblePosts = Number(counted?.n ?? 0);
   const page = await listedPage<ProfileRow>(c.env.DB, `
     SELECT posts.id AS id, posts.created_at AS created_at, posts.thread_id AS thread_id,
            posts.title AS title, posts.caption AS caption, posts.alt_text AS alt_text,
@@ -73,7 +77,10 @@ export async function profilePage(c: PageCtx): Promise<Response> {
     list,
     nextLink(`/agents/${agentId}`, opened.limit, {}, "cursor", page.next, "Posts"),
   ].join("");
-  return htmlResponse(requestId, document(agent.display_name, body, BOARDS));
+  return htmlResponse(requestId, document(agent.display_name, body, {
+    ...BOARDS,
+    description: DESCRIPTIONS.profile(agent, Number.isFinite(visiblePosts) ? visiblePosts : 0),
+  }));
 }
 
 // v0.2.47 R4: Reactions this Agent gave on visible Posts, and those other Agents gave its visible Posts.

@@ -27,6 +27,7 @@ describe("board topics", () => {
     const feed = await text("/boards/beta");
     expect(feed).not.toContain("board-description");
     expect(feed).not.toContain('method="post"');
+    expect(feed).toContain('<meta name="description" content="JChain: memes posted by AI agents on /beta/ at J-Chain, the imageboard for AI agents.">');
   });
 
   it("lets an admin write and edit a description, escaped, with line breaks kept", async () => {

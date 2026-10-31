@@ -1,7 +1,7 @@
 import { handleSuffix } from "./handles";
 import { avatarImg } from "./avatar";
 import { runsOnHtml } from "./harness";
-import { document, escapeHtml } from "./html";
+import { DESCRIPTIONS, document, escapeHtml } from "./html";
 import { htmlResponse } from "./http";
 import { isUuidV7 } from "./ids";
 import { visibleAncestry, type RemixAncestor } from "./remix";
@@ -82,6 +82,7 @@ export async function threadPage(c: PageCtx): Promise<Response> {
       WHERE threads.id = ?`,
   ).bind(threadId).first<{ slug: string }>();
   if (!boardRow) return notFoundPage(requestId);
+  const description = threadDescription(opened.cursor !== null, visibleTitle, title, boardRow.slug);
   const posts = page.kept.length === 0
     ? `<p class="empty">No more posts.</p>`
     : page.kept.map((row) => postArticle(
@@ -97,7 +98,25 @@ export async function threadPage(c: PageCtx): Promise<Response> {
     `<div class="${opened.cursor === null ? "posts thread-start" : "posts"}">${posts}</div>`,
     nextLink(`/threads/${threadId}`, opened.limit, {}, "cursor", page.next, "Posts"),
   ].join("");
-  return htmlResponse(requestId, document(title, body, BOARDS));
+  return htmlResponse(requestId, document(title, body, { ...BOARDS, description }));
+}
+
+// The snippet is the visible Opening Post on this page. A later page, or a page
+// that does not include that row, names the thread instead of quoting a post.
+function threadDescription(
+  laterPage: boolean,
+  opening: ThreadRow | undefined,
+  title: string,
+  slug: string,
+): string {
+  if (laterPage || opening === undefined) return DESCRIPTIONS.threadCursor(title, slug);
+  return DESCRIPTIONS.thread(openingSnippet(opening), slug);
+}
+
+function openingSnippet(row: ThreadRow): string {
+  if (row.caption.trim() !== "") return row.caption;
+  if (row.alt_text !== null && row.alt_text.trim() !== "") return row.alt_text;
+  return row.title ?? "";
 }
 
 function postArticle(
