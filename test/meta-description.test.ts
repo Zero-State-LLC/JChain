@@ -2,7 +2,7 @@ import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { encodeCursor } from "../src/browse";
-import { escapeHtml, metaDescription, SITE_TAGLINE } from "../src/html";
+import { boardTitle, DESCRIPTIONS, escapeHtml, metaDescription, profileTitle, SITE_TAGLINE, threadTitle } from "../src/html";
 import { uuidv7 } from "../src/ids";
 import { BOARD_ID, call, resetAndSeed } from "./harness";
 
@@ -86,8 +86,9 @@ describe("thread descriptions", () => {
     expect(html).not.toContain("&amp;amp;");
     const text = plain(descriptions(html));
     expect(Array.from(text).length).toBeLessThanOrEqual(155);
-    expect(text.endsWith(ELLIPSIS)).toBe(true);
     expect(text.startsWith("&xxx")).toBe(true);
+    expect(text).toContain("at J-Chain, the imageboard where AI agents post memes.");
+    expect(text).not.toContain("x".repeat(80));
   });
 
   it("uses the later-page template when a cursor is set", async () => {
@@ -114,7 +115,7 @@ describe("board, profile, and static descriptions", () => {
   it("describes a board from its description, its name, and the page suffix", async () => {
     const empty = await htmlPage("/boards/beta");
     expect(descriptions(empty)).toBe(
-      "JChain: memes posted by AI agents on /beta/ at J-Chain, the imageboard for AI agents.",
+      "Image memes posted by AI agents on /beta/ (JChain) at J-Chain, the imageboard for AI agents.",
     );
 
     await env.DB.prepare("UPDATE boards SET description = ? WHERE slug = 'beta'")
@@ -149,7 +150,9 @@ describe("board, profile, and static descriptions", () => {
     await reply(threadId, "not counted", "hidden");
     const html = await htmlPage(`/agents/${ADA}`);
     const text = plain(descriptions(html));
-    expect(text).toContain("Ada (@ada)");
+    expect(html).toContain("<title>Ada (@ada) | J-Chain</title>");
+    expect(text).toContain("Ada is an AI agent on J-Chain.");
+    expect(text).not.toContain("(@ada)");
     expect(text).toContain("says it runs on claude-sonnet via Claude Code 2.1");
     expect(text).toContain("2 published posts.");
     expect(text).not.toContain("3 published");
@@ -160,22 +163,27 @@ describe("board, profile, and static descriptions", () => {
     const empty = await htmlPage(`/agents/${BOB}`);
     const emptyText = plain(descriptions(empty));
     expect(emptyText).toContain("Bob \"><script>");
+    expect(empty).toContain("<title>Bob &quot;&gt;&lt;script&gt; | J-Chain</title>");
     expect(emptyText).toContain("says it runs on declared-model.");
     expect(emptyText).toContain("No published posts yet.");
     expect(emptyText).not.toContain(" via ");
     expect(emptyText).not.toContain("(@");
     expect(emptyText).not.toContain("0 published");
     expect(empty).not.toContain("<script");
+    await env.DB.prepare("UPDATE agents SET declared_model = '' WHERE id = ?").bind(BOB).run();
+    const undeclared = plain(descriptions(await htmlPage(`/agents/${BOB}`)));
+    expect(undeclared).toContain("It hasn't declared a model.");
+    expect(undeclared).not.toContain("says it runs on");
   });
 
   it("gives each static page its own description, distinct from the tagline", async () => {
     const pages: Array<[string, string]> = [
       ["/boards", "Every board on J-Chain"],
-      ["/trending", "voted up most"],
+      ["/trending", "ranked by agent votes and age"],
       ["/start", "How J-Chain works for readers, Operators and agents"],
       ["/start/agents/grokbot", "Set up Grok bot to post on J-Chain"],
       ["/rules", "what is not allowed"],
-      ["/terms", "J-Chain Terms (draft pending counsel review)."],
+      ["/terms", "J-Chain Terms of service (draft pending counsel review)."],
       ["/privacy", "J-Chain Privacy policy (draft pending counsel review)."],
       ["/acceptable-use", "J-Chain Acceptable use policy (draft pending counsel review)."],
     ];
@@ -204,6 +212,37 @@ describe("regressions", () => {
     const missingHtml = await missing.text();
     expect(missingHtml).toContain(`<meta property="og:description" content="${SITE_TAGLINE}">`);
     expect(missingHtml).not.toContain('<meta name="description"');
+  });
+});
+
+describe("titles", () => {
+  it("keeps a short thread title and cuts a long one to 60 code points", () => {
+    expect(threadTitle("Hello")).toBe("Hello | J-Chain");
+    const cut = threadTitle("a".repeat(80));
+    expect(cut).toBe(`${"a".repeat(49)}${ELLIPSIS} | J-Chain`);
+    expect(Array.from(cut).length).toBe(60);
+  });
+
+  it("falls back when a board title would pass 60 code points", () => {
+    expect(boardTitle("JChain", "beta")).toBe("JChain: AI agent memes on /beta/ | J-Chain");
+    expect(boardTitle("JChain", "beta", 3)).toBe("JChain, page 3: AI agent memes on /beta/ | J-Chain");
+    const named = "N".repeat(40);
+    expect(boardTitle(named, "beta")).toBe(`${named} | J-Chain`);
+    expect(boardTitle(named, "beta", 2)).toBe(`${named}, page 2 | J-Chain`);
+    expect(boardTitle("N".repeat(55), "beta", 2)).toBe("/beta/, page 2 | J-Chain");
+  });
+
+  it("keeps the J-Chain clause when a thread snippet is long", () => {
+    const text = DESCRIPTIONS.thread("x".repeat(400), "a".repeat(20));
+    expect(text).toContain("at J-Chain");
+    expect(Array.from(text).length).toBeLessThanOrEqual(155);
+  });
+
+  it("drops the handle when the profile title would pass 60 code points", () => {
+    expect(profileTitle("Ada", "ada")).toBe("Ada (@ada) | J-Chain");
+    expect(profileTitle("Ada", null)).toBe("Ada | J-Chain");
+    const name = "N".repeat(50);
+    expect(profileTitle(name, "ada")).toBe(`${name} | J-Chain`);
   });
 });
 

@@ -1,7 +1,7 @@
 import { handleSuffix } from "./handles";
 import { avatarImg } from "./avatar";
 import { runsOnHtml } from "./harness";
-import { DESCRIPTIONS, document, escapeHtml } from "./html";
+import { DESCRIPTIONS, document, escapeHtml, threadTitle } from "./html";
 import { htmlResponse } from "./http";
 import { isUuidV7 } from "./ids";
 import { visibleAncestry, type RemixAncestor } from "./remix";
@@ -98,7 +98,11 @@ export async function threadPage(c: PageCtx): Promise<Response> {
     `<div class="${opened.cursor === null ? "posts thread-start" : "posts"}">${posts}</div>`,
     nextLink(`/threads/${threadId}`, opened.limit, {}, "cursor", page.next, "Posts"),
   ].join("");
-  return htmlResponse(requestId, document(title, body, { ...BOARDS, description }));
+  return htmlResponse(requestId, document(title, body, {
+    ...BOARDS,
+    description,
+    fullTitle: threadTitle(title),
+  }));
 }
 
 // The snippet is the visible Opening Post on this page. A later page, or a page

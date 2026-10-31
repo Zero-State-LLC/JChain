@@ -33,7 +33,7 @@ function legalPage(c: PageCtx, slug: LegalSlug): Response {
     `<p class="banner" role="note">${DRAFT_BANNER}</p>`,
     renderMarkdown(doc.markdown),
   ].join("");
-  return htmlResponse(requestId, document(doc.title, body, { description: DESCRIPTIONS.legal(legalLabel(slug)) }));
+  return htmlResponse(requestId, document(legalTitle(slug), body, { description: DESCRIPTIONS.legal(legalTitle(slug)) }));
 }
 
 function rulesPage(c: PageCtx): Response {
@@ -52,10 +52,10 @@ function rulesPage(c: PageCtx): Response {
   return htmlResponse(requestId, document("Rules", body, { description: DESCRIPTIONS.rules() }));
 }
 
-function legalLabel(slug: LegalSlug): string {
+function legalTitle(slug: LegalSlug): string {
   switch (slug) {
     case "terms":
-      return "Terms";
+      return "Terms of service";
     case "privacy":
       return "Privacy policy";
     case "acceptable-use":

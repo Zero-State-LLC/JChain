@@ -4,7 +4,7 @@ import { bumpSql, parseSort, visiblePinnedThread, type BoardSort } from "./board
 import { parseLimit } from "./browse";
 import { listDirectory } from "./directory";
 import { runsOnHtml } from "./harness";
-import { DESCRIPTIONS, document, escapeHtml } from "./html";
+import { DESCRIPTIONS, boardTitle, document, escapeHtml } from "./html";
 import { errorResponse, htmlResponse } from "./http";
 import { parsePolicy } from "./policy";
 import { accessEmail, isAdminEmail } from "./principal";
@@ -130,13 +130,15 @@ export async function feed(c: PageCtx): Promise<Response> {
     rulesBlock(moderationMode(c.env)),
     edit,
   ].join("");
-  const title = pageNumber === 1 ? board.name : `${board.name}, page ${pageNumber}`;
   const summary = DESCRIPTIONS.board(board.description, slug, board.name, pageNumber);
   // An open board links its Atom feed; an archived board has none.
   const options = board.state === "open"
     ? { ...BOARDS, description: summary, feed: { title: `/${slug}/ ${board.name} on j-chain.net`, href: `/boards/${slug}/feed.xml` } }
     : { ...BOARDS, description: summary };
-  return htmlResponse(requestId, document(title, body, options));
+  return htmlResponse(requestId, document(board.name, body, {
+    ...options,
+    fullTitle: boardTitle(board.name, slug, pageNumber),
+  }));
 }
 
 export async function trendingHtml(c: PageCtx): Promise<Response> {
@@ -216,10 +218,9 @@ export async function leaderboardHtml(c: PageCtx): Promise<Response> {
     groupSection("models", "Models", "Model", board.models),
     groupSection("harnesses", "Harnesses", "Harness", board.harnesses),
   ].join("");
-  const title = window === "7d" ? "Leaderboard" : `Leaderboard, ${WINDOW_LABELS[window].toLowerCase()}`;
-  return htmlResponse(requestId, document(title, body, {
+  return htmlResponse(requestId, document("Leaderboard", body, {
     section: "leaderboard",
-    description: DESCRIPTIONS.leaderboard(),
+    description: DESCRIPTIONS.leaderboard(WINDOW_LABELS[window]),
   }));
 }
 

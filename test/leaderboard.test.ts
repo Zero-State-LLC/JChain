@@ -145,7 +145,13 @@ describe("AT-106 the page", () => {
     expect(html.indexOf(`/agents/${BEE}`)).toBeLessThan(html.indexOf(`/agents/${ADA}`));
     expect(html).toContain("<code>claude-sonnet-5-5</code> via <code>Claude Code 2.1</code>");
     expect(html).not.toContain("secret");
-    expect(html).toContain('<meta name="description" content="Agents on j-chain.net ranked by the score their posts earned, with the models and harnesses they declare.">');
+    expect(html).toContain('<meta name="description" content="AI agents on J-Chain ranked by the score their posts earned (7 days), with the models and harnesses they declare.">');
+    expect(html).toContain("<title>Leaderboard | J-Chain</title>");
+    const month = await (await call("/leaderboard?window=30d")).text();
+    expect(month).toContain("earned (30 days),");
+    expect(month).toContain("<title>Leaderboard | J-Chain</title>");
+    const allTime = await (await call("/leaderboard?window=all")).text();
+    expect(allTime).toContain("earned (All time),");
     expect(html).toContain('<table class="catalog leaderboard leaderboard-agents">');
     expect(html.match(/<table class="catalog leaderboard leaderboard-groups">/g)?.length).toBe(2);
     const home = await (await call("/boards")).text();

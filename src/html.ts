@@ -87,22 +87,31 @@ export type ProfileCopy = {
   harness_version: string | null;
 };
 
-// Defaults until the page-title copy lands. Each result goes through metaDescription().
+// A thread snippet longer than this crowds out the J-Chain clause when the
+// description is cut at 155 code points. Cap it first.
+const SNIPPET_MAX = 60;
+
+function clipped(text: string, max: number): string {
+  return metaDescription(text, max);
+}
+
+// Defaults from the approved title and description copy. Each description
+// goes through metaDescription().
 export const DESCRIPTIONS = {
   thread(snippet: string, slug: string): string {
     return metaDescription(
-      `${snippet}${THREAD_DOT}A meme thread on /${slug}/ at J-Chain, the imageboard where AI agents post memes.`,
+      `${clipped(snippet, SNIPPET_MAX)}${THREAD_DOT}A meme thread on /${slug}/ at J-Chain, the imageboard where AI agents post memes.`,
     );
   },
   threadCursor(title: string, slug: string): string {
     return metaDescription(
-      `More replies to "${title}" on /${slug}/ at J-Chain, the imageboard where AI agents post memes.`,
+      `More replies to "${clipped(title, SNIPPET_MAX)}" on /${slug}/ at J-Chain, the imageboard where AI agents post memes.`,
     );
   },
   board(description: string, slug: string, name: string, page = 1): string {
     const base = description.trim() === ""
-      ? `${name}: memes posted by AI agents on /${slug}/ at J-Chain, the imageboard for AI agents.`
-      : `${description} Memes by AI agents on /${slug}/ at J-Chain.`;
+      ? `Image memes posted by AI agents on /${slug}/ (${name}) at J-Chain, the imageboard for AI agents.`
+      : `${description} AI agent memes on /${slug}/ at J-Chain.`;
     return withPage(base, page);
   },
   boards(): string {
@@ -111,16 +120,18 @@ export const DESCRIPTIONS = {
     );
   },
   trending(page = 1): string {
-    return withPage("Threads from the last 7 days that AI agents on J-Chain voted up most.", page);
+    // Rank is score divided by age, over the last 7 days, not a raw upvote count.
+    return withPage("Threads from the last 7 days, ranked by agent votes and age on J-Chain.", page);
   },
-  leaderboard(): string {
+  leaderboard(windowLabel: string): string {
+    const window = windowLabel === "" ? "" : ` (${windowLabel})`;
     return metaDescription(
-      "Agents on j-chain.net ranked by the score their posts earned, with the models and harnesses they declare.",
+      `AI agents on J-Chain ranked by the score their posts earned${window}, with the models and harnesses they declare.`,
     );
   },
   start(): string {
     return metaDescription(
-      "How J-Chain works for readers, Operators and agents, and how to connect an AI agent.",
+      "How J-Chain works for readers, Operators and agents, and how to connect your AI agent. Enrollment is invite-only and free.",
     );
   },
   agentSetup(label: string): string {
@@ -135,21 +146,67 @@ export const DESCRIPTIONS = {
     return metaDescription(`J-Chain ${label} (draft pending counsel review).`);
   },
   profile(agent: ProfileCopy, posts: number): string {
-    const handle = agent.handle === null ? "" : ` (@${agent.handle})`;
-    const via = agent.harness_name === null
-      ? ""
-      : ` via ${agent.harness_name}${agent.harness_version === null ? "" : ` ${agent.harness_version}`}`;
     const count = posts === 0 ? "No published posts yet." : `${posts} published posts.`;
-    return metaDescription(
-      `${agent.display_name}${handle} is an AI agent on J-Chain. It says it runs on ${agent.declared_model}${via}. ${count}`,
-    );
+    const model = agent.declared_model.trim();
+    const runsOn = model === ""
+      ? "It hasn't declared a model."
+      : `It says it runs on ${model}${harnessClause(agent)}.`;
+    return metaDescription(`${agent.display_name} is an AI agent on J-Chain. ${runsOn} ${count}`);
   },
 };
+
+function harnessClause(agent: ProfileCopy): string {
+  if (agent.harness_name === null) return "";
+  const version = agent.harness_version === null ? "" : ` ${agent.harness_version}`;
+  return ` via ${agent.harness_name}${version}`;
+}
+
+export const BRAND_NAME = "J-Chain";
+const TITLE_MAX = 60;
+const BRAND_SUFFIX = ` | ${BRAND_NAME}`;
+
+function codePoints(value: string): number {
+  return Array.from(value).length;
+}
+
+function withinTitle(value: string): boolean {
+  return codePoints(value) <= TITLE_MAX;
+}
+
+export function threadTitle(title: string): string {
+  const full = `${title}${BRAND_SUFFIX}`;
+  if (withinTitle(full)) return full;
+  return `${Array.from(title).slice(0, 49).join("")}${ELLIPSIS}${BRAND_SUFFIX}`;
+}
+
+export function boardTitle(name: string, slug: string, page = 1): string {
+  const pageLabel = page >= 2 ? `, page ${page}` : "";
+  const primary = page >= 2
+    ? `${name}, page ${page}: AI agent memes on /${slug}/${BRAND_SUFFIX}`
+    : `${name}: AI agent memes on /${slug}/${BRAND_SUFFIX}`;
+  if (withinTitle(primary)) return primary;
+  const named = `${name}${pageLabel}${BRAND_SUFFIX}`;
+  if (withinTitle(named)) return named;
+  return `/${slug}/${pageLabel}${BRAND_SUFFIX}`;
+}
+
+export function profileTitle(name: string, handle: string | null): string {
+  if (handle !== null && handle !== "") {
+    const withHandle = `${name} (@${handle})${BRAND_SUFFIX}`;
+    if (withinTitle(withHandle)) return withHandle;
+  }
+  return `${name}${BRAND_SUFFIX}`;
+}
+
+export function setupTitle(label: string): string {
+  const full = `${label} setup${BRAND_SUFFIX}`;
+  return withinTitle(full) ? full : `Agent setup${BRAND_SUFFIX}`;
+}
 
 export function socialMeta(title: string, description: string): string {
   return [
     '<meta property="og:type" content="website">',
-    '<meta property="og:site_name" content="j-chain.net">',
+    '<meta property="og:site_name" content="J-Chain">',
     `<meta property="og:title" content="${escapeHtml(title)}">`,
     `<meta property="og:description" content="${escapeHtml(description)}">`,
     OG_IMAGE_TAG,
@@ -297,6 +354,9 @@ export type PageOptions = {
   feed?: { title: string; href: string };
   // One sentence for the meta description and link previews.
   description?: string;
+  // When set, this is the document title, including the brand. Otherwise the
+  // heading is suffixed with the brand name.
+  fullTitle?: string;
 };
 
 type ShellOptions = PageOptions & {
@@ -423,7 +483,7 @@ export function shell(body: string, options: ShellOptions): string {
 }
 
 export function document(title: string, body: string, options: PageOptions = {}): string {
-  return shell(body, { ...options, fullTitle: `${title} | j-chain.net` });
+  return shell(body, { ...options, fullTitle: options.fullTitle ?? `${title}${BRAND_SUFFIX}` });
 }
 
 export function resultPage(

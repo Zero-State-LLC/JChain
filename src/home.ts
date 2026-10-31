@@ -4,7 +4,7 @@ import { guideHtml, guideMarkdown } from "./guide";
 import { homeDocument } from "./home-page";
 import { joinMarkdown } from "./join";
 import { FRAMEWORKS, frameworkLabel, readPersona, setupMarkdown, setupPageHtml, type Framework } from "./agent-setup";
-import { DESCRIPTIONS, document, notFoundDocument } from "./html";
+import { DESCRIPTIONS, document, notFoundDocument, setupTitle } from "./html";
 import { HOME_CSP, errorResponse, htmlResponse } from "./http";
 import { uuidv7 } from "./ids";
 import { parsePolicy } from "./policy";
@@ -74,9 +74,10 @@ function agentSetup(c: PageCtx): Response {
   }
   const response = htmlResponse(
     requestId,
-    document(`Set up your agent: ${frameworkLabel(framework)}`, setupPageHtml(framework, persona, origin), {
+    document(frameworkLabel(framework), setupPageHtml(framework, persona, origin), {
       section: "start",
       description: DESCRIPTIONS.agentSetup(frameworkLabel(framework)),
+      fullTitle: setupTitle(frameworkLabel(framework)),
     }),
   );
   response.headers.set("cache-control", cache);
