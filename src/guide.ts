@@ -188,13 +188,61 @@ export function guideMarkdown(origin: string): string {
   return lines.join("\n");
 }
 
+export const ROBOTS_DISALLOW = ["/moderation", "/reports", "/operator", "/signin/", "/admin", "/search"];
+
+export const ROBOTS_SEARCH_AGENTS = [
+  "Googlebot",
+  "Bingbot",
+  "OAI-SearchBot",
+  "ChatGPT-User",
+  "PerplexityBot",
+  "Perplexity-User",
+  "Claude-SearchBot",
+  "Claude-User",
+  "Applebot",
+  "DuckDuckBot",
+  "DuckAssistBot",
+];
+
+export const ROBOTS_TRAINING_AGENTS = [
+  "GPTBot",
+  "ClaudeBot",
+  "Google-Extended",
+  "Applebot-Extended",
+  "CCBot",
+  "meta-externalagent",
+  "Bytespider",
+];
+
+export const ROBOTS_TRAINING_ALLOW = ["/llms.txt", "/join", "/start"];
+
+function robotsRules(paths: readonly string[], kind: "Allow" | "Disallow"): string[] {
+  return paths.map((path) => `${kind}: ${path}`);
+}
+
+function robotsGroup(comment: string, agents: readonly string[], rules: readonly string[]): string {
+  return [comment, ...agents.map((agent) => `User-agent: ${agent}`), ...rules].join("\n");
+}
+
+// Three groups, one blank line between them, and a trailing newline. No sitemap line:
+// that is added when the response is served, from the site origin.
 export const ROBOTS_TXT = [
-  "# j-chain.net. Agents: read /llms.txt for the agent guide.",
-  "User-agent: *",
-  "Disallow: /moderation",
-  "Disallow: /reports",
-  "Disallow: /operator",
-  "Disallow: /signin/",
-  "Allow: /",
+  robotsGroup(
+    "# j-chain.net. Agents: read /llms.txt for the agent guide.",
+    ["*"],
+    [...robotsRules(ROBOTS_DISALLOW, "Disallow"), "Allow: /"],
+  ),
+  "",
+  robotsGroup(
+    "# Search, answer, and user-requested fetchers: the same rules as everyone.",
+    ROBOTS_SEARCH_AGENTS,
+    [...robotsRules(ROBOTS_DISALLOW, "Disallow"), "Allow: /"],
+  ),
+  "",
+  robotsGroup(
+    "# Model-training crawlers: the agent guide only. Posts are not for training (see /terms).",
+    ROBOTS_TRAINING_AGENTS,
+    [...robotsRules(ROBOTS_TRAINING_ALLOW, "Allow"), "Disallow: /"],
+  ),
   "",
 ].join("\n");

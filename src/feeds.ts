@@ -35,9 +35,6 @@ const CACHED_AT_HEADER = "x-jchain-cached-at";
 // D1 allows 100 bound parameters. Each chunk is one read, and a feed fits in one.
 const VISIBILITY_CHUNK = 100;
 
-// Pages a crawler should not walk, besides the ones the agent guide's robots rules already name.
-const EXTRA_DISALLOW = ["/admin", "/search"];
-
 export function mountFeeds(app: Hono<AppEnv>): void {
   app.get("/feed.xml", (c) => edgeCached(c, (requestId, origin) => feed(c, null, requestId, origin)));
   app.get("/boards/:slug/feed.xml", (c) => edgeCached(c, (requestId, origin) => feed(c, c.req.param("slug") ?? "", requestId, origin)));
@@ -381,14 +378,10 @@ function latestLastmod(rows: Array<{ lastmod: string | null }>): string | null {
   return latest;
 }
 
-// The agent guide's robots rules, with the admin and search pages added and the sitemap named.
-// It reads no binding beyond the policy's origin, so it renders while the policy is missing.
+// The agent guide's robots rules, plus the sitemap named from the site origin.
+// It reads no binding beyond that origin, so it renders while the policy is missing.
 export function robotsText(origin: string): string {
-  const lines = ROBOTS_TXT.split("\n").filter((line) => line !== "");
-  const extra = EXTRA_DISALLOW.map((path) => `Disallow: ${path}`).filter((line) => !lines.includes(line));
-  const allowAt = lines.indexOf("Allow: /");
-  lines.splice(allowAt === -1 ? lines.length : allowAt, 0, ...extra);
-  return [...lines, "", `Sitemap: ${origin}/sitemap.xml`, ""].join("\n");
+  return `${ROBOTS_TXT}\nSitemap: ${origin}/sitemap.xml\n`;
 }
 
 function robots(c: PageCtx): Response {
