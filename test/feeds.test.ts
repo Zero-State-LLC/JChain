@@ -331,7 +331,10 @@ describe("AT-90 the sitemap and robots.txt", () => {
     expect([...urls.keys()]).toEqual([
       `${ORIGIN}/`,
       `${ORIGIN}/boards`,
-      `${ORIGIN}/boards/art`,
+      `${ORIGIN}/start`,
+      `${ORIGIN}/trending`,
+      `${ORIGIN}/leaderboard`,
+      `${ORIGIN}/rules`,
       `${ORIGIN}/boards/beta`,
       `${ORIGIN}/agents/${AGENT_ID}`,
       `${ORIGIN}/threads/${visible.threadId}`,
@@ -340,11 +343,57 @@ describe("AT-90 the sitemap and robots.txt", () => {
     expect(urls.get(`${ORIGIN}/threads/${visible.threadId}`)).toBe("2026-02-01T00:00:00Z");
     expect(urls.get(`${ORIGIN}/boards/beta`)).toBe("2026-02-02T00:00:00Z");
     expect(urls.get(`${ORIGIN}/agents/${AGENT_ID}`)).toBe("2026-02-02T00:00:00Z");
+    expect(urls.get(`${ORIGIN}/`)).toBe("2026-02-02T00:00:00Z");
+    expect(urls.get(`${ORIGIN}/boards`)).toBe("2026-02-02T00:00:00Z");
+    expect(urls.get(`${ORIGIN}/trending`)).toBe("2026-02-02T00:00:00Z");
+    expect(urls.get(`${ORIGIN}/leaderboard`)).toBe("2026-02-02T00:00:00Z");
+    expect(urls.get(`${ORIGIN}/start`)).toBeNull();
+    expect(urls.get(`${ORIGIN}/rules`)).toBeNull();
     expect(urls.size).toBeLessThanOrEqual(SITEMAP_MAX_URLS);
     expect(SITEMAP_MAX_URLS).toBe(50_000);
-    for (const absent of [hidden.threadId, deleted.threadId, OTHER_AGENT_ID, "/boards/old", "/search", "/operator", "/admin", "/moderation", "/reports", "/signin", "/v1/"]) {
+    for (const absent of [
+      hidden.threadId, deleted.threadId, OTHER_AGENT_ID, "/boards/art", "/boards/old",
+      "/search", "/operator", "/admin", "/moderation", "/reports", "/signin", "/v1/", "/terms",
+    ]) {
       expect(source, absent).not.toContain(absent);
     }
+  });
+
+  it("omits a board whose only opening post is hidden, even when a reply is published", async () => {
+    const hidden = await thread({
+      title: "Hidden opening",
+      caption: "",
+      stamp: "2026-02-01T00:00:00Z",
+      state: "hidden",
+      boardId: ART_ID,
+    });
+    await reply(hidden.threadId, "a published reply", "2026-02-02T00:00:00Z", "published");
+    const source = await (await call("/sitemap.xml")).text();
+    expect(source).not.toContain("/boards/art");
+    expect(source).not.toContain(hidden.threadId);
+    const root = parseXml(source);
+    expect(root.name).toBe("urlset");
+  });
+
+  it("omits lastmod on the home pages when no board has a visible opening post", async () => {
+    const response = await call("/sitemap.xml");
+    expect(response.status).toBe(200);
+    const root = parseXml(await response.text());
+    expect(root.name).toBe("urlset");
+    const urls = new Map(children(root, "url").map((url) => [
+      text(url, "loc"),
+      url.children.some((node) => node.name === "lastmod") ? text(url, "lastmod") : null,
+    ]));
+    expect([...urls.keys()]).toEqual([
+      `${ORIGIN}/`,
+      `${ORIGIN}/boards`,
+      `${ORIGIN}/start`,
+      `${ORIGIN}/trending`,
+      `${ORIGIN}/leaderboard`,
+      `${ORIGIN}/rules`,
+    ]);
+    for (const loc of urls.keys()) expect(urls.get(loc)).toBeNull();
+    expect(urls.size).toBeLessThanOrEqual(SITEMAP_MAX_URLS);
   });
 
   it("keeps the robots rules, adds the admin and search pages, and names the sitemap", async () => {
