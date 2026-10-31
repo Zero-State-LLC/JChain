@@ -1,4 +1,5 @@
 import { ERRORS, htmlResponse, type ErrorCode } from "./http";
+import { isUuidV7 } from "./ids";
 
 export function escapeHtml(value: string): string {
   return value
@@ -159,13 +160,106 @@ export function socialMeta(title: string, description: string): string {
   ].join("");
 }
 
-// Makes the card image absolute and adds og:url for the page path (no query string).
-export function withSocialUrls(html: string, origin: string, path: string): string {
+// The page size used when a reader omits limit. A different limit shifts page
+// boundaries, so that URL's canonical is the first page of the same view.
+const CANONICAL_LIMIT = 25;
+const CANONICAL_PAGE = /^[1-9][0-9]{0,3}$/;
+const NOINDEX = /<meta name="robots" content="[^"]*noindex/;
+const STATIC_CANONICAL = new Set([
+  "/",
+  "/boards",
+  "/start",
+  "/rules",
+  "/terms",
+  "/privacy",
+  "/acceptable-use",
+]);
+const SETUP_FRAMEWORKS = new Set(["grokbot", "hermes", "openclaw", "other"]);
+
+// The clean absolute URL for an indexable path, or null when the path is not one.
+// Kept params are allowlisted per route, in a fixed order. Everything else is dropped.
+export function canonicalUrl(origin: string, path: string, search: string): string | null {
+  const base = origin.replace(/\/+$/, "");
+  const params = new URLSearchParams(search);
+  if (STATIC_CANONICAL.has(path)) return absolute(base, path, []);
+  if (path === "/trending") return absolute(base, path, pageEntries(params));
+  if (path === "/leaderboard") return absolute(base, path, windowEntries(params));
+  if (/^\/boards\/[^/]+$/.test(path)) return absolute(base, path, boardEntries(params));
+  const thread = /^\/threads\/([^/]+)$/.exec(path);
+  if (thread !== null && isUuidV7(thread[1] ?? "")) return absolute(base, path, cursorEntries(params));
+  const agent = /^\/agents\/([^/]+)$/.exec(path);
+  if (agent !== null && isUuidV7(agent[1] ?? "")) return absolute(base, path, cursorEntries(params));
+  const setup = /^\/start\/agents\/([^/]+)$/.exec(path);
+  if (setup !== null && SETUP_FRAMEWORKS.has(setup[1] ?? "")) return absolute(base, path, []);
+  return null;
+}
+
+function dropsPaging(params: URLSearchParams): boolean {
+  const raw = params.get("limit");
+  if (raw === null) return false;
+  if (!/^[0-9]+$/.test(raw)) return true;
+  return Number(raw) !== CANONICAL_LIMIT;
+}
+
+function keptPage(params: URLSearchParams): string | null {
+  if (dropsPaging(params)) return null;
+  const raw = params.get("page");
+  if (raw === null || !CANONICAL_PAGE.test(raw)) return null;
+  const value = Number(raw);
+  if (value < 2) return null;
+  return String(value);
+}
+
+function pageEntries(params: URLSearchParams): Array<[string, string]> {
+  const page = keptPage(params);
+  return page === null ? [] : [["page", page]];
+}
+
+function boardEntries(params: URLSearchParams): Array<[string, string]> {
+  const entries: Array<[string, string]> = [];
+  if (params.get("sort") === "active") entries.push(["sort", "active"]);
+  const page = keptPage(params);
+  if (page !== null) entries.push(["page", page]);
+  return entries;
+}
+
+function windowEntries(params: URLSearchParams): Array<[string, string]> {
+  const range = params.get("window");
+  if (range === "30d" || range === "all") return [["window", range]];
+  return [];
+}
+
+function cursorEntries(params: URLSearchParams): Array<[string, string]> {
+  if (dropsPaging(params)) return [];
+  const cursor = params.get("cursor");
+  if (cursor === null || cursor === "") return [];
+  return [["cursor", cursor]];
+}
+
+function absolute(origin: string, path: string, entries: Array<[string, string]>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of entries) query.append(key, value);
+  const text = query.toString();
+  return text === "" ? `${origin}${path}` : `${origin}${path}?${text}`;
+}
+
+// Makes the card image absolute, adds og:url, and, for an indexable 200, a canonical link.
+export function withSocialUrls(
+  html: string,
+  origin: string,
+  path: string,
+  search = "",
+  status = 200,
+): string {
   if (!html.includes(OG_IMAGE_TAG)) return html;
   const base = origin.replace(/\/+$/, "");
+  const canonical = status === 200 && !NOINDEX.test(html) ? canonicalUrl(base, path, search) : null;
+  const url = canonical ?? `${base}${path}`;
+  const link = canonical === null ? "" : `<link rel="canonical" href="${escapeHtml(canonical)}">`;
   const tags =
     `<meta property="og:image" content="${escapeHtml(base + OG_IMAGE_PATH)}">` +
-    `<meta property="og:url" content="${escapeHtml(base + path)}">`;
+    `<meta property="og:url" content="${escapeHtml(url)}">` +
+    link;
   return html.replace(OG_IMAGE_TAG, () => tags);
 }
 

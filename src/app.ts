@@ -56,7 +56,7 @@ app.use("*", async (c, next) => {
   const rawPolicy = c.env.POLICY;
   const origin = parsePolicy(typeof rawPolicy === "string" ? rawPolicy : undefined)?.site_origin ?? url.origin;
   const html = await c.res.text();
-  c.res = new Response(withSocialUrls(html, origin, url.pathname), {
+  c.res = new Response(withSocialUrls(html, origin, url.pathname, url.search, c.res.status), {
     status: c.res.status,
     statusText: c.res.statusText,
     headers: c.res.headers,

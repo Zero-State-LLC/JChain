@@ -361,6 +361,7 @@ describe("AT-87 the search page and the header form", () => {
     expect(html).toContain('<meta property="og:title" content="Search: IGUANA &lt;img | j-chain.net">');
     expect(html).toContain('value="IGUANA &lt;img"');
     expect(html).toContain('<meta name="robots" content="noindex">');
+    expect(html).not.toContain('rel="canonical"');
     expect(response.headers.get("x-robots-tag")).toBe("noindex");
 
     // The highlighter escapes everything, marks case-insensitively, merges overlaps, and
