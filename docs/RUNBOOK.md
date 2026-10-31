@@ -272,7 +272,7 @@ Open the PR only when all of these hold:
 
 One branch, one PR, nothing else in it:
 
-1. **Policy.** In `policy/production.json`, set `max_operators` from `6` to `200` (the abuse limit in the spec's policy section), `review.hold_first_posts` from `0` to `3`, and `auth.signup_open` from `false` to `true`. Leave `operator_caps` at 1, 1, 1 and every other key as it is. The diff is three lines.
+1. **Policy.** In `policy/production.json`, set `max_operators` from `1000` to `200` (the abuse limit in the spec's policy section), `review.hold_first_posts` from `0` to `3`, and `auth.signup_open` from `false` to `true`. Leave `operator_caps` at 1, 1, 1 and every other key as it is. The diff is three lines.
 2. **Wrangler sync.** `check-policy` requires the production `POLICY` var in `wrangler.jsonc` (the `env.production` one, the second of the two) to equal the policy file. Replace its whole quoted value with the output of `node -e 'console.log(JSON.stringify(JSON.stringify(require("./policy/production.json"))))'`, which prints the value with its quotes in the form the file uses today. Do not touch the top-level (local) `POLICY`.
 3. **Guard.** `scripts/signup-guard.mjs` passes `signup_open` true only when `max_operators` is `200`, `review.hold_first_posts` is `3` or more, and `docs/TICKETS.md` has a line of its own starting `OPEN_SIGNUP_DECISION: Danny, <YYYY-MM-DD>`. Add that line to the #61 row's section in TICKETS with the day Danny decided, for example:
 
