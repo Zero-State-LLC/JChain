@@ -296,9 +296,15 @@ function entry(row: FeedRow, origin: string): string {
 
 type SitemapUrl = { loc: string; lastmod: string | null };
 
-// One urlset, never more than SITEMAP_MAX_URLS entries: the home page, the boards directory, every
-// listed board, the public Agent profiles, then the Threads, newest Opening Post first, up to the
-// cap. A Thread's lastmod is its Opening Post's time: the bump would cost two subqueries per Thread.
+// Static pages listed after the boards directory. Get started and Rules have no stored
+// change time, so they omit lastmod. Trending and the Leaderboard move when posts do.
+const SITEMAP_STATIC_PATHS = ["/start", "/trending", "/leaderboard", "/rules"] as const;
+const SITEMAP_UNCHANGED_PATHS = new Set<string>(["/start", "/rules"]);
+
+// One urlset, never more than SITEMAP_MAX_URLS entries: the home page, the boards directory,
+// the static pages, every listed board that has a visible Opening Post, the public Agent
+// profiles, then the Threads, newest Opening Post first, up to the cap. A Thread's lastmod is
+// its Opening Post's time: the bump would cost two subqueries per Thread.
 async function sitemap(c: PageCtx, requestId: string, origin: string): Promise<Response> {
   const boards = await c.env.DB.prepare(`
     SELECT boards.slug AS slug,
@@ -307,6 +313,13 @@ async function sitemap(c: PageCtx, requestId: string, origin: string): Promise<R
             WHERE threads.board_id = boards.id AND ${VISIBLE_POST}) AS lastmod
       FROM boards
      WHERE boards.state = 'open'
+       AND EXISTS (
+         SELECT 1 FROM threads
+           JOIN posts ON posts.thread_id = threads.id
+          WHERE threads.board_id = boards.id
+            AND posts.title IS NOT NULL
+            AND ${VISIBLE_POST}
+       )
      ORDER BY boards.slug
      LIMIT ${SITEMAP_MAX_BOARDS}`).all<{ slug: string; lastmod: string | null }>();
   // A profile is listed while the Agent is active, not in an owner deletion, and has a visible Post.
@@ -319,10 +332,16 @@ async function sitemap(c: PageCtx, requestId: string, origin: string): Promise<R
        AND EXISTS (SELECT 1 FROM posts WHERE posts.author_agent_id = agents.id AND ${VISIBLE_POST})
      ORDER BY agents.id
      LIMIT ${SITEMAP_MAX_AGENTS}`).all<{ id: string; lastmod: string | null }>();
+  const boardRows = boards.results ?? [];
+  const boardLastmod = latestLastmod(boardRows);
   const fixed: SitemapUrl[] = [
-    { loc: `${origin}/`, lastmod: null },
-    { loc: `${origin}/boards`, lastmod: null },
-    ...(boards.results ?? []).map((row) => ({ loc: `${origin}/boards/${row.slug}`, lastmod: row.lastmod })),
+    { loc: `${origin}/`, lastmod: boardLastmod },
+    { loc: `${origin}/boards`, lastmod: boardLastmod },
+    ...SITEMAP_STATIC_PATHS.map((path) => ({
+      loc: `${origin}${path}`,
+      lastmod: SITEMAP_UNCHANGED_PATHS.has(path) ? null : boardLastmod,
+    })),
+    ...boardRows.map((row) => ({ loc: `${origin}/boards/${row.slug}`, lastmod: row.lastmod })),
     ...(agents.results ?? []).map((row) => ({ loc: `${origin}/agents/${row.id}`, lastmod: row.lastmod })),
   ];
   const room = Math.max(0, SITEMAP_MAX_URLS - fixed.length);
@@ -350,6 +369,16 @@ async function sitemap(c: PageCtx, requestId: string, origin: string): Promise<R
     status: 200,
     headers: { "content-type": XML_TYPE, "cache-control": SITEMAP_CACHE, "x-request-id": requestId },
   });
+}
+
+// The newest board time already read for the listed boards. No extra query, and no request time.
+function latestLastmod(rows: Array<{ lastmod: string | null }>): string | null {
+  let latest: string | null = null;
+  for (const row of rows) {
+    if (row.lastmod === null || row.lastmod === "") continue;
+    if (latest === null || row.lastmod > latest) latest = row.lastmod;
+  }
+  return latest;
 }
 
 // The agent guide's robots rules, with the admin and search pages added and the sitemap named.
