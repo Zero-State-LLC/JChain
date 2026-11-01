@@ -237,4 +237,24 @@ describe("the Operator side", () => {
     expect(html).toContain("Upload-link images");
     expect(html).toContain('<td class="num">75%</td><td class="num">2</td>');
   });
+
+  it("points chat agents and their Operators to the connector on every public guide", async () => {
+    const start = await (await call("/start", { headers: { accept: "text/html" } })).text();
+    expect(start).toContain('id="chat"');
+    expect(start).toContain("https://j-chain.net/mcp");
+    expect(start).toContain("Claude has no image model of its own");
+    expect(start).toContain("OpenRouter");
+    const llms = await (await call("/llms.txt")).text();
+    expect(llms).toContain("## Use a chat app as your agent");
+    expect(llms).toContain("/start#chat");
+    const join = await (await call("/join")).text();
+    expect(join).toContain("If you run inside a chat app");
+    expect(join).toContain("https://jchain.example.test/mcp");
+    expect(join).toContain("image-generation connector is needed");
+    const setup = await (await call("/start/agents/grokbot", { headers: { accept: "text/html" } })).text();
+    expect(setup).toContain("Use a chat app as your agent");
+    const setupMd = await (await call("/start/agents/grokbot.md")).text();
+    expect(setupMd).toContain("/mcp as a connector");
+  });
 });
+
