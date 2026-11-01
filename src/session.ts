@@ -1,5 +1,6 @@
 import { newPrefixedSecret, sha256Hex } from "./credential";
 import { utcSeconds, uuidv7 } from "./ids";
+import { brandedEmailHtml } from "./email-template";
 import { parsePolicy, type AuthPolicy, type Policy } from "./policy";
 
 // CT-18 as amended in v0.2.23: Sign-in Links and Operator Sessions.
@@ -12,16 +13,43 @@ const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
-export type MailMessage = { from: string; to: string; subject: string; text: string };
+// `html` is optional: the branded body for Operator email (v0.2.49). Every message keeps `text`.
+export type MailMessage = { from: string; to: string; subject: string; text: string; html?: string };
 export type Mailer = { send(message: MailMessage): Promise<unknown> };
 
 export type EmailSignIn = { auth: AuthPolicy; mailer: Mailer };
 
 export type SessionInfo = { id: string; operatorId: string; email: string };
 
-// The optional send-email binding. It is not in the Wrangler config: Danny adds
-// it with Email Sending. Read defensively, like the optional AI binding.
+const RESEND_ENDPOINT = "https://api.resend.com/emails";
+
+// v0.2.49: Resend, when the RESEND_API_KEY secret is set. A non-2xx answer throws, so callers
+// log the failure as they do for the binding. The key and the address are never logged.
+function resendMailer(key: string): Mailer {
+  return {
+    async send(message) {
+      const response = await fetch(RESEND_ENDPOINT, {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          from: message.from,
+          to: [message.to],
+          subject: message.subject,
+          text: message.text,
+          ...(message.html === undefined ? {} : { html: message.html }),
+        }),
+      });
+      if (!response.ok) throw new Error(`resend ${response.status}`);
+      return response.json();
+    },
+  };
+}
+
+// Resend first when its key is set; otherwise the optional send-email binding,
+// which Danny adds with Email Sending. Read defensively, like the optional AI binding.
 export function mailerOf(env: Env): Mailer | null {
+  const key = (env as Env & { RESEND_API_KEY?: unknown }).RESEND_API_KEY;
+  if (typeof key === "string" && key.length > 0) return resendMailer(key);
   const binding = (env as Env & { EMAIL?: unknown }).EMAIL;
   if (typeof binding !== "object" || binding === null) return null;
   const send = (binding as { send?: unknown }).send;
@@ -324,5 +352,17 @@ export function signInEmail(auth: AuthPolicy, to: string, link: string, signup =
       "",
       "j-chain.net is run by Zero State LLC.",
     ].join("\n"),
+    html: brandedEmailHtml(new URL(link).origin, {
+      preheader: `Your sign-in link works once and expires in ${auth.link_minutes} minutes.`,
+      heading: signup ? "Create your Operator account" : "Sign in to j-chain.net",
+      paragraphs: [
+        signup
+          ? "Use the button below to create your j-chain.net Operator account and sign in."
+          : "Use the button below to sign in to j-chain.net.",
+        `The link works once and expires in ${auth.link_minutes} minutes. It opens a page with a Sign in button.`,
+      ],
+      button: { label: signup ? "Create account and sign in" : "Sign in", url: link },
+      note: "If you did not ask to sign in, ignore this email. Nobody can sign in without the link.",
+    }),
   };
 }
