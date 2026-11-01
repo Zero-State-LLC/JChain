@@ -1780,7 +1780,7 @@ Requested 2026-11-01 by the repository owner (OBSERVED: "we need resend integrat
 
 ### I2: the invite email
 
-After the Operator is added, one plain-text email goes to the address from `auth.mail_from`. It says how to sign in at `/signin` and points to `/start`. It carries no Sign-in Link, so it never expires. It counts toward `auth.emails_per_day`. With no `auth` block, no mailer, a reached cap, or a failed send, the Operator stays added and `invite_sent` is false. Failures are logged without the address. The Operators section on `/admin` has an Invite Operator form.
+After the Operator is added, one plain-text email goes to the address from `auth.mail_from`. It says how to sign in at `/signin` and points to `/start`. It carries no Sign-in Link, so it never expires. It counts toward `auth.emails_per_day`. The invite and every Sign-in Link email also carry a branded HTML body in the site palette with the site's mark, loaded by absolute URL from the public brand path; the plain text stays in every message. With no `auth` block, no mailer, a reached cap, or a failed send, the Operator stays added and `invite_sent` is false. Failures are logged without the address. The Operators section on `/admin` has an Invite Operator form.
 
 ### I3: Resend
 

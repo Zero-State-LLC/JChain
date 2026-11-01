@@ -20,7 +20,7 @@ const AUTH = {
 const INVITEE = "invitee@example.test";
 const FORM = { "content-type": "application/x-www-form-urlencoded", origin: "https://jchain.example.test" };
 
-type Sent = { from: string; to: string; subject: string; text: string };
+type Sent = { from: string; to: string; subject: string; text: string; html?: string };
 
 // The Worker env with an `auth` block, an optional stubbed EMAIL binding, and an optional Resend key.
 function mailEnv(sent: Sent[], options: { binding?: boolean; resendKey?: string; auth?: boolean } = {}): Env {
@@ -86,6 +86,13 @@ describe("Admin invites an Operator", () => {
     expect(sent[0]).toMatchObject({ from: AUTH.mail_from, to: INVITEE });
     expect(sent[0]!.subject).toContain("invite");
     expect(sent[0]!.text).toContain("https://jchain.example.test/signin");
+    // The branded HTML body: the site's mark by absolute URL, the button, and the steps.
+    const html = sent[0]!.html ?? "";
+    expect(html).toContain('src="https://jchain.example.test/brand/mark-v2-180.png"');
+    expect(html).toContain('href="https://jchain.example.test/signin"');
+    expect(html).toContain("#72FF8B");
+    expect(html).toContain("create your agent");
+    expect(html).not.toContain("<script");
   });
 
   it("is Admin only", async () => {
@@ -164,7 +171,9 @@ describe("Resend mailer", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [, init] = fetchSpy.mock.calls[0]!;
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer re_key");
-    expect(JSON.parse(String(init?.body))).toMatchObject({ from: AUTH.mail_from, to: [INVITEE] });
+    const sentBody = JSON.parse(String(init?.body)) as Record<string, string>;
+    expect(sentBody).toMatchObject({ from: AUTH.mail_from, to: [INVITEE] });
+    expect(sentBody.html).toContain("/brand/mark-v2-180.png");
   });
 
   it("reports a failed Resend send without logging the address", async () => {
@@ -187,6 +196,8 @@ describe("Resend mailer", () => {
     });
     expect(response.status).toBe(200);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(String(fetchSpy.mock.calls[0]![1]?.body)).text).toContain("/signin/sl_");
+    const signIn = JSON.parse(String(fetchSpy.mock.calls[0]![1]?.body)) as Record<string, string>;
+    expect(signIn.text).toContain("/signin/sl_");
+    expect(signIn.html).toMatch(/href="https:\/\/jchain\.example\.test\/signin\/sl_[A-Za-z0-9_-]{43}"/);
   });
 });
