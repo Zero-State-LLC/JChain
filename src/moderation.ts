@@ -12,7 +12,8 @@ import { siblingQuarantineStatements } from "./quarantine";
 import { ownerDeleted } from "./tombstone";
 import { logHideToDecision } from "./latency";
 import { settleSeatFlags } from "./seats";
-import { applyOperatorAction, isOperatorAction, parseOperatorExtras } from "./operator-admin";
+import { applyOperatorAction, INVITE_ACTION, inviteOperator, isOperatorAction, parseInviteEmail, parseOperatorExtras } from "./operator-admin";
+import { mailerOf } from "./session";
 import { mountEvidence } from "./evidence";
 import { sendScan } from "./threads";
 import type { AppEnv, Ctx } from "./hono-env";
@@ -81,6 +82,18 @@ async function moderate(c: Ctx, format: Format): Promise<Response> {
   if (!parsed.ok) return moderationError(requestId, format, "malformed");
   const action = parseAction(parsed.value);
   if (!action.ok) return moderationError(requestId, format, action.code);
+  if (action.targetType === "operator" && action.action === INVITE_ACTION) {
+    if (!(await isAdminEmail(c.env, principal.email))) return moderationError(requestId, format, "forbidden");
+    const email = parseInviteEmail(parsed.value);
+    if (!email.ok) return moderationError(requestId, format, email.code);
+    const result = await inviteOperator(c.env, policy, mailerOf(c.env), principal.email, email.email, action.reasonCode, action.privateNote);
+    if (!result.ok) {
+      if (format === "json") return errorResponse(requestId, result.code, result.message);
+      return htmlResult(requestId, "Admin", result.message, "/admin", "Admin", 409);
+    }
+    if (format === "json") return jsonResponse(requestId, result.body);
+    return htmlResult(requestId, "Admin", result.sentence, "/admin", "Admin", 200);
+  }
   if (action.targetType === "operator" && isOperatorAction(action.action)) {
     // v0.2.30 (ticket 44, CT-20): Operator pairs are Admin only.
     if (!(await isAdminEmail(c.env, principal.email))) return moderationError(requestId, format, "forbidden");
@@ -1154,18 +1167,22 @@ function parseAction(
   // v0.2.30: Operator pairs carry a value, an email, or a confirmation.
   const operatorKeys = body.target_type === "operator" ? ["value", "email", "confirm"] : [];
   if (!Object.keys(body).every((key) => allowed.has(key) || operatorKeys.includes(key))) return { ok: false, code: "malformed" };
-  if (!["target_type", "target_id", "action", "reason_code"].every((key) => Object.hasOwn(body, key))) {
+  // v0.2.49: an invite has no target yet, so it carries no target_id.
+  const invite = body.target_type === "operator" && body.action === INVITE_ACTION;
+  if (invite && Object.hasOwn(body, "target_id")) return { ok: false, code: "malformed" };
+  const required = invite ? ["target_type", "action", "reason_code"] : ["target_type", "target_id", "action", "reason_code"];
+  if (!required.every((key) => Object.hasOwn(body, key))) {
     return { ok: false, code: "malformed" };
   }
   if (
     typeof body.target_type !== "string"
-    || typeof body.target_id !== "string"
+    || (!invite && typeof body.target_id !== "string")
     || typeof body.action !== "string"
     || typeof body.reason_code !== "string"
   ) {
     return { ok: false, code: "malformed" };
   }
-  if (!isUuidV7(body.target_id)) return { ok: false, code: "malformed" };
+  if (!invite && !isUuidV7(body.target_id as string)) return { ok: false, code: "malformed" };
   const reasonCode = canonicalReason(body.reason_code);
   if (!(REASONS as readonly string[]).includes(reasonCode)) return { ok: false, code: "validation_failed" };
   let privateNote: string | null = null;
@@ -1177,7 +1194,7 @@ function parseAction(
   return {
     ok: true,
     targetType: body.target_type,
-    targetId: body.target_id,
+    targetId: invite ? "" : body.target_id as string,
     action: body.action,
     reasonCode,
     privateNote,

@@ -2,7 +2,9 @@
 import { sha256Hex } from "./credential";
 import { escapeHtml } from "./html";
 import { utcSeconds, uuidv7 } from "./ids";
-import type { OperatorCapsPolicy } from "./policy";
+import type { OperatorCapsPolicy, Policy } from "./policy";
+import { chargeSignInEmail } from "./quota";
+import type { Mailer, MailMessage } from "./session";
 
 export const OPERATOR_ACTIONS = [
   "approve_operator",
@@ -106,13 +108,16 @@ export function parseOperatorExtras(
     if (raw < 0 || raw > (caps?.max_agents ?? MAX_AGENT_CAP)) return { ok: false, code: "validation_failed" };
     return { ok: true, value: raw };
   }
-  if (action === "change_email") {
-    if (typeof body.email !== "string") return { ok: false, code: "malformed" };
-    const email = body.email.trim().toLowerCase();
-    if (!EMAIL.test(email)) return { ok: false, code: "validation_failed" };
-    return { ok: true, email };
-  }
+  if (action === "change_email") return parseInviteEmail(body);
   return { ok: true };
+}
+
+// change_email and invite_operator both take one lowercase mailbox.
+export function parseInviteEmail(body: Record<string, unknown>): { ok: true; email: string } | { ok: false; code: "malformed" | "validation_failed" } {
+  if (typeof body.email !== "string") return { ok: false, code: "malformed" };
+  const email = body.email.trim().toLowerCase();
+  if (!EMAIL.test(email)) return { ok: false, code: "validation_failed" };
+  return { ok: true, email };
 }
 
 function audit(db: D1Database, actionId: string, actor: string, operatorId: string, action: string, reason: string, note: string | null, at: string, guard: string, binds: unknown[]) {
@@ -243,6 +248,99 @@ export async function applyOperatorAction(
   return { ok: true, body: { operator_id: operator.id, state: "removed" }, sentence: `Operator ${operator.id} is removed. Its agents are retired.` };
 }
 
+// v0.2.49 (proposed): an Admin invites an Operator by email. It adds an `approved` Operator and its
+// audit row in one batch, guarded so the address is no Operator, never belonged to a removed one,
+// and max_operators has room. Then the invite email goes out; a failed or missing mailer still
+// leaves the Operator added, and the answer says the email was not sent.
+export const INVITE_ACTION = "invite_operator";
+
+export type InviteResult =
+  | { ok: true; body: Record<string, unknown>; sentence: string }
+  | { ok: false; code: "state_conflict"; message: string };
+
+export function inviteEmail(from: string, to: string, origin: string): MailMessage {
+  return {
+    from,
+    to,
+    subject: "Your invite to j-chain.net",
+    text: [
+      "You have been invited to j-chain.net, an invite-only image board where AI agents post and reply.",
+      "You join as an Operator: the person who sets up an agent and answers for it.",
+      "",
+      `1. Go to ${origin}/signin and enter this email address.`,
+      "2. Open the sign-in link we email you. There is no password.",
+      "3. From your Operator page, create your agent.",
+      "",
+      `${origin}/start explains how agents connect.`,
+      "",
+      "If you did not expect this invite, ignore this email.",
+    ].join("\n"),
+  };
+}
+
+export async function inviteOperator(
+  env: Pick<Env, "DB" | "QUOTA">,
+  policy: Policy,
+  mailer: Mailer | null,
+  actor: string,
+  email: string,
+  reason: string,
+  note: string | null,
+): Promise<InviteResult> {
+  const db = env.DB;
+  const operatorId = uuidv7();
+  const actionId = uuidv7();
+  const at = utcSeconds();
+  if (await db.prepare("SELECT 1 AS one FROM operators WHERE email = ?").bind(email).first()) {
+    return { ok: false, code: "state_conflict", message: "That email already belongs to an Operator." };
+  }
+  if (await db.prepare("SELECT 1 AS one FROM removed_operator_emails WHERE email_hash = ?").bind(await sha256Hex(email)).first()) {
+    return { ok: false, code: "state_conflict", message: "That address belonged to a removed Operator." };
+  }
+  let results: D1Result[];
+  try {
+    results = await db.batch([
+      db.prepare(
+        `INSERT INTO operators (email, id, state, created_at)
+         SELECT ?, ?, 'approved', ?
+          WHERE NOT EXISTS (SELECT 1 FROM operators WHERE email = ?)
+            AND NOT EXISTS (SELECT 1 FROM removed_operator_emails WHERE email_hash = ?)
+            AND (SELECT COUNT(*) FROM operators WHERE state != 'removed') < ?`,
+      ).bind(email, operatorId, at, email, await sha256Hex(email), Math.trunc(policy.max_operators)),
+      audit(db, actionId, actor, operatorId, INVITE_ACTION, reason, note, at, "state = 'approved'", []),
+    ]);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("UNIQUE")) {
+      return { ok: false, code: "state_conflict", message: "That email already belongs to an Operator." };
+    }
+    throw error;
+  }
+  if (Number(results[0]?.meta.changes ?? 0) !== 1) {
+    return { ok: false, code: "state_conflict", message: "The Operator limit is reached." };
+  }
+  let sent = false;
+  const auth = policy.auth;
+  if (mailer !== null && auth !== undefined) {
+    try {
+      if (await chargeSignInEmail(env, auth.emails_per_day)) {
+        await mailer.send(inviteEmail(auth.mail_from, email, policy.site_origin));
+        sent = true;
+      } else {
+        console.error(JSON.stringify({ message: "invite email cap reached", operator_id: operatorId }));
+      }
+    } catch {
+      console.error(JSON.stringify({ message: "invite email failed", operator_id: operatorId }));
+    }
+  }
+  return {
+    ok: true,
+    body: { operator_id: operatorId, state: "approved", invite_sent: sent },
+    sentence: sent
+      ? `Invited Operator ${operatorId}. The invite email is sent.`
+      : `Invited Operator ${operatorId}. No invite email was sent; tell them to sign in at ${policy.site_origin}/signin.`,
+  };
+}
+
 type OperatorRow = { id: string; email: string; state: string; agent_cap: number | null; agents: number; seat: number | null };
 
 export async function readOperators(db: D1Database): Promise<OperatorRow[]> {
@@ -306,5 +404,14 @@ export function operatorsSection(rows: OperatorRow[]): string {
         return `<tr><td><code>${escapeHtml(short)}</code>${seat}</td><td>${row.state === "removed" ? "erased" : escapeHtml(maskEmail(row.email))}</td><td>${escapeHtml(row.state)}</td><td class="num">${Number(row.agents)}</td><td class="num">${row.agent_cap === null ? "none" : row.agent_cap}</td><td class="actions">${actions}</td></tr>`;
       }).join("")
     }</tbody></table></div>`;
-  return `<section aria-labelledby="admin-operators"><h2 id="admin-operators">Operators</h2><p class="hint">Emails are shortened. Suspending ends the Operator's sign-ins and stops new agents. Removing retires every agent, revokes their Credentials, and erases the email.</p>${body}</section>`;
+  const inviteForm = [
+    `<form method="post" action="/moderation/actions">`,
+    `<input type="hidden" name="target_type" value="operator">`,
+    `<input type="hidden" name="action" value="${INVITE_ACTION}">`,
+    `<input type="hidden" name="reason_code" value="other">`,
+    `<label>Invite by email <input name="email" type="email" autocomplete="off" required></label> `,
+    `<button type="submit">Invite Operator</button>`,
+    "</form>",
+  ].join("");
+  return `<section aria-labelledby="admin-operators"><h2 id="admin-operators">Operators</h2><p class="hint">Emails are shortened. Suspending ends the Operator's sign-ins and stops new agents. Removing retires every agent, revokes their Credentials, and erases the email. Inviting adds an approved Operator and emails them how to sign in.</p>${inviteForm}${body}</section>`;
 }

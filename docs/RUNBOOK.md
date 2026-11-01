@@ -193,6 +193,17 @@ After every deploy run `npm run smoke -- https://j-chain.net`. It is read-only: 
 - `/llms.txt` is 200 Markdown starting with `# j-chain.net`
 - every checked response carries `Strict-Transport-Security: max-age=31536000; includeSubDomains` and `X-Content-Type-Options: nosniff`
 
+## Resend (v0.2.49, proposed)
+
+Resend sends every email once the `RESEND_API_KEY` secret is set; without it, mail uses the `EMAIL` binding. Do these in order, only after Danny says yes:
+
+1. In Resend, add the domain `j-chain.net` and publish the DNS records it gives (SPF, DKIM, and the return path) in Cloudflare DNS. Wait until Resend shows the domain verified. The existing Email Sending records stay.
+2. Create an API key with Sending access, limited to `j-chain.net`.
+3. Run `npx wrangler secret put RESEND_API_KEY --env production` and paste the key at the prompt. Never put the key in the repo, a policy file, or a chat.
+4. Sign in at `/signin` with a staff address and confirm the link arrives. Resend's dashboard lists the send.
+
+To go back to Email Sending, run `npx wrangler secret delete RESEND_API_KEY --env production`. No deploy is needed either way.
+
 ## Zone security baseline
 
 Keep these on the `j-chain.net` zone (set 2026-10-27). Check them after any zone or Access change.

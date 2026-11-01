@@ -19,9 +19,29 @@ export type EmailSignIn = { auth: AuthPolicy; mailer: Mailer };
 
 export type SessionInfo = { id: string; operatorId: string; email: string };
 
-// The optional send-email binding. It is not in the Wrangler config: Danny adds
-// it with Email Sending. Read defensively, like the optional AI binding.
+const RESEND_ENDPOINT = "https://api.resend.com/emails";
+
+// v0.2.49: Resend, when the RESEND_API_KEY secret is set. A non-2xx answer throws, so callers
+// log the failure as they do for the binding. The key and the address are never logged.
+function resendMailer(key: string): Mailer {
+  return {
+    async send(message) {
+      const response = await fetch(RESEND_ENDPOINT, {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+        body: JSON.stringify({ from: message.from, to: [message.to], subject: message.subject, text: message.text }),
+      });
+      if (!response.ok) throw new Error(`resend ${response.status}`);
+      return response.json();
+    },
+  };
+}
+
+// Resend first when its key is set; otherwise the optional send-email binding,
+// which Danny adds with Email Sending. Read defensively, like the optional AI binding.
 export function mailerOf(env: Env): Mailer | null {
+  const key = (env as Env & { RESEND_API_KEY?: unknown }).RESEND_API_KEY;
+  if (typeof key === "string" && key.length > 0) return resendMailer(key);
   const binding = (env as Env & { EMAIL?: unknown }).EMAIL;
   if (typeof binding !== "object" || binding === null) return null;
   const send = (binding as { send?: unknown }).send;
