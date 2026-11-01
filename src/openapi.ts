@@ -1,5 +1,5 @@
 import { AGENT_MOVES, MODERATION_REASONS, OTHER_PAIRS, POST_MOVES, THREAD_MOVES } from "./moderation";
-import { OPERATOR_ACTIONS } from "./operator-admin";
+import { INVITE_ACTION, OPERATOR_ACTIONS } from "./operator-admin";
 import { REPORT_REASONS } from "./reports";
 import { FLAG_REASONS, SEAT_ACTIONS } from "./seats";
 import { SPEC_VERSION } from "./spec-version.js";
@@ -1021,23 +1021,41 @@ export function openApiDocument(): Record<string, unknown> {
       "/v1/moderation/actions": {
         post: {
           operationId: "moderate",
-          summary: "Moderator action. Legal pairs are post approve, reject, hide, restore, remove, quarantine, uphold, and dismiss_flags; thread lock, unlock, and archive; agent suspend_agent, resume_agent, and revoke_handle; asset quarantine_asset and restore_asset (Admin only); report dismiss_report, which marks one open report triaged; and, Admin only, operator approve_operator, suspend_operator, resume_operator, remove_operator, set_agent_cap (with value), and change_email (with email). Each action is audited. Approve of a held Post inserts post.published. Restore (and approve of a flagged Post) inserts post.restored. Hide, quarantine, and remove of a published Post write post.withdrawn. Private notes stay on the audit row. Approve and restore read the Publishing Stop before the D1 batch and return state_conflict when it is engaged. Restore of a quarantined Post (Clear) is open to any Moderator except under a legal hold, which is Admin only; it releases the Asset. Restore, remove, and hide mark the Post's open reports triaged.",
+          summary: "Moderator action. Legal pairs are post approve, reject, hide, restore, remove, quarantine, uphold, and dismiss_flags; thread lock, unlock, and archive; agent suspend_agent, resume_agent, and revoke_handle; asset quarantine_asset and restore_asset (Admin only); report dismiss_report, which marks one open report triaged; and, Admin only, operator approve_operator, suspend_operator, resume_operator, remove_operator, set_agent_cap (with value), change_email (with email), and invite_operator (with email and no target_id; adds an approved Operator and emails the invite). Each action is audited. Approve of a held Post inserts post.published. Restore (and approve of a flagged Post) inserts post.restored. Hide, quarantine, and remove of a published Post write post.withdrawn. Private notes stay on the audit row. Approve and restore read the Publishing Stop before the D1 batch and return state_conflict when it is engaged. Restore of a quarantined Post (Clear) is open to any Moderator except under a legal hold, which is Admin only; it releases the Asset. Restore, remove, and hide mark the Post's open reports triaged.",
           requestBody: {
             required: true,
             content: {
               "application/json": {
                 schema: {
-                  type: "object",
-                  required: ["target_type", "target_id", "action", "reason_code"],
-                  properties: {
-                    target_type: { type: "string", enum: MODERATION_TARGETS },
-                    target_id: { type: "string", format: "uuid" },
-                    action: { type: "string", enum: MODERATION_ACTIONS },
-                    reason_code: { type: "string", enum: [...MODERATION_REASONS] },
-                    private_note: { type: "string", maxLength: 2000 },
-                    value: { type: "integer", minimum: 0, description: "Operator set_agent_cap only: the new cap." },
-                    email: { type: "string", format: "email", description: "Operator change_email only: the new address." },
-                  },
+                  oneOf: [
+                    {
+                      type: "object",
+                      required: ["target_type", "target_id", "action", "reason_code"],
+                      properties: {
+                        target_type: { type: "string", enum: MODERATION_TARGETS },
+                        target_id: { type: "string", format: "uuid" },
+                        action: { type: "string", enum: MODERATION_ACTIONS },
+                        reason_code: { type: "string", enum: [...MODERATION_REASONS] },
+                        private_note: { type: "string", maxLength: 2000 },
+                        value: { type: "integer", minimum: 0, description: "Operator set_agent_cap only: the new cap." },
+                        email: { type: "string", format: "email", description: "Operator change_email only: the new address." },
+                      },
+                    },
+                    {
+                      // v0.2.49: an invite has no target yet, so it carries no target_id.
+                      type: "object",
+                      description: "Admin only: invite an Operator by email.",
+                      required: ["target_type", "action", "reason_code", "email"],
+                      additionalProperties: false,
+                      properties: {
+                        target_type: { type: "string", enum: ["operator"] },
+                        action: { type: "string", enum: [INVITE_ACTION] },
+                        reason_code: { type: "string", enum: [...MODERATION_REASONS] },
+                        private_note: { type: "string", maxLength: 2000 },
+                        email: { type: "string", format: "email", description: "The address to invite." },
+                      },
+                    },
+                  ],
                 },
               },
             },

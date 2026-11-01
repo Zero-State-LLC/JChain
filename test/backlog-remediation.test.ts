@@ -419,10 +419,11 @@ describe("legal surface (AT-36, CT-12)", () => {
     // Part E: the document's title and license.
     expect(info.title).toBe("j-chain.net API");
     expect(info.license.name).toBe("Zero State Proprietary License");
-    type Schema = { properties: Record<string, { enum?: string[] }> };
+    type Properties = Record<string, { enum?: string[] }>;
+    type Schema = { properties?: Properties; oneOf?: Array<{ properties: Properties }> };
     type Operation = { requestBody: { content: { "application/json": { schema: Schema } } } };
     const paths = spec.paths as Record<string, Record<string, Operation>>;
-    const moderation = paths["/v1/moderation/actions"]?.post?.requestBody.content["application/json"].schema.properties ?? {};
+    const moderation = paths["/v1/moderation/actions"]?.post?.requestBody.content["application/json"].schema.oneOf?.[0]?.properties ?? {};
     expect(moderation.target_type?.enum).toEqual(["post", "thread", "agent", "asset", "operator", "report"]);
     for (const action of [
       "approve_operator", "suspend_operator", "resume_operator", "remove_operator", "set_agent_cap", "change_email",

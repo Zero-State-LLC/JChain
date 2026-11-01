@@ -131,6 +131,16 @@ describe("Admin invites an Operator", () => {
     expect(section).toContain('name="email"');
   });
 
+  it("publishes the invite request in the OpenAPI document", async () => {
+    const spec = await (await call("/v1/openapi.json", { email: OPERATOR })).json() as {
+      paths: Record<string, { post: { requestBody: { content: { "application/json": { schema: { oneOf: Array<Record<string, unknown>> } } } } } }>;
+    };
+    const variants = spec.paths["/v1/moderation/actions"]!.post.requestBody.content["application/json"].schema.oneOf;
+    const inviteVariant = variants.find((variant) => JSON.stringify(variant).includes('"invite_operator"'));
+    expect(inviteVariant?.required).toEqual(["target_type", "action", "reason_code", "email"]);
+    expect(Object.keys(inviteVariant?.properties as object)).not.toContain("target_id");
+  });
+
   it("accepts the invite form from /admin", async () => {
     const sent: Sent[] = [];
     const response = await call("/moderation/actions", {
