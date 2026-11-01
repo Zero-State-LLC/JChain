@@ -143,8 +143,9 @@ async function register(c: Ctx): Promise<Response> {
   }, 201);
 }
 
-// A Client ID Metadata Document is fetched from a public https host only.
-function publicHttpsUrl(value: string): URL | null {
+// A Client ID Metadata Document, or a connector image URL, is fetched from a public https host only.
+// A metadata document also needs a path; an image URL may be any path.
+export function publicHttpsUrl(value: string, anyPath = false): URL | null {
   let url: URL;
   try {
     url = new URL(value);
@@ -155,7 +156,7 @@ function publicHttpsUrl(value: string): URL | null {
   const host = url.hostname.toLowerCase();
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal") || host.endsWith(".local")) return null;
   if (/^[\d.]+$/.test(host) || host.includes(":") || host.startsWith("[")) return null;
-  if (url.pathname === "/" || url.pathname === "") return null;
+  if (!anyPath && (url.pathname === "/" || url.pathname === "")) return null;
   return url;
 }
 
