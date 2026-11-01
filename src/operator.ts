@@ -11,6 +11,7 @@ import {
   operatorPage,
   operatorSignInRequired,
   type AgentListing,
+  type ConnectionListing,
 } from "./account-pages";
 import {
   MODERATOR_SUSPENSION,
@@ -33,7 +34,7 @@ import { readForm } from "./forms";
 import { type Harness, harnessText, parseHarness, setAgentHarness } from "./harness";
 import { htmlResult, type PageOptions } from "./html";
 import { ERRORS, htmlResponse } from "./http";
-import { utcSeconds, uuidv7 } from "./ids";
+import { isUuidV7, utcSeconds, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import type { Policy } from "./policy";
 import { requireOperator } from "./principal";
@@ -60,6 +61,7 @@ export function mountOperator(app: Hono<AppEnv>): void {
   app.get("/operator/connect", connectForm);
   app.post("/operator/connect", connectAnswer);
   app.post("/operator/attest", attest);
+  app.post("/operator/connections/:id/disconnect", disconnect);
 }
 
 async function open(c: Ctx, write: boolean): Promise<Opened | Response> {
@@ -112,6 +114,8 @@ async function page(c: Ctx): Promise<Response> {
     agents: listed.results ?? [],
     totalAgents: Number(total?.n ?? 0),
     maxAgents: opened.policy.max_agents,
+    connections: await listConnections(c.env.DB, opened.caller.email),
+    origin: opened.policy.site_origin,
   }));
 }
 
@@ -356,4 +360,29 @@ async function attest(c: Ctx): Promise<Response> {
     200,
     SIGNED_IN,
   );
+}
+
+// v0.2.50 M2: the chat apps this Operator connected, newest first.
+async function listConnections(db: D1Database, email: string): Promise<ConnectionListing[]> {
+  const listed = await db.prepare(
+    `SELECT oauth_grants.id AS id, oauth_grants.client_name AS client_name, oauth_grants.harness_name AS harness_name, oauth_grants.created_at AS created_at
+       FROM oauth_grants JOIN operators ON operators.id = oauth_grants.operator_id
+      WHERE operators.email = ? AND oauth_grants.revoked_at IS NULL
+      ORDER BY oauth_grants.created_at DESC LIMIT 20`,
+  ).bind(email).all<ConnectionListing>();
+  return listed.results ?? [];
+}
+
+// Disconnect ends one app's grant and every token issued under it at once.
+async function disconnect(c: Ctx): Promise<Response> {
+  const opened = await open(c, true);
+  if (opened instanceof Response) return opened;
+  const id = c.req.param("id") ?? "";
+  if (!isUuidV7(id)) return failure(opened.requestId, "not_found");
+  const done = await c.env.DB.prepare(
+    `UPDATE oauth_grants SET revoked_at = ?
+      WHERE id = ? AND revoked_at IS NULL AND operator_id = (SELECT id FROM operators WHERE email = ?)`,
+  ).bind(utcSeconds(), id, opened.caller.email).run();
+  if (Number(done.meta.changes ?? 0) !== 1) return failure(opened.requestId, "not_found");
+  return Response.redirect(`${opened.policy.site_origin}/operator#chat-apps`, 303);
 }

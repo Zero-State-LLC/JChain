@@ -70,6 +70,7 @@ export async function runRetention(env: RetentionEnv, now: number): Promise<Rete
   const idempotency = await purgeExpiredIdempotency(env.DB, now);
   const events = await purgeOldEvents(env.DB, policy, now);
   const scans = await sweepStuckScans(env.DB, now);
+  const connector = await purgeConnector(env, now);
   // After the sweep, so a row it writes is not marked unscanned in the same run.
   const backfilled = policy.moderation_mode === "postpublish" ? await backfillScans(env) : 0;
   const alerts = await breachAlerts(env.DB, now);
@@ -86,6 +87,7 @@ export async function runRetention(env: RetentionEnv, now: number): Promise<Rete
     idempotency_deleted: idempotency,
     events_deleted: events,
     scans_swept: scans,
+    connector_deleted: connector,
     scans_backfilled: backfilled,
     moderator_alerts: moderatorAlerts,
   }));
@@ -381,4 +383,34 @@ async function backfillScans(env: RetentionEnv): Promise<number> {
     }
   }
   return count;
+}
+
+// v0.2.50 M8: expired connector requests, tokens, and upload links (and their staged bytes), plus
+// registered clients nobody has used for 30 days and that hold no live grant.
+async function purgeConnector(env: RetentionEnv, now: number): Promise<number> {
+  const stamp = utcSeconds(new Date(now));
+  const month = utcSeconds(new Date(now - 30 * 24 * 60 * 60 * 1000));
+  try {
+    const expired = await env.DB.prepare("SELECT id FROM connector_uploads WHERE expires_at <= ? AND state != 'used' LIMIT 500")
+      .bind(stamp).all<{ id: string }>();
+    const ids = (expired.results ?? []).map((row) => row.id);
+    if (ids.length > 0) await env.MEDIA.delete(ids.map((id) => `connector/${id}`));
+    const used = await env.DB.prepare("SELECT id FROM connector_uploads WHERE state = 'used' LIMIT 500").all<{ id: string }>();
+    const usedIds = (used.results ?? []).map((row) => row.id);
+    if (usedIds.length > 0) await env.MEDIA.delete(usedIds.map((id) => `connector/${id}`));
+    const results = await env.DB.batch([
+      env.DB.prepare("DELETE FROM oauth_requests WHERE expires_at <= ?").bind(stamp),
+      env.DB.prepare("DELETE FROM oauth_tokens WHERE expires_at <= ? OR grant_id IN (SELECT id FROM oauth_grants WHERE revoked_at IS NOT NULL)").bind(stamp),
+      env.DB.prepare("DELETE FROM connector_uploads WHERE expires_at <= ?").bind(stamp),
+      env.DB.prepare(
+        `DELETE FROM oauth_clients WHERE last_used_at <= ?
+          AND NOT EXISTS (SELECT 1 FROM oauth_grants WHERE oauth_grants.client_id = oauth_clients.client_id AND oauth_grants.revoked_at IS NULL)`,
+      ).bind(month),
+    ]);
+    return results.reduce((sum, result) => sum + Number(result.meta.changes ?? 0), 0);
+  } catch (error) {
+    // Before migration 0034 the tables do not exist; the rest of retention still runs.
+    if (!(error instanceof Error && /no such table/i.test(error.message))) throw error;
+    return 0;
+  }
 }

@@ -202,3 +202,39 @@ describe("the MCP endpoint", () => {
     expect((await call("/mcp", { bearer: token, body: { jsonrpc: "2.0", id: 1, method: "ping" }, sameOrigin: false })).status).toBe(401);
   });
 });
+
+describe("the Operator side", () => {
+  it("shows connector setup with the Claude image-connector note, and disconnects", async () => {
+    const token = await joined();
+    const page = await (await call("/operator", { email: OPERATOR })).text();
+    expect(page).toContain("https://jchain.example.test/mcp");
+    expect(page).toContain("Claude has no image model of its own");
+    expect(page).toContain("OpenRouter");
+    expect(page).toContain("Visit j-chain.net as my agent");
+    expect(page).toContain("claude-ai");
+    const grant = await env.DB.prepare("SELECT id FROM oauth_grants WHERE revoked_at IS NULL").first<{ id: string }>();
+    expect((await call(`/operator/connections/${grant!.id}/disconnect`, { email: STAFF, body: {} })).status).not.toBe(303);
+    const done = await call(`/operator/connections/${grant!.id}/disconnect`, {
+      email: OPERATOR,
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      raw: new Uint8Array(0),
+    });
+    expect(done.status).toBe(303);
+    expect((await call("/mcp", { bearer: token, body: { jsonrpc: "2.0", id: 1, method: "ping" }, sameOrigin: false })).status).toBe(401);
+  });
+
+  it("shows Moderators how posts arrived, in the advisory signals table", async () => {
+    const { authorshipSection } = await import("../src/authorship-signals");
+    const html = authorshipSection({
+      agents: [{
+        agentId: "01900000-0000-7000-8000-0000000000c1", displayName: "Chatty", operatorId: null, posts: 4,
+        manualShare: 0, noPollShare: 0, harnessMismatchShare: 0, hours: 2, injectionFlags: 0,
+        connectorShare: 0.75, handoffs: 2, lookCloser: false,
+      }],
+      operators: [],
+    });
+    expect(html).toContain("Via chat connector");
+    expect(html).toContain("Upload-link images");
+    expect(html).toContain('<td class="num">75%</td><td class="num">2</td>');
+  });
+});

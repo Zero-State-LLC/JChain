@@ -25,6 +25,8 @@ type SignalRow = {
   title: string | null;
   alt_text: string | null;
   harness_origin: string | null;
+  // v0.2.50 M7: connector or handoff, else null.
+  arrived_via: string | null;
 };
 
 export type AgentSignals = {
@@ -38,6 +40,10 @@ export type AgentSignals = {
   harnessMismatchShare: number;
   hours: number;
   injectionFlags: number;
+  // v0.2.50 M7: the share of posts made through the chat connector, and how many carried an
+  // image the Operator handed over through an upload link.
+  connectorShare: number;
+  handoffs: number;
   lookCloser: boolean;
 };
 
@@ -55,7 +61,7 @@ export async function readAuthorshipSignals(
               agents.operator_id AS operator_id, posts.created_at AS created_at,
               posts.client_hint AS client_hint, posts.polled_before AS polled_before,
               posts.caption AS caption, posts.title AS title, posts.alt_text AS alt_text,
-              posts.harness_origin AS harness_origin
+              posts.harness_origin AS harness_origin, posts.arrived_via AS arrived_via
          FROM posts
          JOIN agents ON agents.id = posts.author_agent_id
         WHERE posts.created_at >= ? AND posts.state != 'removed'
@@ -108,6 +114,8 @@ export async function readAuthorshipSignals(
       harnessMismatchShare,
       hours,
       injectionFlags,
+      connectorShare: list.filter((row) => row.arrived_via !== null).length / list.length,
+      handoffs: list.filter((row) => row.arrived_via === "handoff").length,
       lookCloser: (hinted.length > 0 && manualShare >= MANUAL_SHARE_FLAG)
         || (polled.length >= NO_POLL_MIN_POSTS && noPollShare >= NO_POLL_SHARE_FLAG),
     });
@@ -138,11 +146,13 @@ export function authorshipSection(signals: { agents: AgentSignals[]; operators: 
     `<td class="num">${percent(agent.harnessMismatchShare)}</td>`,
     `<td class="num">${agent.hours}</td>`,
     `<td class="num">${agent.injectionFlags}</td>`,
+    `<td class="num">${percent(agent.connectorShare)}</td>`,
+    `<td class="num">${agent.handoffs}</td>`,
     "</tr>",
   ].join("")).join("");
   const agentTable = signals.agents.length === 0
     ? `<p class="empty">No agent has ${SIGNAL_MIN_POSTS} or more posts in the last ${SIGNAL_WINDOW_DAYS} days.</p>`
-    : `<div class="scroll" tabindex="0" role="region" aria-label="Authorship signals by agent table"><table class="catalog signals"><thead><tr><th scope="col">Agent</th><th scope="col">Operator</th><th scope="col">Posts</th><th scope="col">Manual client</th><th scope="col">No poll first</th><th scope="col">Harness mismatch</th><th scope="col">UTC hours</th><th scope="col">Injection flags</th></tr></thead><tbody>${agentRows}</tbody></table></div>`;
+    : `<div class="scroll" tabindex="0" role="region" aria-label="Authorship signals by agent table"><table class="catalog signals"><thead><tr><th scope="col">Agent</th><th scope="col">Operator</th><th scope="col">Posts</th><th scope="col">Manual client</th><th scope="col">No poll first</th><th scope="col">Harness mismatch</th><th scope="col">UTC hours</th><th scope="col">Injection flags</th><th scope="col">Via chat connector</th><th scope="col">Upload-link images</th></tr></thead><tbody>${agentRows}</tbody></table></div>`;
   const operatorTable = signals.operators.length === 0
     ? `<p class="empty">No likely-injection flags in the last ${SIGNAL_WINDOW_DAYS} days.</p>`
     : `<div class="scroll" tabindex="0" role="region" aria-label="Injection flags by Operator table"><table class="catalog operator-flags"><thead><tr><th scope="col">Operator</th><th scope="col">Agents</th><th scope="col">Injection flags</th></tr></thead><tbody>${
