@@ -12,7 +12,7 @@ import { sha256Hex } from "./credential";
 import { readForm } from "./forms";
 import { htmlError } from "./html";
 import { htmlResponse } from "./http";
-import { uuidv7 } from "./ids";
+import { isUuidV7, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
 import { mailbox } from "./policy";
 import { chargeSignInAddress, chargeSignInEmail } from "./quota";
@@ -84,6 +84,8 @@ async function requestLink(c: Ctx): Promise<Response> {
   const email = typeof raw === "string" ? raw.trim().toLowerCase() : "";
   // CT-28: a connect code to come back to after sign-in. Only a well-formed code is kept.
   const connect = form.ok ? normalizeUserCode(form.value.connect ?? "") : null;
+  // v0.2.50 M2: a pending app connection to come back to after sign-in. Only a well-formed id is kept.
+  const authorize = form.ok && isUuidV7(form.value.authorize ?? "") ? form.value.authorize! : null;
   if (!form.ok || !mailbox(email)) {
     if (connect !== null) {
       return htmlResponse(requestId, connectSignInPage({
@@ -126,7 +128,7 @@ async function requestLink(c: Ctx): Promise<Response> {
           const token = operatorId !== null
             ? await issueLink(c.env.DB, operatorId, auth)
             : await issueSignupLink(c.env.DB, email, auth);
-          await mailer.send(signInEmail(auth, email, `${policy.site_origin}/signin/${token}${connectQuery(connect)}`, operatorId === null));
+          await mailer.send(signInEmail(auth, email, `${policy.site_origin}/signin/${token}${returnQuery(connect, authorize)}`, operatorId === null));
         } catch {
           console.error(JSON.stringify({ message: "sign-in email failed", request_id: requestId }));
         }
@@ -149,7 +151,7 @@ function confirmLink(c: Ctx): Response {
   }
   const token = c.req.param("token") ?? "";
   const response = isLinkToken(token)
-    ? htmlResponse(requestId, confirmLinkPage(token, normalizeUserCode(c.req.query("connect") ?? "")))
+    ? htmlResponse(requestId, confirmLinkPage(token, normalizeUserCode(c.req.query("connect") ?? ""), authorizeId(c.req.query("authorize"))))
     : htmlResponse(requestId, badLinkPage(), 400);
   response.headers.set("referrer-policy", "no-referrer");
   return response;
@@ -169,18 +171,26 @@ async function useLink(c: Ctx): Promise<Response> {
     response.headers.set("referrer-policy", "no-referrer");
     return response;
   }
-  return redirect(requestId, afterSignIn(c.req.query("connect")), sessionCookie(started.secret, started.maxAge));
+  return redirect(requestId, afterSignIn(c.req.query("connect"), c.req.query("authorize")), sessionCookie(started.secret, started.maxAge));
 }
 
 // The one place a sign-in may send the Operator other than /operator: back to its agent's
 // connect code. The target is rebuilt from the normalized eight letters, never taken from
 // the request, so no other path, host, or scheme can come through (no open redirect).
-export function afterSignIn(rawCode: string | undefined): string {
+// v0.2.50: or back to a pending app connection, rebuilt from its validated id the same way.
+export function afterSignIn(rawCode: string | undefined, rawAuthorize?: string | undefined): string {
+  const authorize = authorizeId(rawAuthorize);
+  if (authorize !== null) return `/oauth/authorize/${authorize}`;
   const code = normalizeUserCode((rawCode ?? "").slice(0, 20));
   return code === null ? "/operator" : `/operator/connect?code=${displayUserCode(code)}`;
 }
 
-function connectQuery(code: string | null): string {
+function authorizeId(raw: string | undefined): string | null {
+  return raw !== undefined && isUuidV7(raw) ? raw : null;
+}
+
+function returnQuery(code: string | null, authorize: string | null): string {
+  if (authorize !== null) return `?authorize=${authorize}`;
   return code === null ? "" : `?connect=${code}`;
 }
 

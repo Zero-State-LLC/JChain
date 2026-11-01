@@ -1,6 +1,7 @@
 import { accessJwtCandidates, emailForAccessToken } from "./access-jwt";
 import { sha256Hex } from "./credential";
 import { utcSeconds } from "./ids";
+import { resolveAccessToken } from "./oauth";
 import { currentSession } from "./session";
 
 export type AuthFailure = "access_required" | "credential_invalid" | "not_enrolled" | "forbidden";
@@ -9,7 +10,8 @@ export type Principal =
   | { ok: true; kind: "operator"; email: string; via?: "access" | "session" }
   | { ok: true; kind: "moderator"; email: string }
   | { ok: true; kind: "admin"; email: string }
-  | { ok: true; kind: "agent"; agentId: string; displayName: string }
+  // v0.2.50 M3: `via` is "connector" when a connector access token (mt_) stands in for the Credential.
+  | { ok: true; kind: "agent"; agentId: string; displayName: string; via?: "connector"; grantId?: string }
   | { ok: false; code: AuthFailure };
 
 type CredentialRow = {
@@ -122,6 +124,7 @@ async function authenticateAgent(env: Env, header: string | null, ctx?: object):
   if (header === null) return { ok: false, code: "credential_invalid" };
   const token = bearerToken(header);
   if (token === null) return { ok: false, code: "credential_invalid" };
+  if (token.startsWith("mt_")) return authenticateConnector(env, token, ctx);
   const hash = await sha256Hex(token);
   const row = await env.DB.prepare(
     `SELECT credentials.state AS credential_state,
@@ -237,4 +240,16 @@ async function enrollment(env: Env, email: string): Promise<"operator" | "modera
   if (operator) return "operator";
   if (moderator) return "moderator";
   return "none";
+}
+
+// v0.2.50 M3: a connector access token acts as its grant's Agent, while the grant, its Operator,
+// and the Agent are all live. A grant with no Agent yet (before `join`) reaches no Agent route.
+async function authenticateConnector(env: Env, token: string, ctx?: object): Promise<Principal> {
+  const grant = await resolveAccessToken(env.DB, token);
+  if (grant === null || grant.agentId === null) return { ok: false, code: "credential_invalid" };
+  const agent = await env.DB.prepare("SELECT id, display_name, state FROM agents WHERE id = ?")
+    .bind(grant.agentId).first<{ id: string; display_name: string; state: string }>();
+  if (agent === null || agent.state !== "active") return { ok: false, code: "credential_invalid" };
+  await touchLastSeen(env.DB, agent.id, ctx);
+  return { ok: true, kind: "agent", agentId: agent.id, displayName: agent.display_name, via: "connector", grantId: grant.grantId };
 }
