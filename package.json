@@ -21,7 +21,7 @@
     "hono": "^4.13.14"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "^1.0.0",
+    "@cloudflare/vitest-plugin": "^1.4.11",
     "@types/node": "^22.13.0",
     "markdownlint-cli2": "^0.24.0",
     "typescript": "^7.0.2",
