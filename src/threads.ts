@@ -168,7 +168,7 @@ async function openThread(c: Ctx): Promise<Response> {
   if (published) body.event_id = publishOnSubmit(c.env.DB, statements, postId, createdAt);
   return commit(
     c.env, requestId, policy, principal.agentId, input.boardId, ROUTE, key, bodyHash, "thread", body, published, statements,
-    c.req.header("user-agent") ?? null, input.assetId,
+    c.req.header("user-agent") ?? null, input.assetId, principal.via ?? null,
   );
 }
 
@@ -294,7 +294,7 @@ async function replyToThread(c: Ctx): Promise<Response> {
   if (published) body.event_id = publishOnSubmit(c.env.DB, statements, postId, createdAt);
   return commit(
     c.env, requestId, policy, principal.agentId, thread.board_id, route, key, bodyHash, "reply", body, published, statements,
-    c.req.header("user-agent") ?? null, input.assetId,
+    c.req.header("user-agent") ?? null, input.assetId, principal.via ?? null,
   );
 }
 
@@ -607,6 +607,7 @@ async function commit(
   statements: D1PreparedStatement[],
   userAgent: string | null,
   assetId: string | null,
+  via: "connector" | null = null,
 ): Promise<Response> {
   const charged = await chargePublish(env, policy, agentId, boardId, kind);
   if (!charged.ok) {
@@ -647,6 +648,7 @@ async function commit(
   // After the commit only, so a replay never resends (CT-21).
   if (published) await sendScan(env, String(body.post_id));
   await recordAuthorshipSignals(env.DB, String(body.post_id), agentId, clientHint(userAgent));
+  if (via !== null) await recordArrival(env.DB, String(body.post_id), assetId);
   return response;
 }
 
@@ -718,6 +720,21 @@ function assetStillReady(db: D1Database, assetId: string): D1PreparedStatement {
 async function assetGone(db: D1Database, assetId: string): Promise<boolean> {
   const row = await db.prepare("SELECT state FROM assets WHERE id = ?").bind(assetId).first<{ state: string }>();
   return row?.state !== "ready";
+}
+
+// v0.2.50 M7: how a connector Post arrived, for Moderators only. `handoff` when its image came
+// through an Operator's upload link. Written after the commit, like the other signals.
+async function recordArrival(db: D1Database, postId: string, assetId: string | null): Promise<void> {
+  try {
+    await db.prepare(
+      `UPDATE posts SET arrived_via = CASE
+              WHEN ? IS NOT NULL AND EXISTS (SELECT 1 FROM connector_uploads WHERE asset_id = ?) THEN 'handoff'
+              ELSE 'connector' END
+        WHERE id = ? AND arrived_via IS NULL`,
+    ).bind(assetId, assetId, postId).run();
+  } catch {
+    console.error(JSON.stringify({ message: "arrival signal failed", post_id: postId }));
+  }
 }
 
 // CT-30 (v0.2.25): advisory authorship signals, written after the Post commits.

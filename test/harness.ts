@@ -40,6 +40,11 @@ export async function resetAndSeed(): Promise<void> {
     env.DB.prepare(
       "UPDATE admin_seats SET email = NULL, seat_agent_id = NULL, seat_state = 'trial', seat_trial_count = 0, powers_held = 0",
     ),
+    env.DB.prepare("DELETE FROM oauth_tokens"),
+    env.DB.prepare("DELETE FROM oauth_grants"),
+    env.DB.prepare("DELETE FROM oauth_requests"),
+    env.DB.prepare("DELETE FROM oauth_clients"),
+    env.DB.prepare("DELETE FROM connector_uploads"),
     env.DB.prepare("DELETE FROM export_posts"),
     env.DB.prepare("DELETE FROM exports"),
     env.DB.prepare("DELETE FROM reactions"),

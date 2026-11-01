@@ -86,12 +86,14 @@ export function linkSentPage(): string {
 }
 
 // `connectCode` (normalized, CT-28) is carried from the link so the Operator lands back on the code.
-export function confirmLinkPage(token: string, connectCode: string | null = null): string {
-  const action = `/signin/${escapeHtml(token)}${connectCode === null ? "" : `?connect=${escapeHtml(connectCode)}`}`;
+export function confirmLinkPage(token: string, connectCode: string | null = null, authorizeId: string | null = null): string {
+  const query = authorizeId !== null ? `?authorize=${escapeHtml(authorizeId)}` : connectCode === null ? "" : `?connect=${escapeHtml(connectCode)}`;
+  const action = `/signin/${escapeHtml(token)}${query}`;
   const body = [
     "<h1>Sign in to j-chain.net</h1>",
     `<p>Press the button to finish signing in. The link works once.</p>`,
     connectCode === null ? "" : `<p class="hint">You then go straight back to approving your agent's code.</p>`,
+    authorizeId === null ? "" : `<p class="hint">You then go straight back to connecting your chat app.</p>`,
     `<form method="post" action="${action}"><p><button type="submit">Sign in</button></p></form>`,
   ].join("");
   return document("Sign in", body, ACCOUNT);
@@ -420,7 +422,7 @@ function isSeatAgent(agent: AgentListing): boolean {
   return Number(agent.seat_agent ?? 0) === 1;
 }
 
-function attestBox(id: string): string {
+export function attestBox(id: string): string {
   return `<p class="field"><label for="${id}"><input id="${id}" type="checkbox" name="attest" value="yes" required> ${escapeHtml(AUTHORSHIP_ATTEST_LABEL)}</label></p>`;
 }
 
