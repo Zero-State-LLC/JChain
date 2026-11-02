@@ -11,6 +11,7 @@ import { displayUserCode, normalizeUserCode } from "./connect";
 import { sha256Hex } from "./credential";
 import { readForm } from "./forms";
 import { htmlError } from "./html";
+import { oauthSignInPage } from "./oauth-pages";
 import { htmlResponse } from "./http";
 import { isUuidV7, uuidv7 } from "./ids";
 import { sameOrigin } from "./origin";
@@ -33,6 +34,14 @@ import {
   signInEmail,
   signupAllowed,
 } from "./session";
+import {
+  TURNSTILE_FIELD,
+  TURNSTILE_TOKEN_MAX,
+  signInCsp,
+  signInTurnstileKey,
+  turnstileSecret,
+  verifyTurnstile,
+} from "./turnstile";
 import type { AppEnv, Ctx } from "./hono-env";
 
 // CT-18 as amended in v0.2.23. The sign-in page always renders. The email form
@@ -53,17 +62,21 @@ export function mountSignIn(app: Hono<AppEnv>): void {
   app.post("/signout/all", signOutEverywhere);
 }
 
+export const TURNSTILE_FAILED = "Complete the security check, then press the button again.";
+
 async function signInForm(c: Ctx): Promise<Response> {
   const requestId = uuidv7();
   const enabled = emailSignIn(c.env, policyOf(c.env));
   const session = enabled === null ? null : await currentSession(c.env, c.req.raw);
+  const siteKey = enabled === null ? null : signInTurnstileKey(policyOf(c.env));
   return htmlResponse(requestId, signInPage({
     emailOn: enabled !== null,
     linkMinutes: enabled?.auth.link_minutes,
     signedInAs: session?.email,
     signupOpen: enabled?.auth.signup_open === true && policyOf(c.env)?.operator_caps !== undefined,
     agentLimit: policyOf(c.env)?.operator_caps?.approved_agents,
-  }));
+    turnstileSiteKey: siteKey,
+  }), 200, signInCsp(siteKey));
 }
 
 function accessDoor(_c: Ctx): Response {
@@ -86,24 +99,56 @@ async function requestLink(c: Ctx): Promise<Response> {
   const connect = form.ok ? normalizeUserCode(form.value.connect ?? "") : null;
   // v0.2.50 M2: a pending app connection to come back to after sign-in. Only a well-formed id is kept.
   const authorize = form.ok && isUuidV7(form.value.authorize ?? "") ? form.value.authorize! : null;
-  if (!form.ok || !mailbox(email)) {
+  const siteKey = signInTurnstileKey(policy);
+  // The same form again with a message, for a bad address or a failed security check.
+  const again = (error: string): Response => {
+    const shown = typeof raw === "string" ? raw.slice(0, 254) : undefined;
     if (connect !== null) {
       return htmlResponse(requestId, connectSignInPage({
         code: connect,
         emailOn: true,
         linkMinutes: enabled.auth.link_minutes,
-        error: "Enter a whole email address, like name@example.com.",
-        email: typeof raw === "string" ? raw.slice(0, 254) : undefined,
-      }), 422);
+        error,
+        email: shown,
+        turnstileSiteKey: siteKey,
+      }), 422, signInCsp(siteKey));
+    }
+    if (authorize !== null) {
+      return htmlResponse(requestId, oauthSignInPage({
+        requestId: authorize,
+        appName: null,
+        emailOn: true,
+        linkMinutes: enabled.auth.link_minutes,
+        error,
+        turnstileSiteKey: siteKey,
+      }), 422, signInCsp(siteKey));
     }
     return htmlResponse(requestId, signInPage({
       emailOn: true,
       linkMinutes: enabled.auth.link_minutes,
       signupOpen: enabled.auth.signup_open && policy.operator_caps !== undefined,
       agentLimit: policy.operator_caps?.approved_agents,
-      error: "Enter a whole email address, like name@example.com.",
-      email: typeof raw === "string" ? raw.slice(0, 254) : undefined,
-    }), 422);
+      error,
+      email: shown,
+      turnstileSiteKey: siteKey,
+    }), 422, signInCsp(siteKey));
+  };
+  if (!form.ok || !mailbox(email)) return again("Enter a whole email address, like name@example.com.");
+  // v0.2.51 (#61): while sign-up is open, every request for a link passes Turnstile first, known
+  // address or not, so the check says nothing about who has an account. It fails closed: no
+  // secret means no link for anyone.
+  if (siteKey !== null) {
+    const secret = turnstileSecret(c.env);
+    if (secret === null) return htmlError(requestId, "policy_missing", "Sign in", "/signin", "Sign in", ACCOUNT);
+    const token = form.value[TURNSTILE_FIELD] ?? "";
+    const passed = token.length > 0 && token.length <= TURNSTILE_TOKEN_MAX && await verifyTurnstile(secret, token, {
+      remoteip: c.req.header("cf-connecting-ip"),
+      expectedHostname: new URL(policy.site_origin).hostname,
+    });
+    if (!passed) {
+      console.log(JSON.stringify({ message: "sign-in turnstile failed", request_id: requestId }));
+      return again(TURNSTILE_FAILED);
+    }
   }
   const { auth, mailer } = enabled;
   // Every outcome below shows the same page, so the answer never says whether

@@ -1,6 +1,6 @@
 import { applyD1Migrations, createExecutionContext, createMessageBatch, getQueueResult } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import production from "../policy/production.json";
 import {
   OPEN_SIGNUP_HOLD_FIRST_POSTS,
@@ -14,6 +14,7 @@ import { VALID_WEBP } from "./fixtures/bytes";
 import postpublishFixture from "./fixtures/policy-postpublish.json";
 import target from "./fixtures/policy-signup-open.json";
 import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, clearConnectQuota, clearSignInQuota, resetAndSeed } from "./harness";
+import { TURNSTILE_OK, stubTurnstile } from "./turnstile-stub";
 
 // #61 (ticket 25, CT-19, AT-30, FR-24): a rehearsal of opening sign-up under the exact policy the
 // flip PR will deploy. The fixture is policy/production.json with only the planned flip applied
@@ -69,7 +70,7 @@ function linkFrom(message: Sent): string {
 }
 
 function requestLink(bound: Env, email: string): Promise<Response> {
-  return call("/signin", { method: "POST", raw: form({ email }), headers: FORM, env: bound });
+  return call("/signin", { method: "POST", raw: form({ email, "cf-turnstile-response": TURNSTILE_OK }), headers: FORM, env: bound });
 }
 
 function useLink(bound: Env, token: string): Promise<Response> {
@@ -204,7 +205,12 @@ beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 beforeEach(async () => {
+  stubTurnstile();
   await resetAndSeed();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM sessions"),

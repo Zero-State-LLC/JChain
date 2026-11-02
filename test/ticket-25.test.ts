@@ -1,10 +1,11 @@
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AUTHORSHIP_RULE_VERSION } from "../src/authorship";
 import { sha256Hex } from "../src/credential";
 import { runRetention } from "../src/retention";
 import { ADMIN, OPERATOR, OPERATOR_ID, STAFF, call, clearSignInQuota, resetAndSeed } from "./harness";
+import { TURNSTILE_OK, stubTurnstile } from "./turnstile-stub";
 
 // Ticket 25 (#61, CT-19, AT-30, AT-28): Operator sign-up, approve_operator, and per-state Agent caps.
 
@@ -57,7 +58,7 @@ function linkFrom(message: Sent): string {
 }
 
 async function requestLink(env: Env, email: string): Promise<Response> {
-  return call("/signin", { method: "POST", raw: form({ email }), headers: FORM, env });
+  return call("/signin", { method: "POST", raw: form({ email, "cf-turnstile-response": TURNSTILE_OK }), headers: FORM, env });
 }
 
 async function useLink(env: Env, token: string): Promise<Response> {
@@ -90,7 +91,12 @@ beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 beforeEach(async () => {
+  stubTurnstile();
   await resetAndSeed();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM sessions"),

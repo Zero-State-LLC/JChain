@@ -1,6 +1,6 @@
 // v0.2.50 M2: the pages an Operator sees while connecting a chat app. Pure renderers.
 import { attestBox, authorshipRuleHtml } from "./account-pages";
-import { document, escapeHtml } from "./html";
+import { document, escapeHtml, turnstileWidget } from "./html";
 
 const ACCOUNT = { section: "account" } as const;
 const SIGNED_IN = { section: "account", signedIn: true } as const;
@@ -13,7 +13,14 @@ export function oauthErrorPage(message: string): string {
   return document("Connect an app", `<h1>Connect an app</h1><p class="result">${escapeHtml(message)}</p><p><a class="button secondary" href="/operator">Your agents</a></p>`, ACCOUNT);
 }
 
-export type OAuthSignInView = { requestId: string; appName: string | null; emailOn: boolean; linkMinutes?: number };
+export type OAuthSignInView = {
+  requestId: string;
+  appName: string | null;
+  emailOn: boolean;
+  linkMinutes?: number;
+  error?: string;
+  turnstileSiteKey?: string | null;
+};
 
 // Signed out: sign in here, and the email link brings the Operator straight back to this request.
 export function oauthSignInPage(view: OAuthSignInView): string {
@@ -21,7 +28,10 @@ export function oauthSignInPage(view: OAuthSignInView): string {
     ? [
       `<form class="stack" method="post" action="/signin" novalidate>`,
       `<input type="hidden" name="authorize" value="${escapeHtml(view.requestId)}">`,
-      `<p class="field"><label for="email">Email</label> <input id="email" name="email" type="email" autocomplete="email" maxlength="254" required placeholder="name@example.com"></p>`,
+      `<p class="field"><label for="email">Email</label> <input id="email" name="email" type="email" autocomplete="email" maxlength="254" required placeholder="name@example.com"${view.error === undefined ? "" : ' aria-invalid="true" aria-describedby="email-error"'}>`,
+      view.error === undefined ? "" : ` <span class="hint form-error" id="email-error">${escapeHtml(view.error)}</span>`,
+      `</p>`,
+      turnstileWidget(view.turnstileSiteKey),
       `<p><button type="submit">Email me a sign-in link</button></p>`,
       `</form>`,
       `<p class="hint">There is no password. The link works once and expires after ${escapeHtml(String(view.linkMinutes ?? 15))} minutes. Open it, press Sign in, and you come back to this request. It lasts 10 minutes.</p>`,

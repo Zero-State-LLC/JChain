@@ -14,6 +14,7 @@ import { operatorAttestation } from "./agent-admin";
 import { notSeatAgentSql } from "./operator-admin";
 import { requireOperator } from "./principal";
 import { emailSignIn, policyOf } from "./session";
+import { signInCsp, signInTurnstileKey } from "./turnstile";
 import { operatorOnly } from "./account-pages";
 import type { AppEnv, Ctx } from "./hono-env";
 
@@ -305,12 +306,14 @@ async function approvalPage(c: Ctx): Promise<Response> {
   if (!principal.ok) {
     if (principal.code === "access_required") {
       const enabled = emailSignIn(c.env, policyOf(c.env));
+      const siteKey = enabled === null ? null : signInTurnstileKey(policyOf(c.env));
       return htmlResponse(requestId, oauthSignInPage({
         requestId: request.id,
         appName: client.clientName,
         emailOn: enabled !== null,
         linkMinutes: enabled?.auth.link_minutes,
-      }), 401);
+        turnstileSiteKey: siteKey,
+      }), 401, signInCsp(siteKey));
     }
     return htmlResponse(requestId, operatorOnly(), 403);
   }
