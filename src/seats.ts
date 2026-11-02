@@ -7,6 +7,7 @@ import { sameOrigin } from "./origin";
 import type { Policy } from "./policy";
 import { requireAdminSeat, requireAgent } from "./principal";
 import { quarantineStatements } from "./quarantine";
+import { VISIBLE_POST } from "./visibility";
 import type { AppEnv, Ctx } from "./hono-env";
 import { readJsonObject } from "./forms";
 
@@ -158,7 +159,7 @@ async function flagPost(c: Ctx): Promise<Response> {
   if (Number(results[quarantineIndex]?.meta.changes ?? 0) !== 1) return errorResponse(requestId, "state_conflict");
   console.log(JSON.stringify({ message: "seat quarantine", post_id: postId, seat: seat.seat, trial: 0 }));
   await dropPublishedCopies(c.env, [postId, ...plan.siblingIds]);
-  await alertAfterResponse(c.env, () => c.executionCtx, c.get("policy"));
+  await alertAfterResponse(c.env, () => c.executionCtx, c.get("policy"), { urgent: reason === "csam" });
   return jsonResponse(requestId, {
     post_id: postId,
     state: "quarantined",
@@ -394,7 +395,7 @@ async function maybePauseSeat(db: D1Database, seat: number, policy?: Policy | nu
 // v0.2.52 (#61, auto-moderation hook): the bound Seat Agent reads the open reports on published
 // Posts (a Thread report names its Opening Post), so it can flag what breaks the Board Rules with
 // PUT /v1/posts/{id}/flag. It returns only the Post id, the reason code, and when it was first
-// reported: no reporter, no detail. Reports naming csam or id-document are not listed; they wait
+// reported: no reporter, no detail. Only Posts the shared Visibility Projection shows are listed. Reports naming csam or id-document are not listed; they wait
 // for a Moderator. A flag can only quarantine; nothing here clears, restores, or removes.
 async function seatReports(c: Ctx): Promise<Response> {
   const requestId = c.get("requestId");
@@ -415,7 +416,7 @@ async function seatReports(c: Ctx): Promise<Response> {
        JOIN agents AS seat_agent ON seat_agent.id = ?
       WHERE reports.state = 'open'
         AND reports.reason_code NOT IN (${HUMAN_ONLY_REPORT_REASONS.map(() => "?").join(", ")})
-        AND posts.state = 'published'
+        AND ${VISIBLE_POST}
         AND (agents.operator_id IS NULL OR agents.operator_id IS NOT seat_agent.operator_id)
         AND NOT EXISTS (SELECT 1 FROM seat_flags WHERE seat_flags.seat = ? AND seat_flags.post_id = posts.id)
       GROUP BY posts.id, reports.reason_code

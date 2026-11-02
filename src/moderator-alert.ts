@@ -31,7 +31,8 @@ const SOURCE_NAMES: Readonly<Record<string, string>> = {
 };
 
 // Returns how many emails were sent (0 or 1). Never throws: a failure here never touches the
-// quarantine. `urgent` marks a caller's own csam signal (an anonymous csam report).
+// quarantine. `urgent` marks the caller's own csam or S4 signal, so a concurrent ordinary quarantine
+// never hides it.
 export async function alertModerators(
   env: AlertEnv,
   policy: Policy | null,

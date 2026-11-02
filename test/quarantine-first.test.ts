@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import worker from "../src/index";
 import { utcSeconds, uuidv7 } from "../src/ids";
 import { derivativeKey } from "../src/asset-pipeline";
-import { ALERT_SUBJECT } from "../src/moderator-alert";
+import { ALERT_SUBJECT, alertModerators } from "../src/moderator-alert";
 import { clearNamedQuota } from "../src/quota";
 import { runRetention } from "../src/retention";
 import postpublishFixture from "./fixtures/policy-postpublish.json";
@@ -584,6 +584,24 @@ describe("v0.2.52 Seat Agent report feed (#61)", () => {
     await expectError(await call("/v1/seat/reports", { bearer: author.credential }), 403, "forbidden");
     await expectError(await call("/v1/seat/reports", { email: STAFF }), 403, "forbidden");
 
+    // A published Reply under a quarantined Opening Post is not visible, so it is not listed.
+    const hiddenThread = await seedPost(author.agentId);
+    const reply = uuidv7();
+    await env.DB.prepare(
+      `INSERT INTO posts (
+         id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
+         provenance_source, rights_attestation, license, state, created_at
+       ) VALUES (?, ?, ?, NULL, NULL, 'reply', 'alt', 'human', 'mine', 'cc0', 'published', ?)`,
+    ).bind(reply, hiddenThread.threadId, author.agentId, utcSeconds()).run();
+    await expectJson(await call("/v1/reports", {
+      body: { target_type: "post", target_id: reply, reason_code: "spam", turnstile_token: "token-ok" },
+    }), 201);
+    expect((await expectJson(await call("/v1/seat/reports", { bearer: seat.credential }), 200)).reports)
+      .toEqual([expect.objectContaining({ post_id: spam.postId }), expect.objectContaining({ post_id: reply })]);
+    await env.DB.prepare("UPDATE posts SET state = 'quarantined' WHERE id = ?").bind(hiddenThread.postId).run();
+    expect((await expectJson(await call("/v1/seat/reports", { bearer: seat.credential }), 200)).reports)
+      .toEqual([expect.objectContaining({ post_id: spam.postId })]);
+
     // Once the seat flags a Post it leaves the list. In the trial the Post stays published.
     await expectJson(await seatFlag(spam.postId, seat.credential, "off-topic"), 200);
     expect((await expectJson(await call("/v1/seat/reports", { bearer: seat.credential }), 200)).reports).toEqual([]);
@@ -696,6 +714,24 @@ describe("AT-76 Moderator email", () => {
     }), 201);
     expect(sent).toHaveLength(2);
     expect(await postRow(third.postId)).toMatchObject({ state: "quarantined", legal_hold: 1 });
+  });
+
+  it("AT-76 a caller's csam signal keeps its own window even when a newer quarantine is ordinary", async () => {
+    const sent: Sent[] = [];
+    const mailEnv = withMail(sent);
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const seeded = await seedPost(author.agentId);
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      env: mailEnv,
+      body: { target_type: "post", target_id: seeded.postId, reason_code: "spam" },
+    }), 201);
+    expect(sent).toHaveLength(1);
+    // The latest audit row is ordinary, as when a concurrent quarantine commits first.
+    const policy = JSON.parse(mailEnv.POLICY as string);
+    expect(await alertModerators(mailEnv, policy)).toBe(0);
+    expect(await alertModerators(mailEnv, policy, { urgent: true })).toBe(1);
+    expect(sent).toHaveLength(2);
   });
 
   it("AT-76 an anonymous csam report alerts without quarantining", async () => {
