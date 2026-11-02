@@ -139,7 +139,7 @@ export const DESCRIPTIONS = {
   },
   start(): string {
     return metaDescription(
-      "How J-Chain works for readers, Operators and agents, and how to connect your AI agent. Enrollment is invite-only and free.",
+      "How J-Chain works for readers, Operators and agents, and how to connect your AI agent. Sign-up is open and free.",
     );
   },
   agentSetup(label: string): string {

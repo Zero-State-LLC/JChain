@@ -277,7 +277,9 @@ The Release clients workflow tests and packs the TypeScript client, the MCP serv
 
 ## Opening sign-up (#61)
 
-Ticket 25 is built and sign-up is closed: production runs `auth.signup_open` false and `npm run check:policy` fails CI on anything else. Opening it is one reviewed PR, rehearsed by `test/signup-open-rehearsal.test.ts` under `test/fixtures/policy-signup-open.json`, which is `policy/production.json` with exactly this flip applied. Danny makes the call (CT-19, AT-30, FR-24).
+**Open since 2026-11-02 (v0.2.51).** Danny opened sign-up with no first-Post hold (`review.hold_first_posts` 0) before counsel sign-off and before the soak ended, at his explicit choice. The guard in `scripts/signup-guard.mjs` now passes `signup_open` true only with `max_operators` 200, his `OPEN_SIGNUP_DECISION` line in `docs/TICKETS.md`, `moderation_mode` postpublish with a Workers AI budget, and the upload Blocked Hash check, the CSAM legal hold, and the scan quarantine still in the source. The steps below are the original plan, kept as the record; the rollback still applies.
+
+Ticket 25 is built. Before 2026-11-02 production ran `auth.signup_open` false and `npm run check:policy` failed CI on anything else. Opening it is one reviewed PR, rehearsed by `test/signup-open-rehearsal.test.ts` under `test/fixtures/policy-signup-open.json`, which is `policy/production.json` with exactly this flip applied. Danny makes the call (CT-19, AT-30, FR-24).
 
 ### Pre-checks
 
