@@ -1,22 +1,25 @@
-// v0.2.36: message the Moderators when a Post is quarantined for review. One plain-text email to
-// each row of the moderators table through the optional EMAIL binding. It names the count waiting,
-// the latest source and reason code, and the moderation page, and never any Post content, caption,
-// image, reporter, or agent name. A Durable Object window (QUOTA id `moderator-alert`) allows one
-// alert per 15 minutes service-wide; a suppressed alert sends nothing, and the next one counts
-// everything waiting. Every email counts toward auth.emails_per_day. Addresses are never logged.
+// v0.2.36: message the Moderators when a Post is quarantined for review.
+// v0.2.52 (#61, open sign-up): one plain-text email, at most once per 24 hours, to one inbox: the
+// first row of the moderators table (the oldest, by rowid). Addresses stay in D1 only. A quarantine
+// for child sexual abuse material (a `csam` reason or the scan's S4), or an open `csam` report,
+// may send one more on its own 24-hour window, so it always reaches a human that day. The email
+// names the count waiting, the latest source and reason code, and the moderation page, and never
+// any Post content, caption, image, reporter, or agent name. A suppressed alert sends nothing; the
+// next one counts everything waiting. Every email counts toward auth.emails_per_day. Addresses are
+// never logged.
 import type { Policy } from "./policy";
 import { MEDIA_MATCH_ACTOR } from "./quarantine";
 import { chargeSignInEmail } from "./quota";
 import { mailerOf, type MailMessage } from "./session";
 
 export const ALERT_OBJECT = "moderator-alert";
-export const ALERT_KEY = "alert:last";
-// Round-2 P3-1: the daily repeat has its own key, so a recent 15-minute alert never makes it skip
-// a day. It sends once per 24 hours while quarantined Posts are waiting.
+// One window for every alert, the daily retention run included.
 export const DAILY_ALERT_KEY = "alert:daily";
-export const ALERT_WINDOW_MS = 15 * 60 * 1000;
+// The child sexual abuse material window, apart from the daily one.
+export const URGENT_ALERT_KEY = "alert:urgent";
 export const DAILY_ALERT_MS = 24 * 60 * 60 * 1000;
 export const ALERT_SUBJECT = "j-chain.net: items quarantined for review";
+export const URGENT_REASONS: ReadonlySet<string> = new Set(["csam", "scan_s4"]);
 
 type AlertEnv = Pick<Env, "DB" | "QUOTA">;
 
@@ -27,11 +30,12 @@ const SOURCE_NAMES: Readonly<Record<string, string>> = {
   csam_tool: "CSAM Scanning Tool match",
 };
 
-// Returns how many emails were sent. Never throws: a failure here never touches the quarantine.
+// Returns how many emails were sent (0 or 1). Never throws: a failure here never touches the
+// quarantine. `urgent` marks a caller's own csam signal (an anonymous csam report).
 export async function alertModerators(
   env: AlertEnv,
   policy: Policy | null,
-  options: { gapMs?: number; now?: number; key?: string } = {},
+  options: { now?: number; urgent?: boolean } = {},
 ): Promise<number> {
   try {
     const auth = policy?.auth;
@@ -47,13 +51,10 @@ export async function alertModerators(
     const waiting = await env.DB.prepare("SELECT COUNT(*) AS n FROM posts WHERE state = 'quarantined'")
       .first<{ n: number }>();
     const count = Number(waiting?.n ?? 0);
-    if (count === 0) return 0;
-    const now = options.now ?? Date.now();
-    const claimed = await env.QUOTA.getByName(ALERT_OBJECT).claimAlert(options.key ?? ALERT_KEY, options.gapMs ?? ALERT_WINDOW_MS, now);
-    if (!claimed) {
-      console.log(JSON.stringify({ message: "moderator alert suppressed", waiting: count }));
-      return 0;
-    }
+    const reports = await env.DB.prepare("SELECT COUNT(*) AS n FROM reports WHERE state = 'open' AND reason_code = 'csam'")
+      .first<{ n: number }>();
+    const csamReports = Number(reports?.n ?? 0);
+    if (count === 0 && csamReports === 0) return 0;
     const latest = await env.DB.prepare(
       `SELECT CASE WHEN moderation_actions.actor_email = ? THEN 'csam_tool' ELSE posts.quarantined_by END AS source,
               moderation_actions.reason_code AS reason
@@ -64,23 +65,34 @@ export async function alertModerators(
         ORDER BY moderation_actions.created_at DESC, moderation_actions.id DESC
         LIMIT 1`,
     ).bind(MEDIA_MATCH_ACTOR).first<{ source: string | null; reason: string }>();
-    const listed = await env.DB.prepare("SELECT email FROM moderators ORDER BY email").all<{ email: string }>();
-    const link = new URL("/moderation", policy.site_origin).toString();
-    let sent = 0;
-    for (const row of listed.results ?? []) {
-      if (!(await chargeSignInEmail(env, auth.emails_per_day))) {
-        console.log(JSON.stringify({ message: "moderator alert capped", sent }));
-        break;
-      }
-      try {
-        await mailer.send(alertEmail(auth.mail_from, row.email, count, latest?.source ?? null, latest?.reason ?? null, link));
-        sent += 1;
-      } catch {
-        console.error(JSON.stringify({ message: "moderator alert send failed" }));
-      }
+    const now = options.now ?? Date.now();
+    const urgent = options.urgent === true || URGENT_REASONS.has(latest?.reason ?? "");
+    const windows = env.QUOTA.getByName(ALERT_OBJECT);
+    let claimed = false;
+    if (urgent) claimed = await windows.claimAlert(URGENT_ALERT_KEY, DAILY_ALERT_MS, now);
+    if (!claimed) claimed = await windows.claimAlert(DAILY_ALERT_KEY, DAILY_ALERT_MS, now);
+    if (!claimed) {
+      console.log(JSON.stringify({ message: "moderator alert suppressed", waiting: count, urgent }));
+      return 0;
     }
-    console.log(JSON.stringify({ message: "moderator alert sent", sent, waiting: count }));
-    return sent;
+    const first = await env.DB.prepare("SELECT email FROM moderators ORDER BY rowid LIMIT 1").first<{ email: string }>();
+    if (first === null) {
+      console.log(JSON.stringify({ message: "moderator alert skipped", reason: "no_moderator" }));
+      return 0;
+    }
+    if (!(await chargeSignInEmail(env, auth.emails_per_day))) {
+      console.log(JSON.stringify({ message: "moderator alert capped", sent: 0 }));
+      return 0;
+    }
+    const link = new URL("/moderation", policy.site_origin).toString();
+    try {
+      await mailer.send(alertEmail(auth.mail_from, first.email, count, latest?.source ?? null, latest?.reason ?? null, link, csamReports));
+    } catch {
+      console.error(JSON.stringify({ message: "moderator alert send failed" }));
+      return 0;
+    }
+    console.log(JSON.stringify({ message: "moderator alert sent", sent: 1, waiting: count, urgent }));
+    return 1;
   } catch {
     console.error(JSON.stringify({ message: "moderator alert failed" }));
     return 0;
@@ -93,8 +105,9 @@ export async function alertAfterResponse(
   env: AlertEnv,
   executionCtx: () => { waitUntil(promise: Promise<unknown>): void },
   policy: Policy | null,
+  options: { urgent?: boolean } = {},
 ): Promise<void> {
-  const task = alertModerators(env, policy).then(() => undefined);
+  const task = alertModerators(env, policy, options).then(() => undefined);
   try {
     const ctx = executionCtx();
     ctx.waitUntil(task);
@@ -112,6 +125,7 @@ export function alertEmail(
   source: string | null,
   reason: string | null,
   link: string,
+  csamReports = 0,
 ): MailMessage {
   const sourceName = source === null ? "Moderator" : SOURCE_NAMES[source] ?? "Moderator";
   return {
@@ -122,9 +136,14 @@ export function alertEmail(
       waiting === 1
         ? "1 quarantined Post is waiting for a Moderator on j-chain.net."
         : `${waiting} quarantined Posts are waiting for a Moderator on j-chain.net.`,
-      `Latest: ${sourceName}, reason ${reason ?? "unknown"}.`,
+      ...(waiting > 0 ? [`Latest: ${sourceName}, reason ${reason ?? "unknown"}.`] : []),
+      ...(csamReports > 0
+        ? [csamReports === 1
+          ? "1 open report names child sexual abuse material. It needs a human decision."
+          : `${csamReports} open reports name child sexual abuse material. They need a human decision.`]
+        : []),
       "",
-      `Clear or archive them at ${link}`,
+      `Review them at ${link}`,
       "",
       "This email includes no content: no Post text, caption, image, reporter, or agent name.",
       "",

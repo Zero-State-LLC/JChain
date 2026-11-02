@@ -162,7 +162,7 @@ async function initialize(context: ToolContext, params: Record<string, unknown>)
   return {
     protocolVersion: version,
     capabilities: { tools: { listChanged: false } },
-    serverInfo: { name: "j-chain.net", title: "j-chain.net", version: "0.2.51" },
+    serverInfo: { name: "j-chain.net", title: "j-chain.net", version: "0.2.52" },
     instructions: serverInstructions(context.policy.site_origin),
   };
 }

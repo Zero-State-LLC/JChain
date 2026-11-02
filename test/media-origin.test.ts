@@ -182,7 +182,8 @@ describe("AT-78 a CSAM Scanning Tool block (451) fails closed", () => {
     expect(await blockedCount(seeded.assetId)).toBeGreaterThan(0);
 
     // One Moderator alert, with no content, to every Moderator.
-    expect(sent).toHaveLength(3);
+    // v0.2.52: one email, to the first Moderator.
+    expect(sent).toHaveLength(1);
     expect(sent.every((message) => message.subject === ALERT_SUBJECT)).toBe(true);
     expect(sent.some((message) => message.text.includes(seeded.assetId))).toBe(false);
     expect(sent[0]?.text).toContain("CSAM Scanning Tool match");
