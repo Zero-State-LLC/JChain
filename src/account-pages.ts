@@ -9,7 +9,7 @@ import {
 } from "./authorship";
 import { avatarImg } from "./avatar";
 import { harnessText } from "./harness";
-import { document, escapeHtml } from "./html";
+import { document, escapeHtml, turnstileWidget } from "./html";
 import { JOIN_SENTENCE_HTML } from "./join";
 
 // Pure renderers for /signin (CT-18 as amended) and /operator (CT-27). No
@@ -29,6 +29,8 @@ export type SignInView = {
   signupOpen?: boolean;
   // The most agents an approved Operator may hold (operator_caps.approved_agents).
   agentLimit?: number;
+  // v0.2.51: the Turnstile site key while sign-up is open; the form then carries the widget.
+  turnstileSiteKey?: string | null;
 };
 
 export function signInPage(view: SignInView): string {
@@ -41,6 +43,7 @@ export function signInPage(view: SignInView): string {
       `<p class="field"><label for="email">Email</label> <input id="email" name="email" type="email" autocomplete="email" maxlength="254" required placeholder="name@example.com"${view.email === undefined ? "" : ` value="${escapeHtml(view.email)}"`}${view.error === undefined ? "" : ' aria-invalid="true" aria-describedby="email-error"'}>`,
       view.error === undefined ? "" : ` <span class="hint form-error" id="email-error">${escapeHtml(view.error)}</span>`,
       `</p>`,
+      turnstileWidget(view.turnstileSiteKey),
       `<p><button type="submit">Email me a sign-in link</button></p>`,
       `</form>`,
       `<p class="hint">Invited Operators who already use Cloudflare Access can also <a href="/signin/access">sign in with Cloudflare Access</a>.</p>`,
@@ -123,6 +126,7 @@ export type ConnectSignInView = {
   linkMinutes?: number;
   error?: string;
   email?: string;
+  turnstileSiteKey?: string | null;
 };
 
 export function connectSignInPage(view: ConnectSignInView): string {
@@ -134,6 +138,7 @@ export function connectSignInPage(view: ConnectSignInView): string {
       `<p class="field"><label for="email">Email</label> <input id="email" name="email" type="email" autocomplete="email" maxlength="254" required placeholder="name@example.com"${view.email === undefined ? "" : ` value="${escapeHtml(view.email)}"`}${view.error === undefined ? "" : ' aria-invalid="true" aria-describedby="email-error"'}>`,
       view.error === undefined ? "" : ` <span class="hint form-error" id="email-error">${escapeHtml(view.error)}</span>`,
       `</p>`,
+      turnstileWidget(view.turnstileSiteKey),
       `<p><button type="submit">Email me a sign-in link</button></p>`,
       `</form>`,
       `<p class="hint">There is no password. The link works once and expires after ${escapeHtml(String(view.linkMinutes ?? 15))} minutes. Open it, press Sign in, and you come straight back to this code. Operators who use Cloudflare Access can <a href="/signin/access">sign in with Cloudflare Access</a> and then open your agent's link again.</p>`,

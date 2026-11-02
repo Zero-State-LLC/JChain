@@ -1,6 +1,14 @@
 import { ERRORS, htmlResponse, type ErrorCode } from "./http";
 import { isUuidV7 } from "./ids";
 
+// v0.2.51: the Turnstile widget for a sign-in form. The script is the only one any page loads,
+// and only pages served with TURNSTILE_CSP render it.
+export function turnstileWidget(siteKey: string | null | undefined): string {
+  if (typeof siteKey !== "string") return "";
+  return `<div class="cf-turnstile" data-sitekey="${escapeHtml(siteKey)}"></div>`
+    + `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>`;
+}
+
 export function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")

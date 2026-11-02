@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { signInCsp, signInTurnstileKey } from "./turnstile";
 import { approvedCodesSql, effectiveCap, heldPlaces, notSeatAgentSql, operatorMayAdd } from "./operator-admin";
 import {
   connectCapPage,
@@ -246,11 +247,13 @@ async function connectForm(c: Ctx): Promise<Response> {
     const principal = await requireOperator(c.env, c.req.raw, c.executionCtx);
     if (!principal.ok && principal.code === "access_required") {
       const enabled = emailSignIn(c.env, policyOf(c.env));
+      const siteKey = enabled === null ? null : signInTurnstileKey(policyOf(c.env));
       return htmlResponse(uuidv7(), connectSignInPage({
         code,
         emailOn: enabled !== null,
         linkMinutes: enabled?.auth.link_minutes,
-      }), 401);
+        turnstileSiteKey: siteKey,
+      }), 401, signInCsp(siteKey));
     }
   }
   const opened = await open(c, false);
