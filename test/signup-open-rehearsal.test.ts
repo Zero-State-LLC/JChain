@@ -223,16 +223,20 @@ describe("#61 target policy", () => {
     // Local values only where a test cannot use production's: the origin and the Turnstile key.
     expect(target.site_origin).toBe(postpublishFixture.site_origin);
     expect(target.turnstile_site_key).toBe(postpublishFixture.turnstile_site_key);
+    // The open values are applied here, not read from production, so closing sign-up (RUNBOOK
+    // rollback: auth.signup_open false) stays a policy-only change that still passes this test.
     expect(target).toEqual({
       ...production,
       site_origin: postpublishFixture.site_origin,
       turnstile_site_key: postpublishFixture.turnstile_site_key,
+      max_operators: OPEN_SIGNUP_MAX_OPERATORS,
+      review: { ...production.review, hold_first_posts: 0 },
+      auth: { ...production.auth, signup_open: true },
     });
-    expect(production.auth.signup_open).toBe(true);
-    expect(production.max_operators).toBe(OPEN_SIGNUP_MAX_OPERATORS);
     expect(OPEN_SIGNUP_MAX_OPERATORS).toBe(200);
     // Danny, 2026-11-02: no first-Post hold.
-    expect(production.review.hold_first_posts).toBe(0);
+    expect(target.review.hold_first_posts).toBe(0);
+    expect(target.auth.signup_open).toBe(true);
     expect(target.operator_caps).toEqual({ provisional_agents: 1, approved_agents: 1, max_agents: 1 });
 
     // scripts/check-policy.mjs: a closed policy passes with nothing else, and the open policy
