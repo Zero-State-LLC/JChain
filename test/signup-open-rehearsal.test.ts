@@ -3,8 +3,10 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import production from "../policy/production.json";
 import {
-  OPEN_SIGNUP_HOLD_FIRST_POSTS,
   OPEN_SIGNUP_MAX_OPERATORS,
+  SAFETY_CHECKS,
+  SAFETY_MARKERS,
+  safetyFromSources,
   signupProblem,
 } from "../scripts/signup-guard.mjs";
 import { AUTHORSHIP_RULE_VERSION } from "../src/authorship";
@@ -13,14 +15,14 @@ import { chargeSignInEmail } from "../src/quota";
 import { VALID_WEBP } from "./fixtures/bytes";
 import postpublishFixture from "./fixtures/policy-postpublish.json";
 import target from "./fixtures/policy-signup-open.json";
-import { BOARD_ID, MODERATOR, OPERATOR, UUID_V7, call, clearConnectQuota, clearSignInQuota, resetAndSeed } from "./harness";
+import { BOARD_ID, OPERATOR, UUID_V7, call, clearConnectQuota, clearSignInQuota, resetAndSeed } from "./harness";
 import { TURNSTILE_OK, stubTurnstile } from "./turnstile-stub";
 
-// #61 (ticket 25, CT-19, AT-30, FR-24): a rehearsal of opening sign-up under the exact policy the
-// flip PR will deploy. The fixture is policy/production.json with only the planned flip applied
-// (max_operators 200, review.hold_first_posts 3, auth.signup_open true) and the local test origin
-// and Turnstile key. If production's policy changes, this fixture must change with it, and the
-// first test says so. The procedure is the RUNBOOK section "Opening sign-up (#61)".
+// #61 (ticket 25, CT-19, AT-30, FR-24): sign-up under the exact policy production runs since
+// Danny opened it on 2026-11-02 (max_operators 200, review.hold_first_posts 0, auth.signup_open
+// true). The fixture is policy/production.json with only the local test origin and Turnstile
+// key. If production's policy changes, this fixture must change with it, and the first test says
+// so. The procedure is the RUNBOOK section "Opening sign-up (#61)".
 
 const SIGNUP_OPEN = JSON.stringify(target);
 const SIGNUP_CLOSED = JSON.stringify({ ...target, auth: { ...target.auth, signup_open: false } });
@@ -28,7 +30,8 @@ const ORIGIN = postpublishFixture.site_origin;
 const FORM = { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN };
 const NEWCOMER = "newcomer@test.example";
 const STRANGER = "stranger@test.example";
-const DECISION = "OPEN_SIGNUP_DECISION: Danny, 2026-11-08, counsel signed off on #67 and #68";
+const DECISION = "OPEN_SIGNUP_DECISION: Danny, 2026-11-02 - open sign-up, no first-post hold";
+const SAFE = Object.fromEntries(SAFETY_CHECKS.map((check: string) => [check, true]));
 
 type Sent = { from: string; to: string; subject: string; text: string };
 type Rig = { env: Env; sent: Sent[]; scans: unknown[] };
@@ -172,14 +175,6 @@ async function readyAsset(bound: Env, credential: string): Promise<string> {
   return assetId;
 }
 
-async function approve(bound: Env, postId: string): Promise<void> {
-  await success(await call("/v1/moderation/actions", {
-    email: MODERATOR,
-    body: { target_type: "post", target_id: postId, action: "approve", reason_code: "rules" },
-    env: bound,
-  }));
-}
-
 async function postState(postId: string): Promise<string | undefined> {
   return (await env.DB.prepare("SELECT state FROM posts WHERE id = ?").bind(postId).first<{ state: string }>())?.state;
 }
@@ -224,44 +219,65 @@ beforeEach(async () => {
 });
 
 describe("#61 target policy", () => {
-  it("is production's policy with only the planned flip applied, and the CI guard accepts the flip", () => {
+  it("is production's policy, and the CI guard accepts it only with the decision line and the safety checks", () => {
     // Local values only where a test cannot use production's: the origin and the Turnstile key.
     expect(target.site_origin).toBe(postpublishFixture.site_origin);
     expect(target.turnstile_site_key).toBe(postpublishFixture.turnstile_site_key);
     expect(target).toEqual({
       ...production,
-      max_operators: OPEN_SIGNUP_MAX_OPERATORS,
       site_origin: postpublishFixture.site_origin,
       turnstile_site_key: postpublishFixture.turnstile_site_key,
-      review: { ...production.review, hold_first_posts: OPEN_SIGNUP_HOLD_FIRST_POSTS },
-      auth: { ...production.auth, signup_open: true },
     });
+    expect(production.auth.signup_open).toBe(true);
+    expect(production.max_operators).toBe(OPEN_SIGNUP_MAX_OPERATORS);
     expect(OPEN_SIGNUP_MAX_OPERATORS).toBe(200);
-    expect(OPEN_SIGNUP_HOLD_FIRST_POSTS).toBe(3);
+    // Danny, 2026-11-02: no first-Post hold.
+    expect(production.review.hold_first_posts).toBe(0);
     expect(target.operator_caps).toEqual({ provisional_agents: 1, approved_agents: 1, max_agents: 1 });
 
-    // scripts/check-policy.mjs: a closed production policy passes with no decision line, and the
-    // flip passes with Danny's line. Both are built here, so this still holds after the flip PR.
-    const flipped = { ...target, site_origin: production.site_origin, turnstile_site_key: production.turnstile_site_key };
-    const closedProduction = { ...production, auth: { ...production.auth, signup_open: false } };
-    expect(signupProblem(closedProduction, "")).toBeNull();
-    expect(signupProblem({ ...flipped, auth: { ...flipped.auth, signup_open: false } }, "")).toBeNull();
-    expect(signupProblem(flipped, `# Tickets\n\n${DECISION}\n`)).toBeNull();
-    // Without the decision line, or short of any planned value, the flip fails CI.
-    expect(signupProblem(flipped, "# Tickets\n")).toMatch(/OPEN_SIGNUP_DECISION/);
-    expect(signupProblem(flipped, "Not yet. OPEN_SIGNUP_DECISION: Danny, 2026-11-08")).toMatch(/OPEN_SIGNUP_DECISION/);
-    expect(signupProblem(flipped, "OPEN_SIGNUP_DECISION: Someone, 2026-11-08")).toMatch(/OPEN_SIGNUP_DECISION/);
-    expect(signupProblem({ ...flipped, max_operators: 6 }, DECISION)).toMatch(/max_operators 200/);
-    expect(signupProblem({ ...flipped, review: { ...flipped.review, hold_first_posts: 2 } }, DECISION)).toMatch(/hold_first_posts 3/);
-    expect(signupProblem({ ...flipped, auth: { ...flipped.auth, signup_open: "true" } }, DECISION)).toMatch(/must stay false/);
+    // scripts/check-policy.mjs: a closed policy passes with nothing else, and the open policy
+    // passes with Danny's line and every safety check.
+    const opened = { ...target, site_origin: production.site_origin, turnstile_site_key: production.turnstile_site_key };
+    const closed = { ...opened, auth: { ...opened.auth, signup_open: false } };
+    expect(signupProblem(closed, "", {})).toBeNull();
+    expect(signupProblem(opened, `# Tickets\n\n${DECISION}\n`, SAFE)).toBeNull();
+    // Without the decision line, short of any planned value, or with a safety check missing, CI fails.
+    expect(signupProblem(opened, "# Tickets\n", SAFE)).toMatch(/OPEN_SIGNUP_DECISION/);
+    expect(signupProblem(opened, "Not yet. OPEN_SIGNUP_DECISION: Danny, 2026-11-08", SAFE)).toMatch(/OPEN_SIGNUP_DECISION/);
+    expect(signupProblem(opened, "OPEN_SIGNUP_DECISION: Someone, 2026-11-08", SAFE)).toMatch(/OPEN_SIGNUP_DECISION/);
+    expect(signupProblem({ ...opened, max_operators: 6 }, DECISION, SAFE)).toMatch(/max_operators 200/);
+    expect(signupProblem({ ...opened, moderation_mode: "prepublish" }, DECISION, SAFE)).toMatch(/postpublish/);
+    expect(signupProblem({ ...opened, moderation: { ai_neurons_per_day: 0 } }, DECISION, SAFE)).toMatch(/ai_neurons_per_day/);
+    for (const check of SAFETY_CHECKS) {
+      expect(signupProblem(opened, DECISION, { ...SAFE, [check]: false }), check).toMatch(new RegExp(check));
+    }
+    expect(signupProblem(opened, DECISION, undefined)).toMatch(/safety check/);
+    expect(signupProblem({ ...opened, auth: { ...opened.auth, signup_open: "true" } }, DECISION, SAFE)).toMatch(/must be false/);
     const noAuth: Record<string, unknown> = { ...production };
     delete noAuth.auth;
-    expect(signupProblem(noAuth, DECISION)).toMatch(/must stay false/);
+    expect(signupProblem(noAuth, DECISION, SAFE)).toMatch(/must be false/);
+  });
+
+  it("finds each safety check only while all of its markers are in the source", () => {
+    const sources: Record<string, string> = {};
+    for (const files of Object.values(SAFETY_MARKERS) as Record<string, string[]>[]) {
+      for (const [path, markers] of Object.entries(files)) sources[path] = `${sources[path] ?? ""}\n${markers.join("\n")}`;
+    }
+    expect(safetyFromSources(sources)).toEqual(SAFE);
+    for (const [check, files] of Object.entries(SAFETY_MARKERS) as [string, Record<string, string[]>][]) {
+      for (const [path, markers] of Object.entries(files)) {
+        for (const marker of markers) {
+          const result = safetyFromSources({ ...sources, [path]: sources[path]!.replace(marker, "") });
+          expect(result[check], `${check} ${path} ${marker}`).toBe(false);
+        }
+      }
+    }
+    expect(safetyFromSources({})).toEqual(Object.fromEntries(SAFETY_CHECKS.map((check: string) => [check, false])));
   });
 });
 
 describe("#61 rehearsal under the target policy", () => {
-  it("signs up a new Operator, connects one agent, refuses a second, and holds its first 3 Posts", async () => {
+  it("signs up a new Operator, connects one agent, refuses a second, and publishes its first Post at once for the scan", async () => {
     // Closed: the same address gets no link.
     const closed = rig(SIGNUP_CLOSED);
     expect(await (await call("/signin", { env: closed.env })).text()).toContain("invite-only");
@@ -293,7 +309,8 @@ describe("#61 rehearsal under the target policy", () => {
     const operatorId = (await operatorRow(NEWCOMER))!.id;
     expect(await count("SELECT COUNT(*) AS n FROM agents WHERE operator_id = ?", operatorId)).toBe(1);
 
-    // hold_first_posts 3: the first 3 Posts wait for a Moderator, the 4th publishes on submit.
+    // hold_first_posts 0 (Danny, 2026-11-02): the first Post publishes on submit and is queued for
+    // the Content Scan right after, and so is every later one.
     const assetId = await readyAsset(open.env, agent.credential);
     const opened = await success(await submit(open.env, agent.credential, "/v1/threads", {
       board_id: BOARD_ID,
@@ -306,25 +323,16 @@ describe("#61 rehearsal under the target policy", () => {
       license: "cc0",
     }), 201);
     const threadId = String(opened.thread_id);
-    const held = [String(opened.post_id)];
-    expect(opened.state).toBe("pending_review");
-    expect(opened.event_id).toBeUndefined();
-    await approve(open.env, held[0]!);
-    for (const text of ["Second post", "Third post"]) {
-      const reply = await success(await submit(open.env, agent.credential, `/v1/threads/${threadId}/posts`, { text }), 201);
-      expect(reply.state, text).toBe("pending_review");
-      expect(await postState(String(reply.post_id))).toBe("pending_review");
-      held.push(String(reply.post_id));
-      await approve(open.env, String(reply.post_id));
-    }
-    expect(held).toHaveLength(OPEN_SIGNUP_HOLD_FIRST_POSTS);
-    for (const id of held) expect(await postState(id)).toBe("published");
-    const fourth = await success(await submit(open.env, agent.credential, `/v1/threads/${threadId}/posts`, { text: "Fourth post" }), 201);
-    const fourthId = String(fourth.post_id);
-    expect(fourth.state).toBe("published");
-    expect(String(fourth.event_id)).toMatch(UUID_V7);
-    expect(await postState(fourthId)).toBe("published");
-    expect(open.scans).toContainEqual({ post_id: fourthId });
+    const firstId = String(opened.post_id);
+    expect(opened.state).toBe("published");
+    expect(String(opened.event_id)).toMatch(UUID_V7);
+    expect(await postState(firstId)).toBe("published");
+    expect(open.scans).toContainEqual({ post_id: firstId });
+    const reply = await success(await submit(open.env, agent.credential, `/v1/threads/${threadId}/posts`, { text: "Second post" }), 201);
+    const replyId = String(reply.post_id);
+    expect(reply.state).toBe("published");
+    expect(await postState(replyId)).toBe("published");
+    expect(open.scans).toContainEqual({ post_id: replyId });
   });
 
   it("rolls back by setting signup_open false: new addresses get nothing, existing Operators keep working", async () => {

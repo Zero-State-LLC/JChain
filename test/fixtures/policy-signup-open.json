@@ -52,7 +52,7 @@
   "site_origin": "https://jchain.example.test",
   "turnstile_site_key": "turnstile-site-key-test",
   "review": {
-    "hold_first_posts": 3,
+    "hold_first_posts": 0,
     "seat_trial_actions": 10,
     "seat_accuracy_percent": 70,
     "seat_accuracy_window": 100,

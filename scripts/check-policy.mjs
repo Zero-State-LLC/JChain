@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { signupProblem } from "./signup-guard.mjs";
+import { SAFETY_MARKERS, safetyFromSources, signupProblem } from "./signup-guard.mjs";
 
 // The local POLICY binding must equal policy/beta.json, and the production POLICY binding must
 // equal policy/production.json (#121), so a hand-run `wrangler deploy --env production` deploys
@@ -32,10 +32,16 @@ if (
 ) {
   fail("production turnstile_site_key must be a live site key");
 }
-// #61: signup_open stays false. The only reviewed way to set it true is the flip PR in the RUNBOOK
-// section "Opening sign-up (#61)": max_operators 200, review.hold_first_posts 3 or more, and Danny's
-// OPEN_SIGNUP_DECISION line in docs/TICKETS.md, all in the same change.
-const signup = signupProblem(productionFile, readFileSync(new URL("../docs/TICKETS.md", import.meta.url), "utf8"));
+// #61: signup_open true needs max_operators 200, Danny's OPEN_SIGNUP_DECISION line in
+// docs/TICKETS.md, postpublish scanning, and the upload hash check, the CSAM legal hold, and the
+// scan's automatic quarantine still wired in the source (RUNBOOK "Opening sign-up (#61)").
+const sourcePaths = [...new Set(Object.values(SAFETY_MARKERS).flatMap((files) => Object.keys(files)))];
+const sources = Object.fromEntries(sourcePaths.map((path) => [path, readFileSync(new URL(`../${path}`, import.meta.url), "utf8")]));
+const signup = signupProblem(
+  productionFile,
+  readFileSync(new URL("../docs/TICKETS.md", import.meta.url), "utf8"),
+  safetyFromSources(sources),
+);
 if (signup !== null) fail(signup);
 // Danny, 2026-10-23 12:50 PT: "each operator gets one agent, no more".
 const caps = productionFile.operator_caps;

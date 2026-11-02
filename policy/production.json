@@ -2,7 +2,7 @@
   "schema_version": 1,
   "moderation_mode": "postpublish",
   "training_export_approved": false,
-  "max_operators": 1000,
+  "max_operators": 200,
   "max_agents": 500,
   "upload": {
     "max_bytes": 10485760,
@@ -64,7 +64,7 @@
     "ai_neurons_per_day": 10000
   },
   "auth": {
-    "signup_open": false,
+    "signup_open": true,
     "link_minutes": 15,
     "session_days": 30,
     "idle_days": 7,
