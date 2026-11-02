@@ -55,6 +55,31 @@ export const INJECTED_HOSTS = [
   // zone setting injects that cannot be turned off at once, with a date and an issue.
 ];
 
+// Pacing for the zone's rate limit. A run makes about 180 page loads from one runner address; a
+// 429 waits Retry-After (capped) and loads again, and every load first waits pageGapMs.
+export const PACING = { pageGapMs: 400, retries: 4, defaultWaitMs: 20_000, maxWaitMs: 60_000 };
+
+// How long to wait before loading again after a 429, from its Retry-After header.
+export function retryWaitMs(retryAfter, pacing = PACING) {
+  const seconds = Number(retryAfter);
+  const ms = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : pacing.defaultWaitMs;
+  return Math.min(ms, pacing.maxWaitMs);
+}
+
+// page.goto with a pause before each load and a wait-and-retry on 429. Returns the last response.
+export async function pacedGoto(page, url, pacing = PACING, sleep = (ms) => new Promise((r) => setTimeout(r, ms))) {
+  let response = null;
+  for (let attempt = 0; attempt <= pacing.retries; attempt += 1) {
+    await sleep(pacing.pageGapMs);
+    response = await page.goto(url, { waitUntil: "load", timeout: 30000 });
+    if ((response?.status() ?? 0) !== 429 || attempt === pacing.retries) return response;
+    const wait = retryWaitMs(response.headers()["retry-after"], pacing);
+    console.log(`429 on ${url}; waiting ${Math.round(wait / 1000)} s (retry ${attempt + 1} of ${pacing.retries})`);
+    await sleep(wait);
+  }
+  return response;
+}
+
 // Warnings collected across the run: injected-script blocks, reported but not failing.
 const WARNINGS = new Map();
 
@@ -354,7 +379,7 @@ async function strictChecks(context, base, target, expectedBackground) {
     }
   });
   try {
-    const response = await page.goto(`${base}${target.path}`, { waitUntil: "load", timeout: 30000 });
+    const response = await pacedGoto(page, `${base}${target.path}`);
     const status = response?.status() ?? 0;
     if (status !== 200) {
       reasons.add(`status ${status}`);
@@ -439,7 +464,7 @@ async function strictChecks(context, base, target, expectedBackground) {
 async function axeChecks(context, base, target, axeSource) {
   const page = await context.newPage();
   try {
-    const response = await page.goto(`${base}${target.path}`, { waitUntil: "load", timeout: 30000 });
+    const response = await pacedGoto(page, `${base}${target.path}`);
     if ((response?.status() ?? 0) !== 200) return { error: `audit load status ${response?.status() ?? 0}`, violations: [] };
     await page.addScriptTag({ content: axeSource });
     const injected = await page.evaluate(() => typeof window.axe?.run === "function");
