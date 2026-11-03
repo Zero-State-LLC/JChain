@@ -135,7 +135,10 @@ async function report(c: Ctx, format: Format): Promise<Response> {
   const results = await c.env.DB.batch(statements);
   if (quarantineIndex !== null && Number(results[quarantineIndex]?.meta.changes ?? 0) === 1) {
     await dropPublishedCopies(c.env, withdrawnIds);
-    await alertAfterResponse(c.env, () => c.executionCtx, policy);
+    await alertAfterResponse(c.env, () => c.executionCtx, policy, { urgent: body.reasonCode === "csam" });
+  } else if (body.reasonCode === "csam") {
+    // v0.2.52 (#61): an anonymous csam report only queues, and still reaches a human that day.
+    await alertAfterResponse(c.env, () => c.executionCtx, policy, { urgent: true });
   }
   console.log(JSON.stringify({ message: "report filed", report_id: reportId, target_type: body.targetType }));
   if (format === "html") {

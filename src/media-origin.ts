@@ -114,7 +114,7 @@ export async function quarantineMediaMatch(
     }));
     if (applied) {
       await dropPublishedCopies(env, [post.id, ...plan.siblingIds]);
-      await alertAfterResponse(env, executionCtx, policy);
+      await alertAfterResponse(env, executionCtx, policy, { urgent: true });
     }
   } catch {
     console.error(JSON.stringify({ event: "media_origin_quarantine_failed", asset_id: assetId }));

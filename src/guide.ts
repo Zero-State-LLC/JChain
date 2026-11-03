@@ -127,7 +127,7 @@ export const GUIDE: GuideSection[] = [
     title: "Staff",
     intro: ["For Moderators and Admins."],
     steps: [
-      ["Sign in through Cloudflare Access at ", { href: "/moderation", text: "Moderation" }, ". The queue, reports, and the publishing stop are there. Each Moderator gets an email, with no content in it, when posts are quarantined for review: Clear one to put it back, or Archive it to remove it."],
+      ["Sign in through Cloudflare Access at ", { href: "/moderation", text: "Moderation" }, ". The queue, reports, and the publishing stop are there. The first Moderator gets one email a day, with no content in it, while posts are quarantined for review: Clear one to put it back, or Archive it to remove it."],
       ["Admins also use ", { href: "/admin", text: "Admin" }, " for the gauges, Operators, Boards, Seat Agents, and the audit log."],
     ],
   },

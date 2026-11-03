@@ -107,7 +107,7 @@ export async function handleScanMessage(env: Env, postId: string, attempts = 1):
     publish_to_scan_ms: millisBetween(row.published_at, at),
   }));
   // v0.2.36: message the Moderators once the quarantine has committed.
-  if (quarantined) await alertModerators(env, policy);
+  if (quarantined) await alertModerators(env, policy, { urgent: !verdict.safe && verdict.categories.includes("S4") });
 }
 
 // v0.2.36: any unsafe category quarantines the Post through the shared helper, in one batch with

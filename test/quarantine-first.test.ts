@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import worker from "../src/index";
 import { utcSeconds, uuidv7 } from "../src/ids";
 import { derivativeKey } from "../src/asset-pipeline";
-import { ALERT_SUBJECT } from "../src/moderator-alert";
+import { ALERT_SUBJECT, alertModerators } from "../src/moderator-alert";
 import { clearNamedQuota } from "../src/quota";
 import { runRetention } from "../src/retention";
 import postpublishFixture from "./fixtures/policy-postpublish.json";
@@ -161,8 +161,8 @@ describe("AT-73 Seat Flags quarantine (CT-22, AT-42)", () => {
     expect(await blockedCount(offTopic.assetId)).toBe(0);
     expect(await withdrawn(offTopic.postId)).toBe(1);
     expect(await audit(offTopic.postId)).toEqual([{ actor_email: "seat_agent", action: "quarantine", reason_code: "off-topic" }]);
-    // The seat flag messaged every Moderator, naming the source and no Agent.
-    expect(sent).toHaveLength(3);
+    // The seat flag messaged the first Moderator, naming the source and no Agent.
+    expect(sent).toHaveLength(1);
     for (const message of sent) {
       expect(message.text).toContain("Seat Agent flag, reason off-topic");
       expect(message.text).not.toContain(AUTHOR_NAME);
@@ -293,8 +293,8 @@ describe("AT-73 and AT-74 a shared image is one item", () => {
     const published = await env.DB.prepare("SELECT COUNT(*) AS n FROM posts WHERE asset_id = ? AND state = 'published'")
       .bind(first.assetId).first<{ n: number }>();
     expect(Number(published?.n)).toBe(0);
-    // One alert: one email per Moderator, counting both Posts.
-    expect(sent).toHaveLength(3);
+    // One alert: one email to the first Moderator, counting both Posts.
+    expect(sent).toHaveLength(1);
     expect(sent[0]?.text).toContain("2 quarantined Posts are waiting");
   });
 
@@ -552,8 +552,65 @@ describe("AT-75 appeals of automatic quarantines", () => {
   });
 });
 
+describe("v0.2.52 Seat Agent report feed (#61)", () => {
+  it("lists open reports on published Posts to the bound Seat Agent only, without csam or reporters", async () => {
+    stubSiteverify();
+    const seat = await enroll("SeatTwo", ADMIN2);
+    await expectJson(await call("/v1/admin/seats/2", {
+      email: ADMIN,
+      body: { action: "bind_seat_agent", agent_id: seat.agentId },
+    }), 200);
+    const author = await enroll(AUTHOR_NAME, OPERATOR);
+    const spam = await seedPost(author.agentId);
+    const csam = await seedPost(author.agentId);
+    const quarantined = await seedPost(author.agentId);
+    const own = await seedPost(seat.agentId);
+    for (const [postId, reason] of [[spam.postId, "spam"], [csam.postId, "csam"], [csam.postId, "id-document"], [own.postId, "spam"]]) {
+      await expectJson(await call("/v1/reports", {
+        body: { target_type: "post", target_id: postId, reason_code: reason, turnstile_token: "token-ok", detail: "reporter-detail-text" },
+      }), 201);
+    }
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      body: { target_type: "post", target_id: quarantined.postId, reason_code: "spam" },
+    }), 201);
+
+    const listed = await expectJson(await call("/v1/seat/reports", { bearer: seat.credential }), 200);
+    expect(listed.reports).toEqual([{ post_id: spam.postId, reason_code: "spam", reported_at: expect.any(String) }]);
+    expect(JSON.stringify(listed)).not.toContain("reporter-detail-text");
+    expect(JSON.stringify(listed)).not.toContain(OPERATOR);
+
+    // Anyone else is refused.
+    await expectError(await call("/v1/seat/reports", { bearer: author.credential }), 403, "forbidden");
+    await expectError(await call("/v1/seat/reports", { email: STAFF }), 403, "forbidden");
+
+    // A published Reply under a quarantined Opening Post is not visible, so it is not listed.
+    const hiddenThread = await seedPost(author.agentId);
+    const reply = uuidv7();
+    await env.DB.prepare(
+      `INSERT INTO posts (
+         id, thread_id, author_agent_id, asset_id, title, caption, alt_text,
+         provenance_source, rights_attestation, license, state, created_at
+       ) VALUES (?, ?, ?, NULL, NULL, 'reply', 'alt', 'human', 'mine', 'cc0', 'published', ?)`,
+    ).bind(reply, hiddenThread.threadId, author.agentId, utcSeconds()).run();
+    await expectJson(await call("/v1/reports", {
+      body: { target_type: "post", target_id: reply, reason_code: "spam", turnstile_token: "token-ok" },
+    }), 201);
+    expect((await expectJson(await call("/v1/seat/reports", { bearer: seat.credential }), 200)).reports)
+      .toEqual([expect.objectContaining({ post_id: spam.postId }), expect.objectContaining({ post_id: reply })]);
+    await env.DB.prepare("UPDATE posts SET state = 'quarantined' WHERE id = ?").bind(hiddenThread.postId).run();
+    expect((await expectJson(await call("/v1/seat/reports", { bearer: seat.credential }), 200)).reports)
+      .toEqual([expect.objectContaining({ post_id: spam.postId })]);
+
+    // Once the seat flags a Post it leaves the list. In the trial the Post stays published.
+    await expectJson(await seatFlag(spam.postId, seat.credential, "off-topic"), 200);
+    expect((await expectJson(await call("/v1/seat/reports", { bearer: seat.credential }), 200)).reports).toEqual([]);
+    expect((await postRow(csam.postId))?.state).toBe("published");
+  });
+});
+
 describe("AT-76 Moderator email", () => {
-  it("emails every Moderator once per window, with the link and no content", async () => {
+  it("emails the first Moderator once per 24 hours, with the link and no content", async () => {
     const sent: Sent[] = [];
     const mailEnv = withMail(sent);
     const author = await enroll(AUTHOR_NAME, ADMIN2);
@@ -564,7 +621,8 @@ describe("AT-76 Moderator email", () => {
       env: mailEnv,
       body: { target_type: "post", target_id: first.postId, reason_code: "spam", detail: "reporter-detail-text" },
     }), 201);
-    expect(sent.map((message) => message.to).sort()).toEqual([ADMIN2, MODERATOR, STAFF].sort());
+    // v0.2.52 (#61): one inbox, the first row of the moderators table.
+    expect(sent.map((message) => message.to)).toEqual([MODERATOR]);
     for (const message of sent) {
       expect(message.from).toBe(AUTH.mail_from);
       expect(message.subject).toBe(ALERT_SUBJECT);
@@ -572,25 +630,25 @@ describe("AT-76 Moderator email", () => {
       expect(message.text).toContain("1 quarantined Post is waiting");
       expect(message.text).toContain("signed-in report, reason spam");
       expect(message.text).toContain("This email includes no content");
+      expect(message.text).not.toContain("child sexual abuse");
       for (const secret of [SECRET_CAPTION, SECRET_TITLE, AUTHOR_NAME, OPERATOR, "reporter-detail-text", first.postId, first.assetId]) {
         expect(message.text).not.toContain(secret);
         expect(message.subject).not.toContain(secret);
       }
     }
-    // A burst inside the window sends nothing more.
+    // A second quarantine the same day sends nothing more.
     await expectJson(await call("/v1/reports", {
       email: OPERATOR,
       env: mailEnv,
       body: { target_type: "post", target_id: second.postId, reason_code: "rules" },
     }), 201);
-    expect(sent).toHaveLength(3);
-    // Every alert email counted toward the sign-in daily window.
+    expect(sent).toHaveLength(1);
+    // The alert email counted toward the sign-in daily window.
     const counted = await env.QUOTA.getByName("auth").peek([`emails:${utcSeconds().slice(0, 10)}`]);
-    expect(Object.values(counted)).toEqual([3]);
-
+    expect(Object.values(counted)).toEqual([1]);
   });
 
-  it("AT-76 sends the daily repeat on its own key, once per 24 hours, even right after a 15-minute alert", async () => {
+  it("AT-76 the daily run shares the 24-hour window and repeats while Posts wait", async () => {
     const sent: Sent[] = [];
     const mailEnv = withMail(sent);
     const author = await enroll(AUTHOR_NAME, ADMIN2);
@@ -606,30 +664,61 @@ describe("AT-76 Moderator email", () => {
       env: mailEnv,
       body: { target_type: "post", target_id: second.postId, reason_code: "rules" },
     }), 201);
-    expect(sent).toHaveLength(3);
-    // Round-2 P3-1: a 15-minute alert went out a moment ago, and the daily run still sends.
+    expect(sent).toHaveLength(1);
+    // The daily run right after the alert sends nothing: one email a day.
     const start = Date.now();
     await runRetention(mailEnv, start);
-    expect(sent).toHaveLength(6);
-    expect(sent.at(-1)?.text).toContain("2 quarantined Posts are waiting");
-    // A second run the same UTC day sends nothing. An hour later, or the last second of the day
-    // when the test starts within an hour of midnight, so the run never crosses into tomorrow.
-    const endOfDay = Math.floor(start / 86_400_000) * 86_400_000 + 86_400_000 - 1000;
-    await runRetention(mailEnv, Math.min(start + 60 * 60 * 1000, endOfDay));
-    expect(sent).toHaveLength(6);
-    // 24 hours later it sends again, with no Durable Object cleared.
+    expect(sent).toHaveLength(1);
+    // 24 hours later it sends again, with no Durable Object cleared, and then not for a day.
     await runRetention(mailEnv, start + 24 * 60 * 60 * 1000);
-    expect(sent).toHaveLength(9);
+    expect(sent).toHaveLength(2);
+    expect(sent.at(-1)?.text).toContain("2 quarantined Posts are waiting");
+    expect(sent.at(-1)?.to).toBe(MODERATOR);
+    await runRetention(mailEnv, start + 25 * 60 * 60 * 1000);
+    expect(sent).toHaveLength(2);
     // With nothing waiting, the daily run sends nothing.
     await expectJson(await moderate(STAFF, "post", first.postId, "restore"), 200);
     await expectJson(await moderate(STAFF, "post", second.postId, "restore"), 200);
-    await runRetention(mailEnv, start + 48 * 60 * 60 * 1000);
-    expect(sent).toHaveLength(9);
+    await runRetention(mailEnv, start + 72 * 60 * 60 * 1000);
+    expect(sent).toHaveLength(2);
   });
 
-  it("AT-76 stops at auth.emails_per_day and still quarantines", async () => {
+  it("AT-76 a csam quarantine reaches a human the same day on its own window", async () => {
     const sent: Sent[] = [];
-    const mailEnv = withMail(sent, true, { emails_per_day: 1 });
+    const mailEnv = withMail(sent);
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const first = await seedPost(author.agentId);
+    const second = await seedPost(author.agentId);
+    const third = await seedPost(author.agentId);
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      env: mailEnv,
+      body: { target_type: "post", target_id: first.postId, reason_code: "spam" },
+    }), 201);
+    expect(sent).toHaveLength(1);
+    // The daily window is spent; a csam quarantine still sends.
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      env: mailEnv,
+      body: { target_type: "post", target_id: second.postId, reason_code: "csam" },
+    }), 201);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.to).toBe(MODERATOR);
+    expect(sent[1]?.text).toContain("signed-in report, reason csam");
+    expect(await postRow(second.postId)).toMatchObject({ state: "quarantined", legal_hold: 1 });
+    // A third the same day sends nothing more; it is in the queue with the rest.
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      env: mailEnv,
+      body: { target_type: "post", target_id: third.postId, reason_code: "csam" },
+    }), 201);
+    expect(sent).toHaveLength(2);
+    expect(await postRow(third.postId)).toMatchObject({ state: "quarantined", legal_hold: 1 });
+  });
+
+  it("AT-76 a caller's csam signal keeps its own window even when a newer quarantine is ordinary", async () => {
+    const sent: Sent[] = [];
+    const mailEnv = withMail(sent);
     const author = await enroll(AUTHOR_NAME, ADMIN2);
     const seeded = await seedPost(author.agentId);
     await expectJson(await call("/v1/reports", {
@@ -637,14 +726,59 @@ describe("AT-76 Moderator email", () => {
       env: mailEnv,
       body: { target_type: "post", target_id: seeded.postId, reason_code: "spam" },
     }), 201);
-    // Three Moderators, one email allowed today: one is sent and the rest are skipped.
     expect(sent).toHaveLength(1);
-    expect((await postRow(seeded.postId))?.state).toBe("quarantined");
+    // The latest audit row is ordinary, as when a concurrent quarantine commits first.
+    const policy = JSON.parse(mailEnv.POLICY as string);
+    expect(await alertModerators(mailEnv, policy)).toBe(0);
+    expect(await alertModerators(mailEnv, policy, { urgent: true })).toBe(1);
+    expect(sent).toHaveLength(2);
+  });
+
+  it("AT-76 an anonymous csam report alerts without quarantining", async () => {
+    stubSiteverify();
+    const sent: Sent[] = [];
+    const mailEnv = withMail(sent);
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const seeded = await seedPost(author.agentId);
+    await expectJson(await call("/v1/reports", {
+      env: mailEnv,
+      body: { target_type: "post", target_id: seeded.postId, reason_code: "spam", turnstile_token: "token-ok" },
+    }), 201);
+    expect(sent).toHaveLength(0);
+    await expectJson(await call("/v1/reports", {
+      env: mailEnv,
+      body: { target_type: "post", target_id: seeded.postId, reason_code: "csam", turnstile_token: "token-ok", detail: "anon-csam" },
+    }), 201);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.to).toBe(MODERATOR);
+    expect(sent[0]?.text).toContain("1 open report names child sexual abuse material");
+    expect(sent[0]?.text).not.toContain("anon-csam");
+    expect(sent[0]?.text).not.toContain(seeded.postId);
+    expect((await postRow(seeded.postId))?.state).toBe("published");
+  });
+
+  it("AT-76 stops at auth.emails_per_day and still quarantines", async () => {
+    const sent: Sent[] = [];
+    const mailEnv = withMail(sent, true, { emails_per_day: 1 });
+    const author = await enroll(AUTHOR_NAME, ADMIN2);
+    const first = await seedPost(author.agentId);
+    const second = await seedPost(author.agentId);
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      env: mailEnv,
+      body: { target_type: "post", target_id: first.postId, reason_code: "spam" },
+    }), 201);
+    expect(sent).toHaveLength(1);
+    // One email allowed today: the csam window opens, and the cap still stops the send.
+    await expectJson(await call("/v1/reports", {
+      email: OPERATOR,
+      env: mailEnv,
+      body: { target_type: "post", target_id: second.postId, reason_code: "csam" },
+    }), 201);
+    expect(sent).toHaveLength(1);
+    expect(await postRow(second.postId)).toMatchObject({ state: "quarantined", legal_hold: 1 });
     const counted = await env.QUOTA.getByName("auth").peek([`emails:${utcSeconds().slice(0, 10)}`]);
     expect(Object.values(counted)).toEqual([1]);
-    // The daily run is capped by the same window.
-    await runRetention(mailEnv, Date.now());
-    expect(sent).toHaveLength(1);
   });
 
   it("sends nothing without the EMAIL binding, and still quarantines", async () => {

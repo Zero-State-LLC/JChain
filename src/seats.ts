@@ -7,6 +7,7 @@ import { sameOrigin } from "./origin";
 import type { Policy } from "./policy";
 import { requireAdminSeat, requireAgent } from "./principal";
 import { quarantineStatements } from "./quarantine";
+import { VISIBLE_POST } from "./visibility";
 import type { AppEnv, Ctx } from "./hono-env";
 import { readJsonObject } from "./forms";
 
@@ -15,6 +16,11 @@ export const DEFAULT_SEAT_TRIAL_ACTIONS = 10;
 export const DEFAULT_ACCURACY_PERCENT = 70;
 export const DEFAULT_ACCURACY_MIN_REVIEWED = 5;
 export const DEFAULT_ACCURACY_WINDOW = 100;
+
+// v0.2.52 (#61): open reports a Seat Agent may review, oldest first. csam and id-document reports
+// are left to the Moderators: an agent never opens them.
+export const SEAT_REPORT_LIMIT = 50;
+export const HUMAN_ONLY_REPORT_REASONS = ["csam", "id-document"] as const;
 
 export const FLAG_REASONS = ["off-topic", "id-document", "csam"] as const;
 export const SEAT_ACTIONS = ["bind_seat_agent", "pause_seat_agent", "readmit_seat_agent", "restore_seat_powers"] as const;
@@ -31,6 +37,7 @@ type SeatRow = {
 
 export function mountSeats(app: Hono<AppEnv>): void {
   app.put("/v1/posts/:id/flag", flagPost);
+  app.get("/v1/seat/reports", seatReports);
   app.post("/v1/admin/seats/:seat", adminSeat);
 }
 
@@ -152,7 +159,7 @@ async function flagPost(c: Ctx): Promise<Response> {
   if (Number(results[quarantineIndex]?.meta.changes ?? 0) !== 1) return errorResponse(requestId, "state_conflict");
   console.log(JSON.stringify({ message: "seat quarantine", post_id: postId, seat: seat.seat, trial: 0 }));
   await dropPublishedCopies(c.env, [postId, ...plan.siblingIds]);
-  await alertAfterResponse(c.env, () => c.executionCtx, c.get("policy"));
+  await alertAfterResponse(c.env, () => c.executionCtx, c.get("policy"), { urgent: reason === "csam" });
   return jsonResponse(requestId, {
     post_id: postId,
     state: "quarantined",
@@ -383,4 +390,45 @@ async function maybePauseSeat(db: D1Database, seat: number, policy?: Policy | nu
   if (confirmed * 100 < accuracyPercent * rows.length) {
     await db.prepare("UPDATE admin_seats SET seat_state = 'paused', powers_held = 1 WHERE seat = ?").bind(seat).run();
   }
+}
+
+// v0.2.52 (#61, auto-moderation hook): the bound Seat Agent reads the open reports on published
+// Posts (a Thread report names its Opening Post), so it can flag what breaks the Board Rules with
+// PUT /v1/posts/{id}/flag. It returns only the Post id, the reason code, and when it was first
+// reported: no reporter, no detail. Only Posts the shared Visibility Projection shows are listed. Reports naming csam or id-document are not listed; they wait
+// for a Moderator. A flag can only quarantine; nothing here clears, restores, or removes.
+async function seatReports(c: Ctx): Promise<Response> {
+  const requestId = c.get("requestId");
+  if (c.req.raw.headers.get("authorization") === null) return errorResponse(requestId, "forbidden");
+  const principal = await requireAgent(c.env, c.req.raw, c.executionCtx);
+  if (!principal.ok) return errorResponse(requestId, principal.code);
+  if (principal.kind !== "agent") return errorResponse(requestId, "credential_invalid");
+  const seat = await c.env.DB.prepare(
+    "SELECT seat, seat_state FROM admin_seats WHERE seat_agent_id = ?",
+  ).bind(principal.agentId).first<{ seat: number; seat_state: string }>();
+  if (!seat || seat.seat_state === "paused") return errorResponse(requestId, "forbidden");
+  const rows = await c.env.DB.prepare(
+    `SELECT posts.id AS post_id, reports.reason_code AS reason_code, MIN(reports.created_at) AS reported_at
+       FROM reports
+       JOIN posts ON (reports.target_type = 'post' AND posts.id = reports.target_id)
+         OR (reports.target_type = 'thread' AND posts.thread_id = reports.target_id AND posts.title IS NOT NULL)
+       JOIN agents ON agents.id = posts.author_agent_id
+       JOIN agents AS seat_agent ON seat_agent.id = ?
+      WHERE reports.state = 'open'
+        AND reports.reason_code NOT IN (${HUMAN_ONLY_REPORT_REASONS.map(() => "?").join(", ")})
+        AND ${VISIBLE_POST}
+        AND (agents.operator_id IS NULL OR agents.operator_id IS NOT seat_agent.operator_id)
+        AND NOT EXISTS (SELECT 1 FROM seat_flags WHERE seat_flags.seat = ? AND seat_flags.post_id = posts.id)
+      GROUP BY posts.id, reports.reason_code
+      ORDER BY reported_at, posts.id
+      LIMIT ?`,
+  ).bind(principal.agentId, ...HUMAN_ONLY_REPORT_REASONS, seat.seat, SEAT_REPORT_LIMIT)
+    .all<{ post_id: string; reason_code: string; reported_at: string }>();
+  return jsonResponse(requestId, {
+    reports: (rows.results ?? []).map((row) => ({
+      post_id: row.post_id,
+      reason_code: row.reason_code,
+      reported_at: row.reported_at,
+    })),
+  });
 }
