@@ -55,6 +55,43 @@ export const INJECTED_HOSTS = [
   // zone setting injects that cannot be turned off at once, with a date and an issue.
 ];
 
+// Third-party widget frames whose own network traffic is not ours to judge. 2026-11-02 (#61):
+// the Turnstile widget on the sign-in forms runs in a frame on challenges.cloudflare.com, and from
+// a CI runner its challenge requests can fail or answer 401 (private access token probe) while the
+// widget still works. Only requests made by that frame are skipped; the api.js script the page
+// itself loads, the page's CSP events, and its console errors are still checked.
+export const WIDGET_FRAME_HOSTS = ["challenges.cloudflare.com"];
+
+export function widgetFrameUrl(url) {
+  let host;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  return WIDGET_FRAME_HOSTS.some((entry) => host === entry || host.endsWith(`.${entry}`));
+}
+
+// The widget's challenge traffic, by frame or by its challenge-platform path (a worker inside the
+// frame has no frame). The page never loads that path itself.
+export function widgetChallengeUrl(url) {
+  try {
+    return widgetFrameUrl(url) && new URL(url).pathname.startsWith("/cdn-cgi/challenge-platform/");
+  } catch {
+    return false;
+  }
+}
+
+function fromWidgetFrame(request) {
+  if (widgetChallengeUrl(request.url())) return true;
+  try {
+    const frame = request.frame();
+    return frame !== null && widgetFrameUrl(frame.url());
+  } catch {
+    return false;
+  }
+}
+
 // Pacing for the zone's rate limit. A run makes about 180 page loads from one runner address; a
 // 429 waits Retry-After (capped) and loads again, and every load first waits pageGapMs.
 export const PACING = { pageGapMs: 400, retries: 4, defaultWaitMs: 20_000, maxWaitMs: 60_000 };
@@ -365,6 +402,7 @@ async function strictChecks(context, base, target, expectedBackground) {
   });
   page.on("pageerror", (error) => reasons.add(`page error: ${String(error?.message ?? error).slice(0, 300)}`));
   page.on("requestfailed", (request) => {
+    if (fromWidgetFrame(request)) return;
     const failure = request.failure()?.errorText ?? "failed";
     if (failure.includes("ERR_ABORTED")) return;
     broken.add(shortUrl(base, request.url()));
@@ -373,6 +411,7 @@ async function strictChecks(context, base, target, expectedBackground) {
   page.on("response", (response) => {
     const request = response.request();
     if (request.isNavigationRequest() && request.frame() === page.mainFrame()) return;
+    if (fromWidgetFrame(request)) return;
     if (response.status() >= 400) {
       broken.add(shortUrl(base, response.url()));
       reasons.add(`${request.resourceType()} ${shortUrl(base, response.url())} returned ${response.status()}`);
